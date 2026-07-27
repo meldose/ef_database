@@ -17,6 +17,12 @@ async function request(path, options = {}) {
     let result = await request('/health', { headers: {} });
     assert.equal(result.status, 200);
 
+    let loginResponse = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin@demo.altegro.local', password: 'demo' }) });
+    let loginBody = await loginResponse.json();
+    assert.equal(loginResponse.status, 200);
+    assert.equal(loginBody.user.role, 'platform_admin');
+    assert.equal(loginBody.token, 'demo-platform-admin');
+
     result = await request('/api/v1/robots');
     assert.equal(result.status, 200);
     assert.equal(result.body.count, 2);

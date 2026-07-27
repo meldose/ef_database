@@ -1,6 +1,6 @@
 'use strict';
 
-const state = { token: 'demo-platform-admin', tokens: {}, robots: [], selectedRobotId: null };
+const state = { token: null, user: null, robots: [], selectedRobotId: null };
 const $ = (selector) => document.querySelector(selector);
 const api = async (path, options = {}) => {
   const response = await fetch(path, { ...options, headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -17,13 +17,24 @@ function toast(message, isError = false) {
   clearTimeout(toast.timer); toast.timer = setTimeout(() => element.classList.remove('show'), 3200);
 }
 
-async function loadTokens() {
-  const payload = await fetch('/api/v1/demo/tokens').then((response) => response.json());
-  state.tokens = payload.tokens;
-  const select = $('#roleSelect');
-  select.innerHTML = Object.entries(state.tokens).map(([token, details]) => `<option value="${token}">${escapeHtml(details.role.replaceAll('_', ' '))}</option>`).join('');
-  select.value = state.token;
-  select.addEventListener('change', () => { state.token = select.value; refreshAll(); });
+function showLogin() {
+  $('#loginScreen').classList.remove('hidden'); $('#appShell').classList.add('hidden'); $('#loginPassword').value = '';
+}
+
+function showApp() {
+  $('#loginScreen').classList.add('hidden'); $('#appShell').classList.remove('hidden');
+  $('#loggedInUser').textContent = `${state.user.name} · ${state.user.role.replaceAll('_', ' ')}`;
+}
+
+async function login(email, password) {
+  const response = await fetch('/api/v1/auth/login', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ email, password }) });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error?.message || 'Unable to sign in');
+  state.token = payload.token; state.user = payload.user; sessionStorage.setItem('altegroSession', JSON.stringify({ token: state.token, user: state.user })); showApp(); await refreshAll();
+}
+
+function logout() {
+  sessionStorage.removeItem('altegroSession'); state.token = null; state.user = null; state.robots = []; state.selectedRobotId = null; showLogin();
 }
 
 async function loadRobots() {
@@ -96,9 +107,12 @@ async function refreshAll() { try { await Promise.all([loadRobots(), loadEvents(
 function bindUi() {
   let searchTimer; $('#searchInput').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadRobots, 180); }); $('#statusFilter').addEventListener('change', loadRobots); $('#refreshButton').addEventListener('click', refreshAll); $('#refreshEvents').addEventListener('click', loadEvents); $('#refreshAdapters').addEventListener('click', loadAdapters);
   $('#syncAutoXing').addEventListener('click', () => syncAdapter('autoxing')); $('#syncCenoBots').addEventListener('click', () => syncAdapter('cenobots'));
+  $('#logoutButton').addEventListener('click', logout);
+  $('#loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const error = $('#loginError'); error.textContent = ''; try { await login($('#loginEmail').value.trim(), $('#loginPassword').value); } catch (loginError) { error.textContent = loginError.message; } });
+  document.querySelectorAll('[data-demo-email]').forEach((button) => button.addEventListener('click', () => { $('#loginEmail').value = button.dataset.demoEmail; $('#loginPassword').value = 'demo'; $('#loginPassword').focus(); }));
   const dialog = $('#robotDialog'); $('#newRobotButton').addEventListener('click', () => dialog.showModal());
   $('#robotForm').addEventListener('submit', async (event) => { event.preventDefault(); try { await api('/api/v1/robots', { method:'POST', body:JSON.stringify({ modelId:$('#modelId').value, siteId:'site-berlin', organizationId:'org-demo', operatorOrganizationId:'org-service', serialNumber:$('#serialNumber').value.trim() }) }); dialog.close(); $('#serialNumber').value = ''; toast('Robot registered as draft'); await refreshAll(); } catch (error) { toast(error.message, true); } });
   $('#eventForm').addEventListener('submit', async (event) => { event.preventDefault(); try { const attachment = await readAttachment($('#eventAttachment').files[0]); await api(`/api/v1/robots/${$('#eventDialog').dataset.robotId}/events`, { method:'POST', body:JSON.stringify({ title:$('#eventTitle').value.trim(), description:$('#eventDescription').value.trim(), eventType:$('#eventType').value, severity:$('#eventSeverity').value, occurredAt:new Date($('#eventOccurredAt').value).toISOString(), sourceSystem:$('#eventSource').value.trim(), sourceEventId:$('#eventSourceId').value.trim() || undefined, attachment }) }); $('#eventDialog').close(); $('#eventTitle').value = ''; $('#eventDescription').value = ''; $('#eventSourceId').value = ''; toast('Event added to Robot Passport'); await Promise.all([loadPassport(state.selectedRobotId), loadEvents()]); } catch (error) { toast(error.message, true); } });
 }
 
-(async function init() { try { bindUi(); await loadTokens(); await refreshAll(); } catch (error) { toast(error.message, true); } })();
+(async function init() { try { bindUi(); const saved = sessionStorage.getItem('altegroSession'); if (!saved) return showLogin(); const session = JSON.parse(saved); state.token = session.token; state.user = session.user; showApp(); await refreshAll(); } catch (error) { sessionStorage.removeItem('altegroSession'); showLogin(); } })();

@@ -7,6 +7,23 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <section id="loginScreen" class="login-screen">
+      <div class="login-card">
+        <div class="login-brand"><span class="brand-mark">A</span><div><strong>altegro</strong><small>robot operations platform</small></div></div>
+        <p class="eyebrow">Secure platform access</p>
+        <h1>Sign in to Altegro</h1>
+        <p class="login-copy">Access your organization’s robot registry, Passports, events and service history.</p>
+        <form id="loginForm">
+          <label>Email address<input id="loginEmail" type="email" autocomplete="username" required placeholder="admin@demo.altegro.local" /></label>
+          <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required placeholder="••••••••" /></label>
+          <button class="button primary login-button" type="submit">Sign in <span>→</span></button>
+          <p id="loginError" class="login-error" role="alert"></p>
+        </form>
+        <div class="demo-access"><span>Prototype access</span><strong>Password: demo</strong><div class="demo-accounts"><button type="button" data-demo-email="admin@demo.altegro.local">Platform Admin</button><button type="button" data-demo-email="technician@demo.altegro.local">Technician</button><button type="button" data-demo-email="owner@demo.altegro.local">Owner</button></div></div>
+      </div>
+      <div class="login-side"><p class="eyebrow">Manufacturer-neutral control plane</p><h2>One Passport for every robot.</h2><p>Connect identity, lifecycle records, service events and technical integrations in one controlled operational view.</p><div class="login-side-note"><span>Phase 1</span><span>Commands disabled</span><span>EU-first design</span></div></div>
+    </section>
+    <div id="appShell" class="app-shell hidden">
     <header class="topbar">
       <a class="brand" href="/">
         <span class="brand-mark">A</span>
@@ -14,9 +31,8 @@
       </a>
       <div class="topbar-actions">
         <span class="env-badge"><i></i> Prototype · Phase 1</span>
-        <label class="role-picker">Role
-          <select id="roleSelect" aria-label="Demo role"></select>
-        </label>
+        <span id="loggedInUser" class="logged-in-user"></span>
+        <button class="logout-button" id="logoutButton">Log out</button>
         <button class="icon-button" id="refreshButton" title="Refresh data" aria-label="Refresh data">↻</button>
       </div>
     </header>
@@ -77,6 +93,7 @@
         </article>
       </section>
     </main>
+    </div>
 
     <dialog id="eventDialog">
       <form method="dialog" id="eventForm">

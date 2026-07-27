@@ -17,7 +17,17 @@ npm start
 
 The server listens on `http://localhost:3000`.
 
-Open `http://127.0.0.1:3000/` in a browser for the included operations frontend. It provides a robot registry table, search and status filters, Passport inspection, adapter sync buttons, event and capability panels, demo-role switching, a robot-registration form, and a robot-specific event form.
+Open `http://127.0.0.1:3000/` in a browser for the included operations frontend. It provides a login page, robot registry table, search and status filters, Passport inspection, adapter sync buttons, event and capability panels, logged-in user display, logout, a robot-registration form, and a robot-specific event form.
+
+The frontend starts with a login page. Prototype accounts use password `demo`:
+
+- `admin@demo.altegro.local` — Platform Admin
+- `technician@demo.altegro.local` — Technician
+- `owner@demo.altegro.local` — Owner
+- `data@demo.altegro.local` — Data Admin
+- `support@demo.altegro.local` — Support Admin
+
+The role is assigned by the backend after login; it is no longer selected from the dashboard.
 
 Run the smoke tests in a second command:
 
@@ -62,6 +72,32 @@ Run the mock OEM adapter:
 curl -X POST -H "Authorization: Bearer demo-platform-admin" \
   http://localhost:3000/api/v1/adapters/mock-oem/sync
 ```
+
+## AutoXing wrapper integration
+
+The AutoXing adapter can use the read-only functions in the separate `autoxing/lib/api_lib.py` wrapper. Live calls are disabled by default and the local mock adapter remains active.
+
+Configure the credentials in the AutoXing repository `.env` file or as environment variables. The wrapper expects `APPID`, `APPSECRET`, and `APPCODE`.
+
+From WSL:
+
+```bash
+export AUTOXING_LIVE=true
+export AUTOXING_REPO_PATH=/mnt/c/Users/meldo/Downloads/autoxing
+export AUTOXING_ENV_FILE=/mnt/c/Users/meldo/Downloads/autoxing/.env
+npm start
+```
+
+Then use the existing **Sync AutoXing** button or call:
+
+```bash
+curl -X POST -H "Authorization: Bearer demo-platform-admin" \
+  http://127.0.0.1:3000/api/v1/adapters/autoxing/sync
+```
+
+The bridge imports the vendor wrapper in a separate Python process, normalizes robot identity/model/online state/battery into Altegro records, creates read-only technical events, and keeps command capabilities empty. It does not expose AutoXing task creation, navigation, cancel, or control methods.
+
+The Python environment must have the wrapper dependencies installed. If credentials or dependencies are missing, the live sync returns a clear `503` error; it does not silently create fake live data.
 
 Append an immutable Passport entry:
 

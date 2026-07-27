@@ -4,6 +4,8 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const pathUtil = require('node:path');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
 
 const PORT = Number(process.env.PORT || 3000);
 const startedAt = new Date().toISOString();
@@ -13,6 +15,11 @@ const ids = () => crypto.randomUUID();
 const timestamp = () => new Date().toISOString();
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const publicDir = pathUtil.join(__dirname, 'public');
+const execFileAsync = promisify(execFile);
+const AUTOXING_BRIDGE = pathUtil.join(__dirname, 'integrations', 'autoxing_bridge.py');
+const AUTOXING_REPO = process.env.AUTOXING_REPO_PATH || pathUtil.resolve(__dirname, '..', 'autoxing');
+const AUTOXING_LIB = process.env.AUTOXING_LIB_PATH || pathUtil.join(AUTOXING_REPO, 'lib');
+const autoXingLiveEnabled = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_LIVE || '').toLowerCase());
 
 const state = {
   tenants: new Map(),
@@ -28,11 +35,11 @@ const state = {
 };
 
 const demoUsers = {
-  'demo-owner': { id: 'user-owner', name: 'Demo Owner', role: 'owner', tenantId: 'tenant-demo', organizationId: 'org-demo' },
-  'demo-technician': { id: 'user-technician', name: 'Demo Technician', role: 'technician', tenantId: 'tenant-demo', organizationId: 'org-service' },
-  'demo-platform-admin': { id: 'user-platform-admin', name: 'Demo Platform Admin', role: 'platform_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' },
-  'demo-data-admin': { id: 'user-data-admin', name: 'Demo Data Admin', role: 'data_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' },
-  'demo-support-admin': { id: 'user-support-admin', name: 'Demo Support Admin', role: 'support_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' }
+  'demo-owner': { id: 'user-owner', name: 'Demo Owner', email: 'owner@demo.altegro.local', role: 'owner', tenantId: 'tenant-demo', organizationId: 'org-demo' },
+  'demo-technician': { id: 'user-technician', name: 'Demo Technician', email: 'technician@demo.altegro.local', role: 'technician', tenantId: 'tenant-demo', organizationId: 'org-service' },
+  'demo-platform-admin': { id: 'user-platform-admin', name: 'Demo Platform Admin', email: 'admin@demo.altegro.local', role: 'platform_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' },
+  'demo-data-admin': { id: 'user-data-admin', name: 'Demo Data Admin', email: 'data@demo.altegro.local', role: 'data_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' },
+  'demo-support-admin': { id: 'user-support-admin', name: 'Demo Support Admin', email: 'support@demo.altegro.local', role: 'support_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' }
 };
 
 function seed() {
@@ -46,7 +53,7 @@ function seed() {
   state.models.set('model-mock-m3', { id: 'model-mock-m3', manufacturer: 'Mock OEM', model: 'M3', category: 'transport', capabilities: ['read.status', 'event.status'] });
 
   state.adapters.set('autoxing', {
-    provider: 'autoxing', version: 'mock-1.0.0', status: 'sandbox',
+    provider: 'autoxing', version: 'wrapper-backed', status: autoXingLiveEnabled() ? 'live-wrapper-enabled' : 'mock-fallback', integration: 'autoxing/lib/api_lib.py',
     capabilities: { read: ['identity', 'status', 'battery', 'alerts'], event: ['alert', 'status'], command: [] },
     sync: () => ({ externalId: 'AX-1001', modelId: 'model-autoxing-a1', serialNumber: 'AX-DEMO-001', status: 'active', battery: 87, eventType: 'online' })
   });
@@ -106,6 +113,43 @@ function syncAdapter(provider, actorId = 'system') {
   appendPassportEntry(robot.id, { type: 'configuration_snapshot', source: provider, data: { battery: payload.battery, status: payload.status } }, actor);
   upsertEvent(robot.id, { eventType: payload.eventType, sourceSystem: provider, sourceEventId: `${payload.externalId}:${payload.eventType}:${payload.battery}`, payload: { battery: payload.battery, status: payload.status } }, actor);
   return { provider, adapterVersion: adapter.version, robot: getPassport(robot.id), commandCapabilitiesEnabled: false };
+}
+
+async function runAutoXingBridge() {
+  const env = { ...process.env, AUTOXING_REPO_PATH: AUTOXING_REPO, AUTOXING_LIB_PATH: AUTOXING_LIB };
+  try {
+    const result = await execFileAsync(process.env.PYTHON_BIN || 'python3', [AUTOXING_BRIDGE, 'list'], { cwd: AUTOXING_REPO, env, timeout: 30000, maxBuffer: 8 * 1024 * 1024 });
+    const payload = JSON.parse(result.stdout.trim());
+    if (!payload.ok) throw httpError(503, payload.message, { provider: 'autoxing', bridgeCode: payload.code });
+    return payload;
+  } catch (error) {
+    if (error.status) throw error;
+    throw httpError(503, `AutoXing wrapper unavailable: ${error.message}`, { provider: 'autoxing' });
+  }
+}
+
+async function syncAutoXingLive(actor) {
+  const bridge = await runAutoXingBridge();
+  const synced = [];
+  for (const externalRobot of bridge.robots) {
+    const externalId = externalRobot.externalId;
+    if (!externalId) continue;
+    let robot = [...state.robots.values()].find((item) => item.externalIdentities.some((identity) => identity.system === 'autoxing' && identity.externalId === externalId));
+    const modelId = externalRobot.model ? 'model-autoxing-a1' : 'model-autoxing-a1';
+    if (!robot) {
+      robot = { id: ids(), tenantId: actor.tenantId, organizationId: process.env.AUTOXING_DEFAULT_ORGANIZATION_ID || 'org-demo', operatorOrganizationId: process.env.AUTOXING_DEFAULT_OPERATOR_ORGANIZATION_ID || 'org-service', siteId: process.env.AUTOXING_DEFAULT_SITE_ID || 'site-berlin', modelId, serialNumber: externalRobot.serialNumber, status: 'draft', online: externalRobot.online, externalIdentities: [{ system: 'autoxing', externalId }], createdAt: timestamp(), updatedAt: timestamp() };
+      state.robots.set(robot.id, robot);
+      appendPassportEntry(robot.id, { type: 'registration', source: 'autoxing', data: { externalId, serialNumber: robot.serialNumber, model: externalRobot.model, businessId: externalRobot.businessId } }, actor);
+    } else {
+      robot.online = externalRobot.online;
+      robot.updatedAt = timestamp();
+    }
+    appendPassportEntry(robot.id, { type: 'configuration_snapshot', source: 'autoxing', data: { model: externalRobot.model, battery: externalRobot.battery, online: externalRobot.online, raw: externalRobot.raw } }, actor);
+    const eventType = externalRobot.online === false ? 'offline' : 'online';
+    upsertEvent(robot.id, { eventType, sourceSystem: 'autoxing', sourceEventId: `${externalId}:${eventType}:${externalRobot.battery ?? 'unknown'}`, title: `AutoXing robot ${eventType}`, description: `Read-only synchronization from the AutoXing Python wrapper for ${externalRobot.serialNumber}.`, severity: externalRobot.online === false ? 'warning' : 'info', payload: externalRobot }, actor);
+    synced.push(getPassport(robot.id));
+  }
+  return { provider: 'autoxing', adapterVersion: 'wrapper-backed', source: bridge.wrapper, robots: synced, count: synced.length, commandCapabilitiesEnabled: false };
 }
 
 function getPassport(robotId) {
@@ -210,6 +254,13 @@ async function handle(req, res) {
   const path = url.pathname;
   if (req.method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: 'altegro-prototype', startedAt, now: timestamp() });
   if (req.method === 'GET' && path === '/api/v1/demo/tokens') return send(res, 200, { warning: 'Demo tokens only. Do not use in production.', tokens: Object.fromEntries(Object.entries(demoUsers).map(([token, user]) => [token, { role: user.role, tenantId: user.tenantId }])) });
+  if (req.method === 'POST' && path === '/api/v1/auth/login') {
+    const login = await readBody(req);
+    const match = Object.entries(demoUsers).find(([, user]) => user.email.toLowerCase() === String(login.email || '').toLowerCase());
+    if (!match || login.password !== 'demo') throw httpError(401, 'Invalid email or password');
+    const [token, user] = match;
+    return send(res, 200, { token, user: { id: user.id, name: user.name, email: user.email, role: user.role, tenantId: user.tenantId } });
+  }
   if (req.method === 'GET' && serveFrontend(path, res)) return;
 
   const actor = requireActor(req);
@@ -232,6 +283,9 @@ async function handle(req, res) {
   const sync = route(req.method, path, /^\/api\/v1\/adapters\/([^/]+)\/sync$/);
   if (sync && req.method === 'POST') {
     if (!canWrite(actor)) throw httpError(403, 'Write permission required');
+    if (sync.id === 'autoxing' && autoXingLiveEnabled()) {
+      const result = await syncAutoXingLive(actor); recordAudit(actor, 'adapter.sync.live', 'adapter', sync.id, 'success', { count: result.count }); return send(res, 200, { data: result });
+    }
     const result = syncAdapter(sync.id, actor.id); recordAudit(actor, 'adapter.sync', 'adapter', sync.id); return send(res, 200, { data: result });
   }
 
