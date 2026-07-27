@@ -1,0 +1,13 @@
+{
+  "name": "altegro-phase1-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Dependency-free test server for the Altegro Phase 1 thin slice",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test-server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
