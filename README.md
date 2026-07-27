@@ -17,6 +17,8 @@ npm start
 
 The server listens on `http://localhost:3000`.
 
+Open `http://127.0.0.1:3000/` in a browser for the included operations frontend. It provides a robot registry table, search and status filters, Passport inspection, adapter sync buttons, event and capability panels, demo-role switching, a robot-registration form, and a robot-specific event form.
+
 Run the smoke tests in a second command:
 
 ```bash
@@ -70,6 +72,17 @@ curl -X POST -H "Authorization: Bearer demo-technician" \
   http://localhost:3000/api/v1/robots/ROBOT_ID/passport-entries
 ```
 
+Create a robot-specific technical event:
+
+```bash
+curl -X POST -H "Authorization: Bearer demo-technician" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Battery inspection completed","description":"Battery and charging dock inspected.","eventType":"inspection","sourceSystem":"manual-portal","severity":"info","occurredAt":"2026-07-27T14:00:00.000Z"}' \
+  http://localhost:3000/api/v1/robots/ROBOT_ID/events
+```
+
+The browser form also accepts an optional attachment up to 2 MB. In this prototype, attachment content is held in memory; production should store it in S3-compatible Object Storage.
+
 Attempting a robot command returns `403`; Phase 1 command capabilities are intentionally disabled.
 
 ## Implemented prototype surface
@@ -83,6 +96,7 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - AutoXing, CenoBots, and third mock OEM adapter manifests
 - Idempotent mock adapter sync
 - Service-case linkage and Passport history
+- Robot-specific event creation with title, description, date/time, type, severity, source, and optional attachment metadata/content
 - Basic search/filtering
 - Stable JSON error responses
 

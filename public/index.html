@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Altegro · Robot Operations</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">
+        <span class="brand-mark">A</span>
+        <span><strong>altegro</strong><small>robot operations platform</small></span>
+      </a>
+      <div class="topbar-actions">
+        <span class="env-badge"><i></i> Prototype · Phase 1</span>
+        <label class="role-picker">Role
+          <select id="roleSelect" aria-label="Demo role"></select>
+        </label>
+        <button class="icon-button" id="refreshButton" title="Refresh data" aria-label="Refresh data">↻</button>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="hero">
+        <div>
+          <p class="eyebrow">Operations center / Demo Customer Tenant</p>
+          <h1>Robot fleet overview</h1>
+          <p class="hero-copy">A manufacturer-neutral view of robots, lifecycle history, events and integrations.</p>
+        </div>
+        <div class="hero-actions">
+          <button class="button secondary" id="syncAutoXing">Sync AutoXing</button>
+          <button class="button secondary" id="syncCenoBots">Sync CenoBots</button>
+          <button class="button primary" id="newRobotButton">＋ Register robot</button>
+        </div>
+      </section>
+
+      <section class="metrics" aria-label="Fleet metrics">
+        <article class="metric-card"><span class="metric-label">Total robots</span><strong id="metricTotal">—</strong><small>Tenant registry</small></article>
+        <article class="metric-card"><span class="metric-label">Active</span><strong class="green" id="metricActive">—</strong><small>Verified fleet</small></article>
+        <article class="metric-card"><span class="metric-label">Draft</span><strong class="amber" id="metricDraft">—</strong><small>Awaiting verification</small></article>
+        <article class="metric-card"><span class="metric-label">Events</span><strong id="metricEvents">—</strong><small>Normalized technical events</small></article>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="panel registry-panel">
+          <div class="panel-header">
+            <div><p class="eyebrow">Canonical registry</p><h2>Robots</h2></div>
+            <span class="count-pill" id="robotCount">0</span>
+          </div>
+          <div class="toolbar">
+            <label class="search-box"><span>⌕</span><input id="searchInput" type="search" placeholder="Search ID, serial or model…" /></label>
+            <select id="statusFilter" aria-label="Filter by status"><option value="">All statuses</option><option value="active">Active</option><option value="draft">Draft</option><option value="suspended">Suspended</option></select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Robot</th><th>Model</th><th>Location</th><th>Status</th><th></th></tr></thead>
+              <tbody id="robotTable"><tr><td colspan="5" class="empty">Loading registry…</td></tr></tbody>
+            </table>
+          </div>
+        </article>
+
+        <aside class="panel detail-panel" id="detailPanel">
+          <div class="panel-header"><div><p class="eyebrow">Lifecycle record</p><h2>Robot Passport</h2></div><span class="lock-label">▣ Append-only</span></div>
+          <div id="passportContent" class="passport-empty"><div class="empty-icon">◎</div><h3>Select a robot</h3><p>Choose a robot from the Registry to inspect its Passport, configuration and technical history.</p></div>
+        </aside>
+      </section>
+
+      <section class="lower-grid">
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Canonical event envelope</p><h2>Recent technical events</h2></div><button class="text-button" id="refreshEvents">Refresh</button></div>
+          <div id="eventsList" class="event-list"><div class="empty">Loading events…</div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Integration plane</p><h2>Adapter capabilities</h2></div><button class="text-button" id="refreshAdapters">Refresh</button></div>
+          <div id="adaptersList" class="adapter-list"><div class="empty">Loading adapters…</div></div>
+        </article>
+      </section>
+    </main>
+
+    <dialog id="eventDialog">
+      <form method="dialog" id="eventForm">
+        <div class="dialog-header"><div><p class="eyebrow">Robot Passport</p><h2>Add technical event</h2></div><button class="close-button" value="cancel" aria-label="Close">×</button></div>
+        <p class="dialog-copy">This creates a canonical event, an append-only Passport entry, and an audit record for the selected robot.</p>
+        <label>Title<input id="eventTitle" required maxlength="160" placeholder="Battery inspection completed" /></label>
+        <div class="form-grid"><label>Event type<select id="eventType" required><option value="maintenance">Maintenance</option><option value="inspection">Inspection</option><option value="error">Error</option><option value="warning">Warning</option><option value="battery">Battery</option><option value="online">Online</option><option value="offline">Offline</option><option value="mission_completed">Mission completed</option><option value="service">Service</option><option value="incident">Incident</option><option value="note">Note</option></select></label><label>Severity<select id="eventSeverity" required><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option><option value="critical">Critical</option></select></label></div>
+        <div class="form-grid"><label>Occurred at<input id="eventOccurredAt" type="datetime-local" required /></label><label>Source system<input id="eventSource" required value="manual-portal" /></label></div>
+        <label>Source event ID <span class="field-hint">optional · generated when empty</span><input id="eventSourceId" maxlength="200" placeholder="SERVICE-CASE-2026-001" /></label>
+        <label>Description<textarea id="eventDescription" required maxlength="4000" rows="5" placeholder="Describe what happened, what was checked, and any follow-up required."></textarea></label>
+        <label>Attachment <span class="field-hint">optional · max 2 MB</span><input id="eventAttachment" type="file" /></label>
+        <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button primary" id="saveEventButton" value="default">Add event</button></div>
+      </form>
+    </dialog>
+    <dialog id="robotDialog">
+      <form method="dialog" id="robotForm">
+        <div class="dialog-header"><div><p class="eyebrow">Registry onboarding</p><h2>Register a robot</h2></div><button class="close-button" value="cancel" aria-label="Close">×</button></div>
+        <p class="dialog-copy">New manually registered robots begin as <strong>draft</strong> until they are verified.</p>
+        <label>Model<select id="modelId" required><option value="model-autoxing-a1">AutoXing A1 · Cleaning</option><option value="model-cenobots-c1">CenoBots C1 · Cleaning</option><option value="model-mock-m3">Mock OEM M3 · Transport</option></select></label>
+        <label>Serial number<input id="serialNumber" required placeholder="AX-PILOT-016" /></label>
+        <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button primary" id="registerButton" value="default">Register robot</button></div>
+      </form>
+    </dialog>
+    <div id="toast" class="toast" role="status"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

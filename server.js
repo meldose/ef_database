@@ -2,13 +2,17 @@
 
 const http = require('node:http');
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const pathUtil = require('node:path');
 
 const PORT = Number(process.env.PORT || 3000);
 const startedAt = new Date().toISOString();
+const MAX_EVENT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 
 const ids = () => crypto.randomUUID();
 const timestamp = () => new Date().toISOString();
 const clone = (value) => JSON.parse(JSON.stringify(value));
+const publicDir = pathUtil.join(__dirname, 'public');
 
 const state = {
   tenants: new Map(),
@@ -76,7 +80,7 @@ function appendPassportEntry(robotId, entry, actor = { id: 'system', name: 'Syst
 function upsertEvent(robotId, event, actor = { id: 'system', name: 'System' }) {
   const duplicate = state.events.find((item) => item.sourceSystem === event.sourceSystem && item.sourceEventId === event.sourceEventId);
   if (duplicate) return duplicate;
-  const fullEvent = { eventId: ids(), eventType: event.eventType, schemaVersion: '1.0.0', tenantId: state.robots.get(robotId).tenantId, robotId, sourceSystem: event.sourceSystem, sourceEventId: event.sourceEventId, occurredAt: event.occurredAt || timestamp(), ingestedAt: timestamp(), severity: event.severity || 'info', payload: event.payload || {}, correlationId: ids() };
+  const fullEvent = { eventId: ids(), eventType: event.eventType, schemaVersion: '1.0.0', tenantId: state.robots.get(robotId).tenantId, robotId, sourceSystem: event.sourceSystem, sourceEventId: event.sourceEventId, occurredAt: event.occurredAt || timestamp(), ingestedAt: timestamp(), severity: event.severity || 'info', title: event.title || event.eventType, description: event.description || '', attachment: event.attachment || null, payload: event.payload || {}, correlationId: ids() };
   state.events.push(fullEvent);
   appendPassportEntry(robotId, { type: 'technical_event', source: event.sourceSystem, data: fullEvent }, actor);
   return fullEvent;
@@ -153,7 +157,7 @@ function visibleToActor(actor, robot) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', (chunk) => { data += chunk; if (data.length > 1_000_000) reject(httpError(413, 'Request body too large')); });
+    req.on('data', (chunk) => { data += chunk; if (data.length > 5_000_000) reject(httpError(413, 'Request body too large; event attachments are limited to 2 MB')); });
     req.on('end', () => {
       if (!data) return resolve({});
       try { resolve(JSON.parse(data)); } catch { reject(httpError(400, 'Request body must be valid JSON')); }
@@ -166,10 +170,34 @@ function httpError(status, message, details) {
   const error = new Error(message); error.status = status; error.details = details; return error;
 }
 
+function validateEventAttachment(attachment) {
+  if (!attachment) return null;
+  if (!attachment.name || !attachment.contentType || !attachment.contentBase64) throw httpError(400, 'Attachment requires name, contentType, and contentBase64');
+  const content = Buffer.from(attachment.contentBase64, 'base64');
+  if (content.length > MAX_EVENT_ATTACHMENT_BYTES) throw httpError(413, 'Event attachment is limited to 2 MB');
+  return { name: String(attachment.name).slice(0, 255), contentType: String(attachment.contentType).slice(0, 120), size: content.length, sha256: crypto.createHash('sha256').update(content).digest('hex'), contentBase64: attachment.contentBase64 };
+}
+
 function send(res, status, payload) {
   const body = JSON.stringify(payload);
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body) });
   res.end(body);
+}
+
+function serveFrontend(pathname, res) {
+  const requested = pathname === '/' ? 'index.html' : pathname.slice(1);
+  const allowed = new Set(['index.html', 'app.js', 'styles.css']);
+  if (!allowed.has(requested)) return false;
+  const filePath = pathUtil.join(publicDir, requested);
+  try {
+    const body = fs.readFileSync(filePath);
+    const contentTypes = { 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'styles.css': 'text/css; charset=utf-8' };
+    res.writeHead(200, { 'content-type': contentTypes[requested], 'content-length': body.length });
+    res.end(body);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function route(method, pathname, pattern) {
@@ -182,6 +210,7 @@ async function handle(req, res) {
   const path = url.pathname;
   if (req.method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: 'altegro-prototype', startedAt, now: timestamp() });
   if (req.method === 'GET' && path === '/api/v1/demo/tokens') return send(res, 200, { warning: 'Demo tokens only. Do not use in production.', tokens: Object.fromEntries(Object.entries(demoUsers).map(([token, user]) => [token, { role: user.role, tenantId: user.tenantId }])) });
+  if (req.method === 'GET' && serveFrontend(path, res)) return;
 
   const actor = requireActor(req);
   const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
@@ -232,6 +261,22 @@ async function handle(req, res) {
       if (!canWrite(actor)) throw httpError(403, 'Write permission required');
       if (!body.type) throw httpError(400, 'Missing required field: type');
       const entry = appendPassportEntry(entries.id, body, actor); recordAudit(actor, 'passport.append', 'robot', entries.id); return send(res, 201, { data: entry });
+    }
+  }
+  const robotEvents = route(req.method, path, /^\/api\/v1\/robots\/([^/]+)\/events$/);
+  if (robotEvents) {
+    const item = state.robots.get(robotEvents.id); if (!item || !visibleToActor(actor, item)) throw httpError(404, 'Robot not found');
+    if (req.method === 'GET') return send(res, 200, { data: state.events.filter((event) => event.robotId === robotEvents.id) });
+    if (req.method === 'POST') {
+      if (!canWrite(actor)) throw httpError(403, 'Write permission required');
+      for (const field of ['title', 'description', 'eventType', 'sourceSystem', 'severity', 'occurredAt']) if (!body[field]) throw httpError(400, `Missing required field: ${field}`);
+      if (!['info', 'warning', 'error', 'critical'].includes(body.severity)) throw httpError(400, 'severity must be info, warning, error, or critical');
+      if (Number.isNaN(Date.parse(body.occurredAt))) throw httpError(400, 'occurredAt must be a valid ISO date/time');
+      const sourceEventId = body.sourceEventId || `manual-${ids()}`;
+      const attachment = validateEventAttachment(body.attachment);
+      const event = upsertEvent(robotEvents.id, { eventType: body.eventType, sourceSystem: body.sourceSystem, sourceEventId, occurredAt: new Date(body.occurredAt).toISOString(), severity: body.severity, title: body.title, description: body.description, attachment, payload: { ...(body.payload || {}), title: body.title, description: body.description } }, actor);
+      recordAudit(actor, 'event.create', 'robot', robotEvents.id, 'success', { eventId: event.eventId, sourceEventId });
+      return send(res, 201, { data: event });
     }
   }
   const commands = route(req.method, path, /^\/api\/v1\/robots\/([^/]+)\/commands$/);
