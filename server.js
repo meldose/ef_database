@@ -106,23 +106,29 @@ function robotAccountSlug(value) {
   return String(value || 'robot').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'robot';
 }
 
-function ensureRobotUser(robot) {
-  const identity = (robot.externalIdentities || [])[0];
-  if (!identity || !robot.serialNumber) return null;
-  const existing = Object.entries(demoUsers).find(([, user]) => user.role === 'robot_user' && user.robotSystem === identity.system && user.robotSerialNumber === robot.serialNumber);
-  if (existing) return { token: existing[0], email: existing[1].email, password: existing[1].demoPassword, serialNumber: robot.serialNumber, robotId: robot.id, created: false };
+function createRobotUser(robot, { email, password, system = 'manual', externalId = null } = {}) {
+  const existingRobotUser = Object.entries(demoUsers).find(([, user]) => user.role === 'robot_user' && user.robotSystem === system && user.robotSerialNumber === robot.serialNumber);
+  if (existingRobotUser) return { token: existingRobotUser[0], email: existingRobotUser[1].email, password: existingRobotUser[1].demoPassword, serialNumber: robot.serialNumber, robotId: robot.id, created: false };
+  if (Object.values(demoUsers).some((user) => user.email.toLowerCase() === email.toLowerCase())) throw httpError(409, 'That username/email is already in use');
   const slug = robotAccountSlug(robot.serialNumber);
   let token = `demo-robot-${slug}`;
   let suffix = 2;
   while (demoUsers[token]) token = `demo-robot-${slug}-${suffix++}`;
-  const password = `Robot-${slug}-demo`;
-  const user = { id: `user-${token}`, name: `${robot.serialNumber} User`, email: `robot-${slug}@demo.altegro.local`, demoPassword: password, role: 'robot_user', tenantId: robot.tenantId, organizationId: robot.organizationId, robotSystem: identity.system, robotExternalId: identity.externalId, robotSerialNumber: robot.serialNumber };
+  const user = { id: `user-${token}`, name: `${robot.serialNumber} User`, email, demoPassword: password, role: 'robot_user', tenantId: robot.tenantId, organizationId: robot.organizationId, robotSystem: system, robotExternalId: externalId, robotSerialNumber: robot.serialNumber };
   demoUsers[token] = user;
   return { token, email: user.email, password, serialNumber: robot.serialNumber, robotId: robot.id, created: true };
 }
 
+function ensureRobotUser(robot) {
+  const identity = (robot.externalIdentities || [])[0];
+  if (!identity || !robot.serialNumber) return null;
+  const slug = robotAccountSlug(robot.serialNumber);
+  return createRobotUser(robot, { email: `robot-${slug}@demo.altegro.local`, password: `Robot-${slug}-demo`, system: identity.system, externalId: identity.externalId });
+}
+
 function ensureAllRobotUsers() {
-  return [...state.robots.values()].map(ensureRobotUser).filter(Boolean);
+  [...state.robots.values()].map(ensureRobotUser).filter(Boolean);
+  return Object.entries(demoUsers).filter(([, user]) => user.role === 'robot_user').map(([token, user]) => ({ token, email: user.email, password: user.demoPassword, serialNumber: user.robotSerialNumber, robotId: [...state.robots.values()].find((robot) => robot.serialNumber === user.robotSerialNumber)?.id || null, created: false }));
 }
 
 function upsertEvent(robotId, event, actor = { id: 'system', name: 'System' }) {
@@ -162,7 +168,7 @@ async function runAutoXingBridge(command = 'snapshot') {
   let lastError;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      const result = await execFileAsync(process.env.PYTHON_BIN || 'python3', [AUTOXING_BRIDGE, command], { cwd: AUTOXING_REPO, env, timeout: 120000, maxBuffer: 32 * 1024 * 1024 });
+      const result = await execFileAsync(process.env.PYTHON_BIN || 'python3', [AUTOXING_BRIDGE, command], { cwd: AUTOXING_REPO, env, timeout: Math.max(120000, Number(process.env.AUTOXING_BRIDGE_TIMEOUT_MS || 300000)), maxBuffer: 128 * 1024 * 1024 });
       let payload;
       try {
         payload = JSON.parse(result.stdout.trim());
@@ -406,7 +412,7 @@ async function handle(req, res) {
 
   if (req.method === 'GET' && path === '/api/v1/tenants') return send(res, 200, { data: [...state.tenants.values()].filter((tenant) => tenant.id === actor.tenantId) });
   if (req.method === 'GET' && path === '/api/v1/robot-accounts') {
-    if (!['platform_admin', 'data_admin', 'support_admin'].includes(actor.role)) throw httpError(403, 'Administrator permission required');
+    if (actor.role !== 'platform_admin') throw httpError(403, 'Platform administrator permission required');
     const accounts = ensureAllRobotUsers().map(({ token, email, password, serialNumber, robotId, created }) => ({ token, email, password, serialNumber, robotId, created }));
     return send(res, 200, { warning: 'Prototype credentials only. Do not use in production.', data: accounts, count: accounts.length });
   }
@@ -455,10 +461,19 @@ async function handle(req, res) {
 
   if (req.method === 'POST' && path === '/api/v1/robots') {
     if (!canWrite(actor)) throw httpError(403, 'Write permission required');
-    for (const field of ['modelId', 'siteId', 'organizationId', 'serialNumber']) if (!body[field]) throw httpError(400, `Missing required field: ${field}`);
+    for (const field of ['modelId', 'siteId', 'organizationId', 'serialNumber', 'username', 'password']) if (!body[field]) throw httpError(400, `Missing required field: ${field}`);
     if (!state.models.has(body.modelId) || !state.sites.has(body.siteId) || !state.organizations.has(body.organizationId)) throw httpError(400, 'Unknown model, site, or organization');
+    const username = String(body.username).trim().toLowerCase();
+    const password = String(body.password);
+    if (!username.includes('@')) throw httpError(400, 'Username must be an email address');
+    if (password.length < 8) throw httpError(400, 'Password must be at least 8 characters');
+    if ([...state.robots.values()].some((item) => item.tenantId === actor.tenantId && item.serialNumber === body.serialNumber)) throw httpError(409, 'A robot with that serial number already exists');
     const robot = { id: ids(), tenantId: actor.tenantId, organizationId: body.organizationId, operatorOrganizationId: body.operatorOrganizationId || body.organizationId, siteId: body.siteId, modelId: body.modelId, serialNumber: body.serialNumber, status: 'draft', externalIdentities: body.externalIdentities || [], createdAt: timestamp(), updatedAt: timestamp() };
-    state.robots.set(robot.id, robot); appendPassportEntry(robot.id, { type: 'registration', source: 'manual', data: { serialNumber: robot.serialNumber } }, actor); recordAudit(actor, 'robot.create', 'robot', robot.id); return send(res, 201, { data: getPassport(robot.id) });
+    const account = createRobotUser(robot, { email: username, password });
+    state.robots.set(robot.id, robot);
+    appendPassportEntry(robot.id, { type: 'registration', source: 'manual', data: { serialNumber: robot.serialNumber, username } }, actor);
+    recordAudit(actor, 'robot.create', 'robot', robot.id);
+    return send(res, 201, { data: getPassport(robot.id), account: { username: account.email, password: account.password } });
   }
 
   const robot = route(req.method, path, /^\/api\/v1\/robots\/([^/]+)$/);

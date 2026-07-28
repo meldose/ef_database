@@ -93,7 +93,7 @@ async function requestAs(token, path, options = {}) {
     assert.ok(result.body.data.some((account) => account.serialNumber === 'CB-DEMO-001'));
     const dynamicAccount = result.body.data.find((account) => account.serialNumber === 'AX-PILOT-016');
     assert.ok(dynamicAccount);
-    assert.equal(dynamicAccount.created, true);
+    assert.equal(dynamicAccount.created, false);
     assert.match(dynamicAccount.email, /@demo\.altegro\.local$/);
 
     loginResponse = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: dynamicAccount.email, password: dynamicAccount.password }) });
@@ -102,6 +102,17 @@ async function requestAs(token, path, options = {}) {
     assert.equal(result.status, 200);
     assert.equal(result.body.count, 1);
     assert.equal(result.body.data[0].serialNumber, 'AX-PILOT-016');
+
+    result = await request('/api/v1/robots', { method: 'POST', body: JSON.stringify({ modelId: 'model-mock-m3', siteId: 'site-berlin', organizationId: 'org-demo', operatorOrganizationId: 'org-service', serialNumber: 'MANUAL-ROBOT-001', username: 'manual-robot-001@demo.altegro.local', password: 'Manual-robot-001' }) });
+    assert.equal(result.status, 201);
+    assert.equal(result.body.account.username, 'manual-robot-001@demo.altegro.local');
+
+    loginResponse = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'manual-robot-001@demo.altegro.local', password: 'Manual-robot-001' }) });
+    assert.equal(loginResponse.status, 200);
+    result = await requestAs('demo-robot-manual-robot-001', '/api/v1/robots');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.count, 1);
+    assert.equal(result.body.data[0].serialNumber, 'MANUAL-ROBOT-001');
 
     console.log('All Altegro prototype tests passed.');
   } finally {

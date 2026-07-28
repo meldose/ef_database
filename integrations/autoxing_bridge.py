@@ -303,9 +303,10 @@ def main() -> None:
     command = sys.argv[1] if len(sys.argv) > 1 else "list"
     robot_id = sys.argv[2] if len(sys.argv) > 2 else None
     try:
-        module, old_cwd = import_wrapper()
-        try:
-            with contextlib.redirect_stdout(sys.stderr):
+        with open(os.devnull, "w", encoding="utf-8") as quiet_vendor_output:
+            with contextlib.redirect_stdout(quiet_vendor_output), contextlib.redirect_stderr(quiet_vendor_output):
+                module, old_cwd = import_wrapper()
+            with contextlib.redirect_stdout(quiet_vendor_output), contextlib.redirect_stderr(quiet_vendor_output):
                 dataframe = module.get_robots()
             if isinstance(dataframe, str):
                 raise RuntimeError(dataframe)
@@ -317,7 +318,7 @@ def main() -> None:
                 is_online = row_value(raw_row, "isOnLine", "isOnline", "online")
                 if fetch_status and external_id and is_online is not False and hasattr(module, "get_robot_status"):
                     try:
-                        with contextlib.redirect_stdout(sys.stderr):
+                        with contextlib.redirect_stdout(quiet_vendor_output), contextlib.redirect_stderr(quiet_vendor_output):
                             raw_row["_state"] = normalize_status_frame(module.get_robot_status(row))
                     except Exception as state_error:
                         raw_row["_stateError"] = str(state_error)
@@ -335,23 +336,28 @@ def main() -> None:
                 "capabilities": {"read": ["identity", "model", "status", "battery", "position", "emergency_stop", "obstruction", "detailed_errors", "pois", "areas", "maps", "task_history", "task_status"], "event": ["status", "alerts", "task_status"], "command": []},
             }
             if command == "snapshot":
-                resource_rows = rows
-                resource_limit = max(0, int(os.environ.get("AUTOXING_SNAPSHOT_ROBOT_LIMIT", "0")))
-                if resource_limit:
-                    resource_rows = rows[:resource_limit]
-                try:
-                    payload["resources"], payload["resourceErrors"] = collect_resources(module, resource_rows)
-                except Exception as resource_error:
+                resource_sync = str(os.environ.get("AUTOXING_RESOURCE_SYNC", "false")).lower() in {"1", "true", "yes"}
+                if not resource_sync:
                     payload["resources"] = {"businesses": [], "buildings": [], "pois": [], "areas": [], "maps": [], "tasks": []}
-                    payload["resourceErrors"] = [{"resource": "snapshot", "message": str(resource_error)}]
+                    payload["resourceErrors"] = []
+                    payload["resourcesDisabled"] = True
+                else:
+                    resource_rows = rows
+                    resource_limit = max(0, int(os.environ.get("AUTOXING_SNAPSHOT_ROBOT_LIMIT", "0")))
+                    if resource_limit:
+                        resource_rows = rows[:resource_limit]
+                    try:
+                        with contextlib.redirect_stdout(quiet_vendor_output), contextlib.redirect_stderr(quiet_vendor_output):
+                            payload["resources"], payload["resourceErrors"] = collect_resources(module, resource_rows)
+                    except Exception as resource_error:
+                        payload["resources"] = {"businesses": [], "buildings": [], "pois": [], "areas": [], "maps": [], "tasks": []}
+                        payload["resourceErrors"] = [{"resource": "snapshot", "message": str(resource_error)}]
             # Raw provider rows are useful while collecting resources but can
             # make a fleet snapshot unnecessarily large. Keep them opt-in.
             if str(os.environ.get("AUTOXING_INCLUDE_RAW", "false")).lower() not in {"1", "true", "yes"}:
                 for item in payload["robots"]:
                     item.pop("raw", None)
             output(payload)
-        finally:
-            os.chdir(old_cwd)
     except Exception as error:
         output({"ok": False, "provider": "autoxing", "code": "AUTOXING_BRIDGE_FAILED", "message": str(error)})
         sys.exit(0)

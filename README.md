@@ -96,6 +96,11 @@ export AUTOXING_LIVE=true
 export AUTOXING_REPO_PATH=/mnt/c/Users/meldo/Downloads/autoxing
 export AUTOXING_ENV_FILE=/mnt/c/Users/meldo/Downloads/autoxing/.env
 export AUTOXING_POLL_INTERVAL_MS=300000
+# The robot snapshot is reliable by default. Optional POI/area/map/task
+# endpoints are disabled by default because some provider responses are slow
+# or do not use the wrapper's expected `data` shape.
+# export AUTOXING_RESOURCE_SYNC=true
+# export AUTOXING_BRIDGE_TIMEOUT_MS=300000
 # Optional: include binary base-map images in the fleet snapshot
 # export AUTOXING_INCLUDE_BASE_MAP=true
 npm start

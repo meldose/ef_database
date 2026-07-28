@@ -115,6 +115,7 @@
         <label>Existing synchronized robot <span class="field-hint">optional · select one to open it</span><select id="existingRobotId"><option value="">＋ New robot</option></select></label>
         <label>Model<select id="modelId" required><option value="model-autoxing-a1">AutoXing A1 · Cleaning</option><option value="model-cenobots-c1">CenoBots C1 · Cleaning</option><option value="model-mock-m3">Mock OEM M3 · Transport</option></select></label>
         <label>Serial number<input id="serialNumber" required placeholder="AX-PILOT-016" /><span id="serialNumberHint" class="field-hint">Enter a new unique serial number.</span></label>
+        <div class="form-grid"><label>Username / email<input id="robotUsername" type="email" required autocomplete="off" placeholder="operator@example.com" /></label><label>Password<input id="robotPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="At least 8 characters" /></label></div>
         <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" id="registerButton" value="default">Register robot</button></div>
       </form>
     </dialog>
