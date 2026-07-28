@@ -29,6 +29,16 @@ The frontend starts with a login page. Prototype accounts use password `demo`:
 
 The role is assigned by the backend after login; it is no longer selected from the dashboard.
 
+Robot-scoped prototype accounts use separate credentials and can only see their assigned robot:
+
+- `robot-ax-001@demo.altegro.local` / `AX-robot-001-demo` — `AX-DEMO-001`
+- `robot-cb-001@demo.altegro.local` / `CB-robot-001-demo` — `CB-DEMO-001`
+- `robot-se52512706922ne@demo.altegro.local` / `SE-robot-001-demo` — `SE52512706922NE`
+
+Robot accounts are read-only. The third account will show data after the AutoXing sync has registered a robot with serial `SE52512706922NE`. These are local prototype credentials only; they are stored in server source code and must be replaced by OIDC/SSO and database-backed memberships before deployment.
+
+Every additional robot returned by an adapter synchronization automatically receives a new robot-scoped prototype account. Platform, data, or support administrators can view the generated credentials in the **Robot accounts** section of the Integration plane, or through `GET /api/v1/robot-accounts`.
+
 Run the smoke tests in a second command:
 
 ```bash

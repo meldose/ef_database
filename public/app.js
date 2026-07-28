@@ -24,6 +24,16 @@ function showLogin() {
 function showApp() {
   $('#loginScreen').classList.add('hidden'); $('#appShell').classList.remove('hidden');
   $('#loggedInUser').textContent = `${state.user.name} · ${state.user.role.replaceAll('_', ' ')}`;
+  const robotUser = state.user.role === 'robot_user';
+  ['syncAutoXing', 'syncCenoBots', 'newRobotButton'].forEach((id) => { const element = $(`#${id}`); if (element) element.classList.toggle('hidden', robotUser); });
+}
+
+function populateExistingRobotSelect() {
+  const select = $('#existingRobotId');
+  if (!select) return;
+  const selected = select.value;
+  select.innerHTML = '<option value="">＋ New robot</option>' + state.robots.map((robot) => `<option value="${escapeHtml(robot.id)}">${escapeHtml(robot.serialNumber)} · ${escapeHtml(robot.externalIdentities?.[0]?.system || 'manual')} · ${escapeHtml(robot.status)}</option>`).join('');
+  if (selected && state.robots.some((robot) => robot.id === selected)) select.value = selected;
 }
 
 async function login(email, password) {
@@ -44,6 +54,7 @@ async function loadRobots() {
   $('#robotCount').textContent = payload.count; $('#metricTotal').textContent = payload.count;
   $('#metricActive').textContent = payload.data.filter((robot) => robot.status === 'active').length;
   $('#metricDraft').textContent = payload.data.filter((robot) => robot.status === 'draft').length;
+  populateExistingRobotSelect();
   renderRobots();
   if (state.selectedRobotId && state.robots.some((robot) => robot.id === state.selectedRobotId)) await loadPassport(state.selectedRobotId);
 }
@@ -81,6 +92,7 @@ function renderPassport(passport) {
   $('#blockedCommand').addEventListener('click', async () => { try { await api(`/api/v1/robots/${robot.id}/commands`, { method:'POST', body:JSON.stringify({ command:'move' }) }); } catch (error) { toast(`Expected Phase 1 rejection: ${error.message}`); } });
   $('#syncSelected').addEventListener('click', () => syncAdapter(robot.externalIdentities[0]?.system || 'mock-oem'));
   $('#addEventButton').addEventListener('click', () => openEventDialog(robot.id));
+  if (state.user.role === 'robot_user') ['blockedCommand', 'syncSelected', 'addEventButton'].forEach((id) => $(`#${id}`).classList.add('hidden'));
   loadAutoXingDetails(robot);
 }
 
@@ -124,7 +136,9 @@ async function loadEvents() {
 
 async function loadAdapters() {
   const payload = await api('/api/v1/adapters');
-  $('#adaptersList').innerHTML = payload.data.map((adapter) => `<div class="adapter-item"><div><strong>${escapeHtml(adapter.provider)}</strong><small>${escapeHtml(adapter.status)} · v${escapeHtml(adapter.version)}<br />Last sync: ${formatDate(adapter.lastSyncAt)} · ${escapeHtml(adapter.lastSyncStatus || '—')}</small>${adapter.lastError ? `<small class="adapter-error">${escapeHtml(adapter.lastError)}</small>` : ''}</div><div class="adapter-capabilities">Read: ${escapeHtml(adapter.capabilities.read.join(', '))}<br />Events: ${escapeHtml(adapter.capabilities.event.join(', ') || 'none')}<br /><b>Commands: disabled</b></div></div>`).join('');
+  const accountPayload = state.user.role === 'robot_user' ? { data: [] } : await api('/api/v1/robot-accounts');
+  const accountMarkup = accountPayload.data.length ? `<div class="adapter-item"><div><strong>Robot accounts</strong><small>Separate read-only credentials for every synchronized robot</small></div><div class="adapter-capabilities">${accountPayload.data.map((account) => `<div><b>${escapeHtml(account.serialNumber)}</b><br />${escapeHtml(account.email)}<br />Password: <code>${escapeHtml(account.password)}</code></div>`).join('<hr />')}</div></div>` : '';
+  $('#adaptersList').innerHTML = accountMarkup + payload.data.map((adapter) => `<div class="adapter-item"><div><strong>${escapeHtml(adapter.provider)}</strong><small>${escapeHtml(adapter.status)} · v${escapeHtml(adapter.version)}<br />Last sync: ${formatDate(adapter.lastSyncAt)} · ${escapeHtml(adapter.lastSyncStatus || '—')}</small>${adapter.lastError ? `<small class="adapter-error">${escapeHtml(adapter.lastError)}</small>` : ''}</div><div class="adapter-capabilities">Read: ${escapeHtml(adapter.capabilities.read.join(', '))}<br />Events: ${escapeHtml(adapter.capabilities.event.join(', ') || 'none')}<br /><b>Commands: disabled</b></div></div>`).join('');
 }
 
 async function syncAdapter(provider) { toast(`Syncing ${provider}…`); try { await api(`/api/v1/adapters/${provider}/sync`, { method:'POST', body:'{}' }); toast(`${provider} adapter synchronized`); await refreshAll(); } catch (error) { toast(`Sync failed: ${error.message}`, true); await loadAdapters(); } }
@@ -135,10 +149,12 @@ function bindUi() {
   $('#syncAutoXing').addEventListener('click', () => syncAdapter('autoxing')); $('#syncCenoBots').addEventListener('click', () => syncAdapter('cenobots'));
   $('#logoutButton').addEventListener('click', logout);
   $('#loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const error = $('#loginError'); error.textContent = ''; try { await login($('#loginEmail').value.trim(), $('#loginPassword').value); } catch (loginError) { error.textContent = loginError.message; } });
-  document.querySelectorAll('[data-demo-email]').forEach((button) => button.addEventListener('click', () => { $('#loginEmail').value = button.dataset.demoEmail; $('#loginPassword').value = 'demo'; $('#loginPassword').focus(); }));
-  const dialog = $('#robotDialog'); $('#newRobotButton').addEventListener('click', () => dialog.showModal());
-  $('#robotForm').addEventListener('submit', async (event) => { event.preventDefault(); try { await api('/api/v1/robots', { method:'POST', body:JSON.stringify({ modelId:$('#modelId').value, siteId:'site-berlin', organizationId:'org-demo', operatorOrganizationId:'org-service', serialNumber:$('#serialNumber').value.trim() }) }); dialog.close(); $('#serialNumber').value = ''; toast('Robot registered as draft'); await refreshAll(); } catch (error) { toast(error.message, true); } });
-  $('#eventForm').addEventListener('submit', async (event) => { event.preventDefault(); try { const attachment = await readAttachment($('#eventAttachment').files[0]); await api(`/api/v1/robots/${$('#eventDialog').dataset.robotId}/events`, { method:'POST', body:JSON.stringify({ title:$('#eventTitle').value.trim(), description:$('#eventDescription').value.trim(), eventType:$('#eventType').value, severity:$('#eventSeverity').value, occurredAt:new Date($('#eventOccurredAt').value).toISOString(), sourceSystem:$('#eventSource').value.trim(), sourceEventId:$('#eventSourceId').value.trim() || undefined, attachment }) }); $('#eventDialog').close(); $('#eventTitle').value = ''; $('#eventDescription').value = ''; $('#eventSourceId').value = ''; toast('Event added to Robot Passport'); await Promise.all([loadPassport(state.selectedRobotId), loadEvents()]); } catch (error) { toast(error.message, true); } });
+  document.querySelectorAll('[data-demo-email]').forEach((button) => button.addEventListener('click', () => { $('#loginEmail').value = button.dataset.demoEmail; $('#loginPassword').value = button.dataset.demoPassword || 'demo'; $('#loginPassword').focus(); }));
+  const dialog = $('#robotDialog'); const existingRobotSelect = $('#existingRobotId'); const serialInput = $('#serialNumber'); const modelSelect = $('#modelId'); const registerButton = $('#registerButton'); const serialHint = $('#serialNumberHint');
+  $('#newRobotButton').addEventListener('click', () => { existingRobotSelect.value = ''; serialInput.readOnly = false; serialHint.textContent = 'Enter a new unique serial number.'; registerButton.textContent = 'Register robot'; dialog.showModal(); });
+  existingRobotSelect.addEventListener('change', () => { const robot = state.robots.find((item) => item.id === existingRobotSelect.value); if (!robot) { serialInput.value = ''; serialInput.readOnly = false; serialHint.textContent = 'Enter a new unique serial number.'; registerButton.textContent = 'Register robot'; return; } modelSelect.value = robot.modelId; serialInput.value = robot.serialNumber; serialInput.readOnly = true; serialHint.textContent = 'Existing synchronized robot selected.'; registerButton.textContent = 'Open robot'; });
+  $('#robotForm').addEventListener('submit', async (event) => { if (event.submitter?.value === 'cancel') return; event.preventDefault(); try { const existingRobot = state.robots.find((item) => item.id === existingRobotSelect.value); if (existingRobot) { dialog.close(); await loadPassport(existingRobot.id); toast(`Opened ${existingRobot.serialNumber}`); return; } await api('/api/v1/robots', { method:'POST', body:JSON.stringify({ modelId:modelSelect.value, siteId:'site-berlin', organizationId:'org-demo', operatorOrganizationId:'org-service', serialNumber:serialInput.value.trim() }) }); dialog.close(); serialInput.value = ''; toast('Robot registered as draft'); await refreshAll(); } catch (error) { toast(error.message, true); } });
+  $('#eventForm').addEventListener('submit', async (event) => { if (event.submitter?.value === 'cancel') return; event.preventDefault(); try { const attachment = await readAttachment($('#eventAttachment').files[0]); await api(`/api/v1/robots/${$('#eventDialog').dataset.robotId}/events`, { method:'POST', body:JSON.stringify({ title:$('#eventTitle').value.trim(), description:$('#eventDescription').value.trim(), eventType:$('#eventType').value, severity:$('#eventSeverity').value, occurredAt:new Date($('#eventOccurredAt').value).toISOString(), sourceSystem:$('#eventSource').value.trim(), sourceEventId:$('#eventSourceId').value.trim() || undefined, attachment }) }); $('#eventDialog').close(); $('#eventTitle').value = ''; $('#eventDescription').value = ''; $('#eventSourceId').value = ''; toast('Event added to Robot Passport'); await Promise.all([loadPassport(state.selectedRobotId), loadEvents()]); } catch (error) { toast(error.message, true); } });
 }
 
 (async function init() { try { bindUi(); const saved = sessionStorage.getItem('altegroSession'); if (!saved) return showLogin(); const session = JSON.parse(saved); state.token = session.token; state.user = session.user; showApp(); await refreshAll(); } catch (error) { sessionStorage.removeItem('altegroSession'); showLogin(); } })();

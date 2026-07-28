@@ -52,7 +52,12 @@ const demoUsers = {
   'demo-technician': { id: 'user-technician', name: 'Demo Technician', email: 'technician@demo.altegro.local', role: 'technician', tenantId: 'tenant-demo', organizationId: 'org-service' },
   'demo-platform-admin': { id: 'user-platform-admin', name: 'Demo Platform Admin', email: 'admin@demo.altegro.local', role: 'platform_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' },
   'demo-data-admin': { id: 'user-data-admin', name: 'Demo Data Admin', email: 'data@demo.altegro.local', role: 'data_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' },
-  'demo-support-admin': { id: 'user-support-admin', name: 'Demo Support Admin', email: 'support@demo.altegro.local', role: 'support_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' }
+  'demo-support-admin': { id: 'user-support-admin', name: 'Demo Support Admin', email: 'support@demo.altegro.local', role: 'support_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' },
+  // Robot accounts are intentionally read-only prototype accounts. In production,
+  // replace these demo passwords with OIDC/SSO identities and database memberships.
+  'demo-robot-ax-001': { id: 'user-robot-ax-001', name: 'AX-DEMO-001 User', email: 'robot-ax-001@demo.altegro.local', demoPassword: 'AX-robot-001-demo', role: 'robot_user', tenantId: 'tenant-demo', organizationId: 'org-demo', robotSystem: 'autoxing', robotExternalId: 'AX-1001', robotSerialNumber: 'AX-DEMO-001' },
+  'demo-robot-cb-001': { id: 'user-robot-cb-001', name: 'CB-DEMO-001 User', email: 'robot-cb-001@demo.altegro.local', demoPassword: 'CB-robot-001-demo', role: 'robot_user', tenantId: 'tenant-demo', organizationId: 'org-demo', robotSystem: 'cenobots', robotExternalId: 'CB-1001', robotSerialNumber: 'CB-DEMO-001' },
+  'demo-robot-se52512706922ne': { id: 'user-robot-se52512706922ne', name: 'SE52512706922NE User', email: 'robot-se52512706922ne@demo.altegro.local', demoPassword: 'SE-robot-001-demo', role: 'robot_user', tenantId: 'tenant-demo', organizationId: 'org-demo', robotSystem: 'autoxing', robotSerialNumber: 'SE52512706922NE' }
 };
 
 function seed() {
@@ -97,6 +102,29 @@ function appendPassportEntry(robotId, entry, actor = { id: 'system', name: 'Syst
   return fullEntry;
 }
 
+function robotAccountSlug(value) {
+  return String(value || 'robot').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 50) || 'robot';
+}
+
+function ensureRobotUser(robot) {
+  const identity = (robot.externalIdentities || [])[0];
+  if (!identity || !robot.serialNumber) return null;
+  const existing = Object.entries(demoUsers).find(([, user]) => user.role === 'robot_user' && user.robotSystem === identity.system && user.robotSerialNumber === robot.serialNumber);
+  if (existing) return { token: existing[0], email: existing[1].email, password: existing[1].demoPassword, serialNumber: robot.serialNumber, robotId: robot.id, created: false };
+  const slug = robotAccountSlug(robot.serialNumber);
+  let token = `demo-robot-${slug}`;
+  let suffix = 2;
+  while (demoUsers[token]) token = `demo-robot-${slug}-${suffix++}`;
+  const password = `Robot-${slug}-demo`;
+  const user = { id: `user-${token}`, name: `${robot.serialNumber} User`, email: `robot-${slug}@demo.altegro.local`, demoPassword: password, role: 'robot_user', tenantId: robot.tenantId, organizationId: robot.organizationId, robotSystem: identity.system, robotExternalId: identity.externalId, robotSerialNumber: robot.serialNumber };
+  demoUsers[token] = user;
+  return { token, email: user.email, password, serialNumber: robot.serialNumber, robotId: robot.id, created: true };
+}
+
+function ensureAllRobotUsers() {
+  return [...state.robots.values()].map(ensureRobotUser).filter(Boolean);
+}
+
 function upsertEvent(robotId, event, actor = { id: 'system', name: 'System' }) {
   const duplicate = state.events.find((item) => item.sourceSystem === event.sourceSystem && item.sourceEventId === event.sourceEventId);
   if (duplicate) return duplicate;
@@ -123,6 +151,7 @@ function syncAdapter(provider, actorId = 'system') {
     robot.status = payload.status;
     robot.updatedAt = timestamp();
   }
+  ensureRobotUser(robot);
   appendPassportEntry(robot.id, { type: 'configuration_snapshot', source: provider, data: { battery: payload.battery, status: payload.status } }, actor);
   upsertEvent(robot.id, { eventType: payload.eventType, sourceSystem: provider, sourceEventId: `${payload.externalId}:${payload.eventType}:${payload.battery}`, payload: { battery: payload.battery, status: payload.status } }, actor);
   return { provider, adapterVersion: adapter.version, robot: getPassport(robot.id), commandCapabilitiesEnabled: false };
@@ -234,6 +263,7 @@ async function syncAutoXingLive(actor) {
       robot.lastProviderError = externalRobot.stateError || null;
       robot.updatedAt = timestamp();
     }
+    ensureRobotUser(robot);
     appendPassportEntry(robot.id, { type: 'configuration_snapshot', source: 'autoxing', data: { model: externalRobot.model, battery: externalRobot.battery, online: externalRobot.online, version: externalRobot.version, mappingStatus, raw: externalRobot.raw } }, actor);
     const eventType = externalRobot.online === false ? 'offline' : 'online';
     upsertEvent(robot.id, { eventType, sourceSystem: 'autoxing', sourceEventId: `${externalId}:${eventType}:${externalRobot.battery ?? 'unknown'}`, title: `AutoXing robot ${eventType}`, description: `Read-only synchronization from the AutoXing Python wrapper for ${externalRobot.serialNumber}.`, severity: externalRobot.online === false ? 'warning' : 'info', payload: externalRobot }, actor);
@@ -287,8 +317,19 @@ function canWrite(actor) {
   return ['owner', 'technician', 'platform_admin', 'data_admin', 'support_admin'].includes(actor.role);
 }
 
+function matchesRobotScope(actor, robot) {
+  if (actor.role !== 'robot_user') return true;
+  if (actor.robotSerialNumber && robot.serialNumber !== actor.robotSerialNumber) return false;
+  if (actor.robotExternalId) {
+    return (robot.externalIdentities || []).some((identity) => identity.system === actor.robotSystem && identity.externalId === actor.robotExternalId);
+  }
+  return Boolean(actor.robotSerialNumber);
+}
+
 function visibleToActor(actor, robot) {
   if (!robot || robot.tenantId !== actor.tenantId) return false;
+  if (!matchesRobotScope(actor, robot)) return false;
+  if (actor.role === 'robot_user') return true;
   if (['platform_admin', 'data_admin', 'support_admin'].includes(actor.role)) return true;
   if (actor.role === 'owner') return robot.organizationId === actor.organizationId;
   if (actor.role === 'technician') return robot.operatorOrganizationId === actor.organizationId || robot.organizationId === actor.tenantId;
@@ -350,13 +391,13 @@ async function handle(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
   if (req.method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: 'altegro-prototype', startedAt, now: timestamp() });
-  if (req.method === 'GET' && path === '/api/v1/demo/tokens') return send(res, 200, { warning: 'Demo tokens only. Do not use in production.', tokens: Object.fromEntries(Object.entries(demoUsers).map(([token, user]) => [token, { role: user.role, tenantId: user.tenantId }])) });
+  if (req.method === 'GET' && path === '/api/v1/demo/tokens') return send(res, 200, { warning: 'Demo tokens only. Do not use in production.', tokens: Object.fromEntries(Object.entries(demoUsers).map(([token, user]) => [token, { role: user.role, tenantId: user.tenantId, robotSerialNumber: user.robotSerialNumber || null }])) });
   if (req.method === 'POST' && path === '/api/v1/auth/login') {
     const login = await readBody(req);
     const match = Object.entries(demoUsers).find(([, user]) => user.email.toLowerCase() === String(login.email || '').toLowerCase());
-    if (!match || login.password !== 'demo') throw httpError(401, 'Invalid email or password');
+    if (!match || String(login.password || '') !== (match[1].demoPassword || 'demo')) throw httpError(401, 'Invalid email or password');
     const [token, user] = match;
-    return send(res, 200, { token, user: { id: user.id, name: user.name, email: user.email, role: user.role, tenantId: user.tenantId } });
+    return send(res, 200, { token, user: { id: user.id, name: user.name, email: user.email, role: user.role, tenantId: user.tenantId, scope: user.robotSerialNumber ? { type: 'robot', system: user.robotSystem, externalId: user.robotExternalId || null, serialNumber: user.robotSerialNumber } : { type: 'tenant' } } });
   }
   if (req.method === 'GET' && serveFrontend(path, res)) return;
 
@@ -364,8 +405,14 @@ async function handle(req, res) {
   const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
 
   if (req.method === 'GET' && path === '/api/v1/tenants') return send(res, 200, { data: [...state.tenants.values()].filter((tenant) => tenant.id === actor.tenantId) });
-  if (req.method === 'GET' && path === '/api/v1/adapters') return send(res, 200, { data: [...state.adapters.values()].map(({ sync, ...adapter }) => adapter) });
+  if (req.method === 'GET' && path === '/api/v1/robot-accounts') {
+    if (!['platform_admin', 'data_admin', 'support_admin'].includes(actor.role)) throw httpError(403, 'Administrator permission required');
+    const accounts = ensureAllRobotUsers().map(({ token, email, password, serialNumber, robotId, created }) => ({ token, email, password, serialNumber, robotId, created }));
+    return send(res, 200, { warning: 'Prototype credentials only. Do not use in production.', data: accounts, count: accounts.length });
+  }
+  if (req.method === 'GET' && path === '/api/v1/adapters') return send(res, 200, { data: actor.role === 'robot_user' ? [] : [...state.adapters.values()].map(({ sync, ...adapter }) => adapter) });
   if (req.method === 'GET' && path === '/api/v1/adapters/autoxing/resources') {
+    if (actor.role === 'robot_user') return send(res, 200, { data: { businesses: [], buildings: [], maps: [], syncedAt: state.autoxing.lastSyncAt, resourceErrors: [] } });
     return send(res, 200, { data: { businesses: clone(state.autoxing.businesses), buildings: clone(state.autoxing.buildings), maps: clone([...state.autoxing.maps.values()]), syncedAt: state.autoxing.lastSyncAt, resourceErrors: clone(state.autoxing.resourceErrors) } });
   }
   if (req.method === 'GET' && path === '/api/v1/autoxing/tasks') {
@@ -380,7 +427,8 @@ async function handle(req, res) {
     return send(res, 200, { data: clone(tasks), count: tasks.length, syncedAt: state.autoxing.lastSyncAt });
   }
   if (req.method === 'GET' && path === '/api/v1/events') {
-    const data = state.events.filter((event) => event.tenantId === actor.tenantId).filter((event) => !url.searchParams.get('robotId') || event.robotId === url.searchParams.get('robotId'));
+    const visibleRobotIds = new Set([...state.robots.values()].filter((robot) => visibleToActor(actor, robot)).map((robot) => robot.id));
+    const data = state.events.filter((event) => visibleRobotIds.has(event.robotId)).filter((event) => !url.searchParams.get('robotId') || event.robotId === url.searchParams.get('robotId'));
     return send(res, 200, { data });
   }
   if (req.method === 'GET' && path === '/api/v1/audit') return send(res, 200, { data: state.audit.filter((item) => item.actorId === actor.id || ['platform_admin', 'data_admin', 'support_admin'].includes(actor.role)) });

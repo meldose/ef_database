@@ -19,7 +19,7 @@
           <button class="button primary login-button" type="submit">Sign in <span>→</span></button>
           <p id="loginError" class="login-error" role="alert"></p>
         </form>
-        <div class="demo-access"><span>Prototype access</span><strong>Password: demo</strong><div class="demo-accounts"><button type="button" data-demo-email="admin@demo.altegro.local">Platform Admin</button><button type="button" data-demo-email="technician@demo.altegro.local">Technician</button><button type="button" data-demo-email="owner@demo.altegro.local">Owner</button></div></div>
+        <div class="demo-access"><span>Prototype access</span><strong>Fleet accounts: password demo</strong><div class="demo-accounts"><button type="button" data-demo-email="admin@demo.altegro.local">Platform Admin</button><button type="button" data-demo-email="technician@demo.altegro.local">Technician</button><button type="button" data-demo-email="owner@demo.altegro.local">Owner</button></div><strong class="demo-scope-heading">Robot accounts: each has a separate password</strong><div class="demo-accounts robot-demo-accounts"><button type="button" data-demo-email="robot-ax-001@demo.altegro.local" data-demo-password="AX-robot-001-demo">AX-DEMO-001</button><button type="button" data-demo-email="robot-cb-001@demo.altegro.local" data-demo-password="CB-robot-001-demo">CB-DEMO-001</button><button type="button" data-demo-email="robot-se52512706922ne@demo.altegro.local" data-demo-password="SE-robot-001-demo">SE52512706922NE</button></div></div>
       </div>
       <div class="login-side"><p class="eyebrow">Manufacturer-neutral control plane</p><h2>One Passport for every robot.</h2><p>Connect identity, lifecycle records, service events and technical integrations in one controlled operational view.</p><div class="login-side-note"><span>Phase 1</span><span>Commands disabled</span><span>EU-first design</span></div></div>
     </section>
@@ -97,7 +97,7 @@
 
     <dialog id="eventDialog">
       <form method="dialog" id="eventForm">
-        <div class="dialog-header"><div><p class="eyebrow">Robot Passport</p><h2>Add technical event</h2></div><button class="close-button" value="cancel" aria-label="Close">×</button></div>
+        <div class="dialog-header"><div><p class="eyebrow">Robot Passport</p><h2>Add technical event</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close">×</button></div>
         <p class="dialog-copy">This creates a canonical event, an append-only Passport entry, and an audit record for the selected robot.</p>
         <label>Title<input id="eventTitle" required maxlength="160" placeholder="Battery inspection completed" /></label>
         <div class="form-grid"><label>Event type<select id="eventType" required><option value="maintenance">Maintenance</option><option value="inspection">Inspection</option><option value="error">Error</option><option value="warning">Warning</option><option value="battery">Battery</option><option value="online">Online</option><option value="offline">Offline</option><option value="mission_completed">Mission completed</option><option value="service">Service</option><option value="incident">Incident</option><option value="note">Note</option></select></label><label>Severity<select id="eventSeverity" required><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option><option value="critical">Critical</option></select></label></div>
@@ -105,16 +105,17 @@
         <label>Source event ID <span class="field-hint">optional · generated when empty</span><input id="eventSourceId" maxlength="200" placeholder="SERVICE-CASE-2026-001" /></label>
         <label>Description<textarea id="eventDescription" required maxlength="4000" rows="5" placeholder="Describe what happened, what was checked, and any follow-up required."></textarea></label>
         <label>Attachment <span class="field-hint">optional · max 2 MB</span><input id="eventAttachment" type="file" /></label>
-        <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button primary" id="saveEventButton" value="default">Add event</button></div>
+        <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" id="saveEventButton" value="default">Add event</button></div>
       </form>
     </dialog>
     <dialog id="robotDialog">
       <form method="dialog" id="robotForm">
-        <div class="dialog-header"><div><p class="eyebrow">Registry onboarding</p><h2>Register a robot</h2></div><button class="close-button" value="cancel" aria-label="Close">×</button></div>
+        <div class="dialog-header"><div><p class="eyebrow">Registry onboarding</p><h2>Register a robot</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close">×</button></div>
         <p class="dialog-copy">New manually registered robots begin as <strong>draft</strong> until they are verified.</p>
+        <label>Existing synchronized robot <span class="field-hint">optional · select one to open it</span><select id="existingRobotId"><option value="">＋ New robot</option></select></label>
         <label>Model<select id="modelId" required><option value="model-autoxing-a1">AutoXing A1 · Cleaning</option><option value="model-cenobots-c1">CenoBots C1 · Cleaning</option><option value="model-mock-m3">Mock OEM M3 · Transport</option></select></label>
-        <label>Serial number<input id="serialNumber" required placeholder="AX-PILOT-016" /></label>
-        <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button primary" id="registerButton" value="default">Register robot</button></div>
+        <label>Serial number<input id="serialNumber" required placeholder="AX-PILOT-016" /><span id="serialNumberHint" class="field-hint">Enter a new unique serial number.</span></label>
+        <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" id="registerButton" value="default">Register robot</button></div>
       </form>
     </dialog>
     <div id="toast" class="toast" role="status"></div>
