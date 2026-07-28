@@ -85,6 +85,9 @@ From WSL:
 export AUTOXING_LIVE=true
 export AUTOXING_REPO_PATH=/mnt/c/Users/meldo/Downloads/autoxing
 export AUTOXING_ENV_FILE=/mnt/c/Users/meldo/Downloads/autoxing/.env
+export AUTOXING_POLL_INTERVAL_MS=300000
+# Optional: include binary base-map images in the fleet snapshot
+# export AUTOXING_INCLUDE_BASE_MAP=true
 npm start
 ```
 
@@ -95,7 +98,24 @@ curl -X POST -H "Authorization: Bearer demo-platform-admin" \
   http://127.0.0.1:3000/api/v1/adapters/autoxing/sync
 ```
 
-The bridge imports the vendor wrapper in a separate Python process, normalizes robot identity/model/online state/battery into Altegro records, creates read-only technical events, and keeps command capabilities empty. It does not expose AutoXing task creation, navigation, cancel, or control methods.
+The bridge imports the vendor wrapper in a separate Python process, normalizes robot identity/model/online state/battery, position, safety status, POIs, areas, maps, task history/status, and detailed errors into Altegro records, creates read-only technical events, and keeps command capabilities empty. Base-map images are omitted by default to keep fleet snapshots small; set `AUTOXING_INCLUDE_BASE_MAP=true` when they are needed. It does not expose AutoXing task creation, navigation, cancel, or control methods.
+
+Read-only resource endpoints after synchronization:
+
+```text
+GET /api/v1/robots/:id/autoxing
+GET /api/v1/autoxing/tasks
+GET /api/v1/adapters/autoxing/resources
+```
+
+For real customer/site assignment, configure a JSON business mapping before the pilot. The keys can be an AutoXing business ID or business name:
+
+```bash
+export AUTOXING_BUSINESS_MAP='{"AUTOXING_BUSINESS_ID":{"organizationId":"org-demo","operatorOrganizationId":"org-service","siteId":"site-berlin"}}'
+export AUTOXING_REQUIRE_MAPPING=true
+```
+
+Optional model mapping is supported with `AUTOXING_MODEL_MAP`. When live mode is enabled, the server polls AutoXing at `AUTOXING_POLL_INTERVAL_MS`, records last-sync status/errors, retries a failed bridge call once, and imports online/offline, battery, version, mission, and error events when the wrapper provides them.
 
 The Python environment must have the wrapper dependencies installed. If credentials or dependencies are missing, the live sync returns a clear `503` error; it does not silently create fake live data.
 

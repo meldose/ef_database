@@ -20,6 +20,9 @@ const AUTOXING_BRIDGE = pathUtil.join(__dirname, 'integrations', 'autoxing_bridg
 const AUTOXING_REPO = process.env.AUTOXING_REPO_PATH || pathUtil.resolve(__dirname, '..', 'autoxing');
 const AUTOXING_LIB = process.env.AUTOXING_LIB_PATH || pathUtil.join(AUTOXING_REPO, 'lib');
 const autoXingLiveEnabled = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_LIVE || '').toLowerCase());
+const autoXingPollIntervalMs = () => Math.max(0, Number(process.env.AUTOXING_POLL_INTERVAL_MS || 300000));
+const parseJsonEnv = (name, fallback = {}) => { try { return process.env[name] ? JSON.parse(process.env[name]) : fallback; } catch { return fallback; } };
+const autoXingMappingRequired = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_REQUIRE_MAPPING || '').toLowerCase());
 
 const state = {
   tenants: new Map(),
@@ -31,7 +34,17 @@ const state = {
   serviceCases: new Map(),
   events: [],
   audit: [],
-  adapters: new Map()
+  adapters: new Map(),
+  autoxing: {
+    businesses: [],
+    buildings: [],
+    pois: new Map(),
+    areas: new Map(),
+    maps: new Map(),
+    tasks: new Map(),
+    lastSyncAt: null,
+    resourceErrors: []
+  }
 };
 
 const demoUsers = {
@@ -53,8 +66,8 @@ function seed() {
   state.models.set('model-mock-m3', { id: 'model-mock-m3', manufacturer: 'Mock OEM', model: 'M3', category: 'transport', capabilities: ['read.status', 'event.status'] });
 
   state.adapters.set('autoxing', {
-    provider: 'autoxing', version: 'wrapper-backed', status: autoXingLiveEnabled() ? 'live-wrapper-enabled' : 'mock-fallback', integration: 'autoxing/lib/api_lib.py',
-    capabilities: { read: ['identity', 'status', 'battery', 'alerts'], event: ['alert', 'status'], command: [] },
+    provider: 'autoxing', version: 'wrapper-backed', status: autoXingLiveEnabled() ? 'live-wrapper-enabled' : 'mock-fallback', integration: 'autoxing/lib/api_lib.py', lastSyncAt: null, lastSyncStatus: 'never', lastError: null, pollingIntervalMs: autoXingPollIntervalMs(),
+    capabilities: { read: ['identity', 'status', 'battery', 'position', 'emergency_stop', 'obstruction', 'detailed_errors', 'pois', 'areas', 'maps', 'task_history', 'task_status'], event: ['alert', 'status', 'task_status'], command: [] },
     sync: () => ({ externalId: 'AX-1001', modelId: 'model-autoxing-a1', serialNumber: 'AX-DEMO-001', status: 'active', battery: 87, eventType: 'online' })
   });
   state.adapters.set('cenobots', {
@@ -115,41 +128,125 @@ function syncAdapter(provider, actorId = 'system') {
   return { provider, adapterVersion: adapter.version, robot: getPassport(robot.id), commandCapabilitiesEnabled: false };
 }
 
-async function runAutoXingBridge() {
+async function runAutoXingBridge(command = 'snapshot') {
   const env = { ...process.env, AUTOXING_REPO_PATH: AUTOXING_REPO, AUTOXING_LIB_PATH: AUTOXING_LIB };
-  try {
-    const result = await execFileAsync(process.env.PYTHON_BIN || 'python3', [AUTOXING_BRIDGE, 'list'], { cwd: AUTOXING_REPO, env, timeout: 30000, maxBuffer: 8 * 1024 * 1024 });
-    const payload = JSON.parse(result.stdout.trim());
-    if (!payload.ok) throw httpError(503, payload.message, { provider: 'autoxing', bridgeCode: payload.code });
-    return payload;
-  } catch (error) {
-    if (error.status) throw error;
-    throw httpError(503, `AutoXing wrapper unavailable: ${error.message}`, { provider: 'autoxing' });
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const result = await execFileAsync(process.env.PYTHON_BIN || 'python3', [AUTOXING_BRIDGE, command], { cwd: AUTOXING_REPO, env, timeout: 120000, maxBuffer: 32 * 1024 * 1024 });
+      let payload;
+      try {
+        payload = JSON.parse(result.stdout.trim());
+      } catch (parseError) {
+        throw httpError(503, `AutoXing bridge returned invalid JSON: ${parseError.message}`, { provider: 'autoxing', stderr: String(result.stderr || '').slice(-4000) });
+      }
+      if (!payload.ok) throw httpError(503, payload.message, { provider: 'autoxing', bridgeCode: payload.code });
+      return payload;
+    } catch (error) {
+      const diagnostic = [error.message, error.stderr ? String(error.stderr).slice(-4000) : ''].filter(Boolean).join(' | ');
+      lastError = Object.assign(error, { diagnostic });
+      // Child-process failures also have a numeric `status`; only stop
+      // immediately for our own structured HTTP errors. Python stderr is
+      // needed to diagnose wrapper failures.
+      if ((error.status && !error.code) || attempt === 2) break;
+      await new Promise((resolve) => setTimeout(resolve, 750));
+    }
   }
+  if (lastError.status && !lastError.code) throw lastError;
+  throw httpError(503, `AutoXing wrapper unavailable: ${lastError.diagnostic || lastError.message}`, { provider: 'autoxing' });
+}
+
+function meaningful(value) {
+  return value !== null && value !== undefined && value !== '' && !(Array.isArray(value) && value.length === 0) && !(typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0);
+}
+
+function storeAutoXingResources(resources = {}, resourceErrors = []) {
+  const data = state.autoxing;
+  data.businesses = Array.isArray(resources.businesses) ? resources.businesses : [];
+  data.buildings = Array.isArray(resources.buildings) ? resources.buildings : [];
+  data.pois = new Map((resources.pois || []).map((item) => [String(item.externalRobotId), item]));
+  data.areas = new Map((resources.areas || []).map((item) => [String(item.externalRobotId), item]));
+  data.maps = new Map((resources.maps || []).map((item) => [`${item.areaId}:${item.externalRobotId}`, item]));
+  data.tasks = new Map((resources.tasks || []).filter((item) => item.taskId).map((item) => [String(item.taskId), item]));
+  data.lastSyncAt = timestamp();
+  data.resourceErrors = Array.isArray(resourceErrors) ? resourceErrors : [];
+}
+
+function taskRobotExternalId(task) {
+  const raw = task?.raw || {};
+  return raw.robotId || raw.robot_id || raw.robotSn || raw.robotSN || raw.robot?.robotId || raw.robot?.id || null;
+}
+
+function autoXingResourcesForRobot(robot) {
+  const externalId = robot.externalIdentities?.find((identity) => identity.system === 'autoxing')?.externalId;
+  if (!externalId) return null;
+  const maps = [...state.autoxing.maps.values()].filter((item) => item.externalRobotId === externalId || (robot.providerAreaId && String(item.areaId) === String(robot.providerAreaId)));
+  const tasks = [...state.autoxing.tasks.values()].filter((task) => {
+    const taskRobot = taskRobotExternalId(task);
+    return taskRobot && String(taskRobot) === String(externalId);
+  });
+  return {
+    externalRobotId: externalId,
+    pois: clone(state.autoxing.pois.get(String(externalId)) || { externalRobotId: externalId, items: [] }),
+    areas: clone(state.autoxing.areas.get(String(externalId)) || { externalRobotId: externalId, items: [] }),
+    maps: clone(maps),
+    tasks: clone(tasks),
+    syncedAt: state.autoxing.lastSyncAt,
+    resourceErrors: clone(state.autoxing.resourceErrors.filter((error) => !error.externalRobotId || error.externalRobotId === externalId))
+  };
 }
 
 async function syncAutoXingLive(actor) {
-  const bridge = await runAutoXingBridge();
+  const adapter = state.adapters.get('autoxing');
+  if (adapter) { adapter.lastSyncStatus = 'running'; adapter.lastError = null; }
+  const bridge = await runAutoXingBridge('snapshot');
+  const businessMap = parseJsonEnv('AUTOXING_BUSINESS_MAP');
+  const modelMap = parseJsonEnv('AUTOXING_MODEL_MAP');
   const synced = [];
   for (const externalRobot of bridge.robots) {
     const externalId = externalRobot.externalId;
     if (!externalId) continue;
     let robot = [...state.robots.values()].find((item) => item.externalIdentities.some((identity) => identity.system === 'autoxing' && identity.externalId === externalId));
-    const modelId = externalRobot.model ? 'model-autoxing-a1' : 'model-autoxing-a1';
+    const mapping = businessMap[String(externalRobot.businessId)] || businessMap[String(externalRobot.businessName)] || businessMap.default || {};
+    if (autoXingMappingRequired() && !Object.keys(mapping).length) throw httpError(400, `No Altegro mapping configured for AutoXing business ${externalRobot.businessName || externalRobot.businessId || externalId}`);
+    const modelId = modelMap[String(externalRobot.model)] || 'model-autoxing-a1';
+    const mappingStatus = Object.keys(mapping).length ? 'configured' : 'default-demo';
     if (!robot) {
-      robot = { id: ids(), tenantId: actor.tenantId, organizationId: process.env.AUTOXING_DEFAULT_ORGANIZATION_ID || 'org-demo', operatorOrganizationId: process.env.AUTOXING_DEFAULT_OPERATOR_ORGANIZATION_ID || 'org-service', siteId: process.env.AUTOXING_DEFAULT_SITE_ID || 'site-berlin', modelId, serialNumber: externalRobot.serialNumber, status: 'draft', online: externalRobot.online, externalIdentities: [{ system: 'autoxing', externalId }], createdAt: timestamp(), updatedAt: timestamp() };
+      robot = { id: ids(), tenantId: actor.tenantId, organizationId: mapping.organizationId || process.env.AUTOXING_DEFAULT_ORGANIZATION_ID || 'org-demo', operatorOrganizationId: mapping.operatorOrganizationId || process.env.AUTOXING_DEFAULT_OPERATOR_ORGANIZATION_ID || 'org-service', siteId: mapping.siteId || process.env.AUTOXING_DEFAULT_SITE_ID || 'site-berlin', modelId, serialNumber: externalRobot.serialNumber, status: 'draft', online: externalRobot.online, battery: externalRobot.battery, charging: externalRobot.charging, position: externalRobot.position, speed: externalRobot.speed, emergencyStop: externalRobot.emergencyStop, obstruction: externalRobot.obstruction, statusDetails: externalRobot.statusDetails, providerTask: externalRobot.task, errors: externalRobot.errors, providerVersion: externalRobot.version, providerBusinessId: externalRobot.businessId, providerBusinessName: externalRobot.businessName, providerAreaId: externalRobot.areaId, mappingStatus, lastProviderError: externalRobot.stateError || null, externalIdentities: [{ system: 'autoxing', externalId }], createdAt: timestamp(), updatedAt: timestamp() };
       state.robots.set(robot.id, robot);
       appendPassportEntry(robot.id, { type: 'registration', source: 'autoxing', data: { externalId, serialNumber: robot.serialNumber, model: externalRobot.model, businessId: externalRobot.businessId } }, actor);
     } else {
       robot.online = externalRobot.online;
+      robot.battery = externalRobot.battery;
+      robot.charging = externalRobot.charging;
+      robot.position = externalRobot.position;
+      robot.speed = externalRobot.speed;
+      robot.emergencyStop = externalRobot.emergencyStop;
+      robot.obstruction = externalRobot.obstruction;
+      robot.statusDetails = externalRobot.statusDetails;
+      robot.providerTask = externalRobot.task;
+      robot.errors = externalRobot.errors;
+      robot.providerBusinessId = externalRobot.businessId;
+      robot.providerBusinessName = externalRobot.businessName;
+      robot.providerAreaId = externalRobot.areaId;
+      robot.providerVersion = externalRobot.version;
+      robot.mappingStatus = mappingStatus;
+      robot.lastProviderError = externalRobot.stateError || null;
       robot.updatedAt = timestamp();
     }
-    appendPassportEntry(robot.id, { type: 'configuration_snapshot', source: 'autoxing', data: { model: externalRobot.model, battery: externalRobot.battery, online: externalRobot.online, raw: externalRobot.raw } }, actor);
+    appendPassportEntry(robot.id, { type: 'configuration_snapshot', source: 'autoxing', data: { model: externalRobot.model, battery: externalRobot.battery, online: externalRobot.online, version: externalRobot.version, mappingStatus, raw: externalRobot.raw } }, actor);
     const eventType = externalRobot.online === false ? 'offline' : 'online';
     upsertEvent(robot.id, { eventType, sourceSystem: 'autoxing', sourceEventId: `${externalId}:${eventType}:${externalRobot.battery ?? 'unknown'}`, title: `AutoXing robot ${eventType}`, description: `Read-only synchronization from the AutoXing Python wrapper for ${externalRobot.serialNumber}.`, severity: externalRobot.online === false ? 'warning' : 'info', payload: externalRobot }, actor);
+    if (externalRobot.task) upsertEvent(robot.id, { eventType: 'mission_status', sourceSystem: 'autoxing', sourceEventId: `${externalId}:task:${JSON.stringify(externalRobot.task)}`, title: 'AutoXing mission status', description: 'Mission status received from the AutoXing wrapper.', severity: 'info', payload: { task: externalRobot.task } }, actor);
+    if (externalRobot.errors && JSON.stringify(externalRobot.errors) !== '[]' && JSON.stringify(externalRobot.errors) !== '{}') upsertEvent(robot.id, { eventType: 'error', sourceSystem: 'autoxing', sourceEventId: `${externalId}:errors:${JSON.stringify(externalRobot.errors)}`, title: 'AutoXing alert or error', description: 'An alert or error was received from AutoXing.', severity: 'error', payload: { errors: externalRobot.errors } }, actor);
+    if (externalRobot.emergencyStop === true) upsertEvent(robot.id, { eventType: 'emergency_stop', sourceSystem: 'autoxing', sourceEventId: `${externalId}:emergency-stop:true`, title: 'AutoXing emergency stop active', description: 'The emergency-stop state is active according to AutoXing.', severity: 'critical', payload: { emergencyStop: true, statusDetails: externalRobot.statusDetails } }, actor);
+    if (externalRobot.obstruction === true) upsertEvent(robot.id, { eventType: 'obstruction', sourceSystem: 'autoxing', sourceEventId: `${externalId}:obstruction:true`, title: 'AutoXing obstruction detected', description: 'The robot reports an obstruction according to AutoXing.', severity: 'warning', payload: { obstruction: true, statusDetails: externalRobot.statusDetails } }, actor);
+    if (externalRobot.stateError) upsertEvent(robot.id, { eventType: 'error', sourceSystem: 'autoxing', sourceEventId: `${externalId}:state-error:${externalRobot.stateError}`, title: 'AutoXing status read failed', description: externalRobot.stateError, severity: 'warning', payload: { stateError: externalRobot.stateError } }, actor);
     synced.push(getPassport(robot.id));
   }
-  return { provider: 'autoxing', adapterVersion: 'wrapper-backed', source: bridge.wrapper, robots: synced, count: synced.length, commandCapabilitiesEnabled: false };
+  storeAutoXingResources(bridge.resources, bridge.resourceErrors);
+  if (adapter) { adapter.lastSyncAt = timestamp(); adapter.lastSyncStatus = 'success'; adapter.lastError = bridge.resourceErrors?.length ? `${bridge.resourceErrors.length} resource warnings` : null; }
+  return { provider: 'autoxing', adapterVersion: 'wrapper-backed', source: bridge.wrapper, robots: synced, count: synced.length, resources: { businesses: state.autoxing.businesses.length, buildings: state.autoxing.buildings.length, poiRobotScopes: state.autoxing.pois.size, areaRobotScopes: state.autoxing.areas.size, maps: state.autoxing.maps.size, tasks: state.autoxing.tasks.size, warnings: state.autoxing.resourceErrors.length }, resourceErrors: clone(state.autoxing.resourceErrors), commandCapabilitiesEnabled: false };
 }
 
 function getPassport(robotId) {
@@ -268,6 +365,20 @@ async function handle(req, res) {
 
   if (req.method === 'GET' && path === '/api/v1/tenants') return send(res, 200, { data: [...state.tenants.values()].filter((tenant) => tenant.id === actor.tenantId) });
   if (req.method === 'GET' && path === '/api/v1/adapters') return send(res, 200, { data: [...state.adapters.values()].map(({ sync, ...adapter }) => adapter) });
+  if (req.method === 'GET' && path === '/api/v1/adapters/autoxing/resources') {
+    return send(res, 200, { data: { businesses: clone(state.autoxing.businesses), buildings: clone(state.autoxing.buildings), maps: clone([...state.autoxing.maps.values()]), syncedAt: state.autoxing.lastSyncAt, resourceErrors: clone(state.autoxing.resourceErrors) } });
+  }
+  if (req.method === 'GET' && path === '/api/v1/autoxing/tasks') {
+    let tasks = [...state.autoxing.tasks.values()];
+    const robotId = url.searchParams.get('robotId');
+    if (robotId) {
+      const item = state.robots.get(robotId);
+      if (!item || !visibleToActor(actor, item)) throw httpError(404, 'Robot not found');
+      const externalId = item.externalIdentities?.find((identity) => identity.system === 'autoxing')?.externalId;
+      tasks = tasks.filter((task) => String(taskRobotExternalId(task)) === String(externalId));
+    }
+    return send(res, 200, { data: clone(tasks), count: tasks.length, syncedAt: state.autoxing.lastSyncAt });
+  }
   if (req.method === 'GET' && path === '/api/v1/events') {
     const data = state.events.filter((event) => event.tenantId === actor.tenantId).filter((event) => !url.searchParams.get('robotId') || event.robotId === url.searchParams.get('robotId'));
     return send(res, 200, { data });
@@ -284,7 +395,12 @@ async function handle(req, res) {
   if (sync && req.method === 'POST') {
     if (!canWrite(actor)) throw httpError(403, 'Write permission required');
     if (sync.id === 'autoxing' && autoXingLiveEnabled()) {
-      const result = await syncAutoXingLive(actor); recordAudit(actor, 'adapter.sync.live', 'adapter', sync.id, 'success', { count: result.count }); return send(res, 200, { data: result });
+      try {
+        const result = await syncAutoXingLive(actor); recordAudit(actor, 'adapter.sync.live', 'adapter', sync.id, 'success', { count: result.count }); return send(res, 200, { data: result });
+      } catch (error) {
+        const adapter = state.adapters.get('autoxing'); if (adapter) { adapter.lastSyncStatus = 'error'; adapter.lastError = error.message; }
+        throw error;
+      }
     }
     const result = syncAdapter(sync.id, actor.id); recordAudit(actor, 'adapter.sync', 'adapter', sync.id); return send(res, 200, { data: result });
   }
@@ -301,6 +417,12 @@ async function handle(req, res) {
   if (robot) {
     const item = state.robots.get(robot.id); if (!item || !visibleToActor(actor, item)) throw httpError(404, 'Robot not found');
     if (req.method === 'GET') return send(res, 200, { data: item });
+  }
+  const robotAutoXing = route(req.method, path, /^\/api\/v1\/robots\/([^/]+)\/autoxing$/);
+  if (robotAutoXing && req.method === 'GET') {
+    const item = state.robots.get(robotAutoXing.id); if (!item || !visibleToActor(actor, item)) throw httpError(404, 'Robot not found');
+    if (!item.externalIdentities?.some((identity) => identity.system === 'autoxing')) throw httpError(404, 'Robot is not linked to AutoXing');
+    return send(res, 200, { data: { robotId: item.id, status: { online: item.online ?? null, battery: item.battery ?? null, charging: item.charging ?? null, position: item.position ? clone(item.position) : null, speed: item.speed ?? null, emergencyStop: item.emergencyStop ?? null, obstruction: item.obstruction ?? null, details: clone(item.statusDetails || {}), errors: clone(item.errors || []), task: item.providerTask ? clone(item.providerTask) : null }, resources: autoXingResourcesForRobot(item) } });
   }
   const passport = route(req.method, path, /^\/api\/v1\/robots\/([^/]+)\/passport$/);
   if (passport && req.method === 'GET') {
@@ -350,8 +472,21 @@ async function handle(req, res) {
 seed();
 const server = http.createServer((req, res) => handle(req, res).catch((error) => send(res, error.status || 500, { error: { code: error.status === 401 ? 'UNAUTHENTICATED' : 'REQUEST_FAILED', message: error.message, details: error.details, correlationId: ids() } })));
 
+let autoXingPollTimer = null;
+let autoXingPollRunning = false;
+function startAutoXingPolling() {
+  if (!autoXingLiveEnabled() || autoXingPollIntervalMs() === 0) return;
+  const pollActor = { id: 'system-autoxing-poller', name: 'AutoXing Poller', role: 'platform_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' };
+  autoXingPollTimer = setInterval(async () => {
+    if (autoXingPollRunning) return;
+    autoXingPollRunning = true;
+    try { await syncAutoXingLive(pollActor); } catch (error) { const adapter = state.adapters.get('autoxing'); if (adapter) { adapter.lastSyncStatus = 'error'; adapter.lastError = error.message; } }
+    finally { autoXingPollRunning = false; }
+  }, autoXingPollIntervalMs());
+}
+
 if (require.main === module) {
-  server.listen(PORT, '127.0.0.1', () => console.log(`Altegro prototype listening on http://127.0.0.1:${PORT}`));
+  server.listen(PORT, '127.0.0.1', () => { startAutoXingPolling(); console.log(`Altegro prototype listening on http://127.0.0.1:${PORT}`); });
 }
 
 module.exports = { server, state };
