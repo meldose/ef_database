@@ -26,6 +26,7 @@ The frontend starts with a login page. Prototype accounts use password `demo`:
 - `owner@demo.altegro.local` — Owner
 - `data@demo.altegro.local` — Data Admin
 - `support@demo.altegro.local` — Support Admin
+- `auditor@demo.altegro.local` — read-only Passport, certificate, service evidence, and export access
 
 The role is assigned by the backend after login; it is no longer selected from the dashboard.
 
@@ -95,6 +96,7 @@ From WSL:
 export AUTOXING_LIVE=true
 export AUTOXING_REPO_PATH=/mnt/c/Users/meldo/Downloads/autoxing
 export AUTOXING_ENV_FILE=/mnt/c/Users/meldo/Downloads/autoxing/.env
+export PYTHON_BIN=/mnt/c/Users/meldo/Downloads/autoxing/.venv/bin/python
 export AUTOXING_POLL_INTERVAL_MS=300000
 # The robot snapshot is reliable by default. Optional POI/area/map/task
 # endpoints are disabled by default because some provider responses are slow
@@ -167,10 +169,17 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - AutoXing, CenoBots, and third mock OEM adapter manifests
 - Idempotent mock adapter sync
 - Service-case linkage and Passport history
+- Incident-to-service workflow with controlled status progression and service-completion evidence
+- Passport documents with hashes, certificate expiry records, and deployment/rollback evidence
+- Model/capability compatibility catalog with an explicit Phase 1 command block
+- Operations and 2027-proof metrics for online robots, open cases, Passport completeness, and expiring certificates
+- Controlled Robot CSV, Passport JSON, and tenant JSON exports with audit records
+- Read-only auditor role
+- Prototype Outbox records for lifecycle and service changes
 - Robot-specific event creation with title, description, date/time, type, severity, source, and optional attachment metadata/content
 - Basic search/filtering
 - Stable JSON error responses
 
 ## Intentionally not production-ready
 
-The prototype uses in-memory state and demo bearer tokens. It does not yet implement PostgreSQL, OIDC, real Secret Management, Object Storage, OpenAPI generation, signed Webhooks, rate limiting, migrations, or a real AutoXing/CenoBots connection. Those are the next implementation steps for the production-oriented Phase 1 build.
+The prototype uses in-memory state and demo bearer tokens. Its Outbox is illustrative and not transactionally durable. Attachments are kept in memory rather than Object Storage. It does not yet implement PostgreSQL, OIDC, real Secret Management, Object Storage, OpenAPI generation, signed Webhooks, rate limiting, or migrations. AutoXing can run through the configured wrapper; CenoBots remains a mock until its new client is connected to the server. Those are the next implementation steps for the production-oriented Phase 1 build.

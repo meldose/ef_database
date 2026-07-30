@@ -19,7 +19,7 @@
           <button class="button primary login-button" type="submit">Sign in <span>→</span></button>
           <p id="loginError" class="login-error" role="alert"></p>
         </form>
-        <div class="demo-access"><span>Prototype access</span><strong>Fleet accounts: password demo</strong><div class="demo-accounts"><button type="button" data-demo-email="admin@demo.altegro.local">Platform Admin</button><button type="button" data-demo-email="technician@demo.altegro.local">Technician</button><button type="button" data-demo-email="owner@demo.altegro.local">Owner</button></div><strong class="demo-scope-heading">Robot accounts: each has a separate password</strong><div class="demo-accounts robot-demo-accounts"><button type="button" data-demo-email="robot-ax-001@demo.altegro.local" data-demo-password="AX-robot-001-demo">AX-DEMO-001</button><button type="button" data-demo-email="robot-cb-001@demo.altegro.local" data-demo-password="CB-robot-001-demo">CB-DEMO-001</button><button type="button" data-demo-email="robot-se52512706922ne@demo.altegro.local" data-demo-password="SE-robot-001-demo">SE52512706922NE</button></div></div>
+        <div class="demo-access"><span>Prototype access</span><strong>Fleet accounts: password demo</strong><div class="demo-accounts"><button type="button" data-demo-email="admin@demo.altegro.local">Platform Admin</button><button type="button" data-demo-email="technician@demo.altegro.local">Technician</button><button type="button" data-demo-email="owner@demo.altegro.local">Owner</button><button type="button" data-demo-email="auditor@demo.altegro.local">Auditor</button></div><strong class="demo-scope-heading">Robot accounts: each has a separate password</strong><div class="demo-accounts robot-demo-accounts"><button type="button" data-demo-email="robot-ax-001@demo.altegro.local" data-demo-password="AX-robot-001-demo">AX-DEMO-001</button><button type="button" data-demo-email="robot-cb-001@demo.altegro.local" data-demo-password="CB-robot-001-demo">CB-DEMO-001</button><button type="button" data-demo-email="robot-se52512706922ne@demo.altegro.local" data-demo-password="SE-robot-001-demo">SE52512706922NE</button></div></div>
       </div>
       <div class="login-side"><p class="eyebrow">Manufacturer-neutral control plane</p><h2>One Passport for every robot.</h2><p>Connect identity, lifecycle records, service events and technical integrations in one controlled operational view.</p><div class="login-side-note"><span>Phase 1</span><span>Commands disabled</span><span>EU-first design</span></div></div>
     </section>
@@ -45,6 +45,7 @@
           <p class="hero-copy">A manufacturer-neutral view of robots, lifecycle history, events and integrations.</p>
         </div>
         <div class="hero-actions">
+          <button class="button secondary" id="exportTenant">Export tenant</button>
           <button class="button secondary" id="syncAutoXing">Sync AutoXing</button>
           <button class="button secondary" id="syncCenoBots">Sync CenoBots</button>
           <button class="button primary" id="newRobotButton">＋ Register robot</button>
@@ -56,6 +57,12 @@
         <article class="metric-card"><span class="metric-label">Active</span><strong class="green" id="metricActive">—</strong><small>Verified fleet</small></article>
         <article class="metric-card"><span class="metric-label">Draft</span><strong class="amber" id="metricDraft">—</strong><small>Awaiting verification</small></article>
         <article class="metric-card"><span class="metric-label">Events</span><strong id="metricEvents">—</strong><small>Normalized technical events</small></article>
+      </section>
+      <section class="metrics proof-metrics" aria-label="2027 proof metrics">
+        <article class="metric-card"><span class="metric-label">Online now</span><strong class="green" id="metricOnline">—</strong><small>Normalized live status</small></article>
+        <article class="metric-card"><span class="metric-label">Open service cases</span><strong class="amber" id="metricOpenCases">—</strong><small>Incident-to-service flow</small></article>
+        <article class="metric-card"><span class="metric-label">Complete Passports</span><strong id="metricPassportComplete">—</strong><small>Target ≥ 80%</small></article>
+        <article class="metric-card"><span class="metric-label">Certificates due</span><strong id="metricCertificatesDue">—</strong><small>Expired or due in 30 days</small></article>
       </section>
 
       <section class="workspace-grid">
@@ -92,6 +99,16 @@
           <div id="adaptersList" class="adapter-list"><div class="empty">Loading adapters…</div></div>
         </article>
       </section>
+      <section class="lower-grid">
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Service link</p><h2>Incident and service workflow</h2></div><button class="text-button" id="refreshServiceCases">Refresh</button></div>
+          <div id="serviceCasesList" class="record-list"><div class="empty">Loading service cases…</div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Compatibility gate</p><h2>Model compatibility</h2></div><span class="lock-label">Commands blocked</span></div>
+          <div id="compatibilityList" class="record-list"><div class="empty">Loading compatibility records…</div></div>
+        </article>
+      </section>
     </main>
     </div>
 
@@ -108,6 +125,28 @@
         <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" id="saveEventButton" value="default">Add event</button></div>
       </form>
     </dialog>
+    <dialog id="incidentDialog">
+      <form method="dialog" id="incidentForm">
+        <div class="dialog-header"><div><p class="eyebrow">Service Link</p><h2>Open an incident</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close">×</button></div>
+        <p class="dialog-copy">Creates an incident event, an open service case and append-only Passport evidence.</p>
+        <label>Title<input id="incidentTitle" required maxlength="160" placeholder="Robot stopped during operation" /></label>
+        <div class="form-grid"><label>Severity<select id="incidentSeverity"><option value="warning">Warning</option><option value="error">Error</option><option value="critical">Critical</option></select></label><label>Assign to<input id="incidentAssignedTo" maxlength="160" placeholder="Robot Care Berlin" /></label></div>
+        <label>Description<textarea id="incidentDescription" required maxlength="4000" rows="5" placeholder="Describe the incident and immediate containment."></textarea></label>
+        <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Open incident</button></div>
+      </form>
+    </dialog>
+    <dialog id="lifecycleDialog">
+      <form method="dialog" id="lifecycleForm">
+        <div class="dialog-header"><div><p class="eyebrow">Robot Passport</p><h2>Add lifecycle evidence</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close">×</button></div>
+        <label>Record type<select id="lifecycleType"><option value="document">Document</option><option value="certificate">Certificate</option><option value="deployment">Deployment record</option></select></label>
+        <label>Title<input id="lifecycleTitle" required maxlength="200" placeholder="Commissioning report" /></label>
+        <div class="form-grid"><label id="lifecycleVersionField">Version<input id="lifecycleVersion" maxlength="80" value="1.0" /></label><label id="lifecycleStatusField">Status<select id="lifecycleStatus"></select></label></div>
+        <div class="form-grid"><label id="lifecycleIssuerField">Issuer<input id="lifecycleIssuer" maxlength="160" placeholder="Certification body" /></label><label id="lifecycleExpiryField">Valid until<input id="lifecycleValidUntil" type="date" /></label></div>
+        <label>Description<textarea id="lifecycleDescription" maxlength="4000" rows="4" placeholder="Evidence, approval and verification notes."></textarea></label>
+        <label id="lifecycleAttachmentField">Attachment <span class="field-hint">optional · max 2 MB</span><input id="lifecycleAttachment" type="file" /></label>
+        <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Add to Passport</button></div>
+      </form>
+    </dialog>
     <dialog id="robotDialog">
       <form method="dialog" id="robotForm">
         <div class="dialog-header"><div><p class="eyebrow">Registry onboarding</p><h2>Register a robot</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close">×</button></div>
@@ -115,8 +154,16 @@
         <label>Existing synchronized robot <span class="field-hint">optional · select one to open it</span><select id="existingRobotId"><option value="">＋ New robot</option></select></label>
         <label>Model<select id="modelId" required><option value="model-autoxing-a1">AutoXing A1 · Cleaning</option><option value="model-cenobots-c1">CenoBots C1 · Cleaning</option><option value="model-mock-m3">Mock OEM M3 · Transport</option></select></label>
         <label>Serial number<input id="serialNumber" required placeholder="AX-PILOT-016" /><span id="serialNumberHint" class="field-hint">Enter a new unique serial number.</span></label>
-        <div class="form-grid"><label>Username / email<input id="robotUsername" type="email" required autocomplete="off" placeholder="operator@example.com" /></label><label>Password<input id="robotPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="At least 8 characters" /></label></div>
+        <div id="robotAccountFields" class="form-grid"><label>Username / email<input id="robotUsername" type="email" required autocomplete="off" placeholder="operator@example.com" /></label><label>Password<input id="robotPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="At least 8 characters" /></label></div>
         <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" id="registerButton" value="default">Register robot</button></div>
+      </form>
+    </dialog>
+    <dialog id="credentialsDialog">
+      <form method="dialog">
+        <div class="dialog-header"><div><p class="eyebrow">Robot account created</p><h2>Save these credentials</h2></div><button class="close-button" value="cancel" aria-label="Close">×</button></div>
+        <p class="dialog-copy">Use this username and password to log in and view only the newly registered robot.</p>
+        <pre id="createdAccountCredentials" class="credential-display"></pre>
+        <div class="dialog-actions"><button class="button primary" value="default">Done</button></div>
       </form>
     </dialog>
     <div id="toast" class="toast" role="status"></div>
