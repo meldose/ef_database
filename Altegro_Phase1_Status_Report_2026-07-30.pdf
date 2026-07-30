@@ -1,0 +1,291 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R 10 0 R 12 0 R 14 0 R] /Count 5 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 5834 >>
+stream
+q 0.914 0.184 0.51 rg 0 816 595 26 re f Q
+BT /F2 8 Tf 1 1 1 rg 1 0 0 1 48 825 Tm (ALTEGRO  |  PHASE 1 STATUS) Tj ET
+BT /F2 22 Tf 0.914 0.184 0.51 rg 1 0 0 1 48 790 Tm (Altegro Phase 1 Status Report) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 747 Tm (Date: 30 July 2026) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 731.5 Tm (Scope: Current ef_database prototype compared with the binding developer briefing and Phase 1) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 719 Tm (technical specification.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 699.5 Tm (Executive summary) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 669.5 Tm (The current Altegro website is a functional demonstrator of the intended Phase 1 domain. It) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 657 Tm (proves immutable Altegro Robot IDs, a manufacturer-neutral Registry, basic Passport history,) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 644.5 Tm (normalized events, read-only OEM synchronization, robot-scoped access, incident and service) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 632 Tm (workflows, lifecycle evidence, compatibility records, controlled exports, and a visible command) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 619.5 Tm (safety boundary.) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 600 Tm (It is not yet a production-ready Phase 1 release. The largest gap is the technical foundation:) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 587.5 Tm (all business data and credentials remain in memory, authentication is demo-only, attachments are) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 575 Tm (not stored in Object Storage, and audit/Outbox records are not durable. Live CenoBots, CRM and) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 562.5 Tm (external service-system adapters are also incomplete. Public API contracts, staging,) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 550 Tm (backup/restore evidence, and the required security review remain outstanding.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 530.5 Tm (Source documents) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 500.5 Tm (- Altegro_Projektbriefing_Entwickler.md, dated 27 July 2026.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 486.2 Tm (- Altegro_Technisches_Lastenheft_Phase_1.md, dated 23 July 2026.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 471.9 Tm (- Altegro_Business_Model_Platform_2037.md, dated 21 July 2026.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 453.59999999999997 Tm (Changes implemented in the current prototype) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 423.59999999999997 Tm (Robot Registry and identity) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 400.59999999999997 Tm (- Generates a non-reused UUID as the Altegro Robot ID.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 386.29999999999995 Tm (- Stores serial number, model, tenant, customer organization, operator and site.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 371.99999999999994 Tm (- Keeps OEM IDs as generic External Identities rather than primary keys.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 357.69999999999993 Tm (- Supports manual registration and adapter-based registration.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 343.3999999999999 Tm (- Provides robot search and status filtering.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 329.0999999999999 Tm (- Provides robot-scoped logins so assigned users only see their permitted robots.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 314.7999999999999 Tm (- Keeps commands disabled at the backend boundary.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 296.4999999999999 Tm (AutoXing integration) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 273.4999999999999 Tm (- Connects to the separate AutoXing Python wrapper through a read-only bridge.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 259.1999999999999 Tm (- Synchronizes robot identity, serial number, model, online status and battery.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 244.89999999999986 Tm (- Maps charging state, position, speed, emergency stop, obstruction and detailed errors) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 232.59999999999985 Tm (when supplied.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 218.29999999999984 Tm (- Can synchronize POIs, areas, maps, task history and task status as optional resources.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 203.99999999999983 Tm (- Creates canonical status, mission, error and safety events.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 189.69999999999982 Tm (- Shows adapter status, last synchronization and provider errors.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 175.3999999999998 Tm (- Supports configured business-to-organization/site mapping.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 161.0999999999998 Tm (- Keeps all movement, navigation, mission and control capabilities disabled.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 142.79999999999978 Tm (Robot Passport and lifecycle evidence) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 119.79999999999978 Tm (- Shows current robot identity, owner, operator, site and external identity.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 105.49999999999979 Tm (- Maintains append-only prototype Passport entries.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 91.19999999999979 Tm (- Creates configuration snapshots during synchronization.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 76.89999999999979 Tm (- Supports manual technical events with title, description, severity and timestamp.) Tj ET
+BT /F1 7.5 Tf 0.47 0.38 0.43 rg 1 0 0 1 48 30 Tm (Altegro Phase 1 Status Report  |  1 / 5) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 6325 >>
+stream
+q 0.914 0.184 0.51 rg 0 816 595 26 re f Q
+BT /F2 8 Tf 1 1 1 rg 1 0 0 1 48 825 Tm (ALTEGRO  |  PHASE 1 STATUS) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 790 Tm (- Supports optional event attachments with file size and SHA-256 hash.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 775.7 Tm (- Supports lifecycle documents, certificate issuer/expiry records and deployment evidence.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 761.4000000000001 Tm (- Records deployment version, verification state and rollback version.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 747.1000000000001 Tm (- Calculates a prototype Passport-completeness score.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 732.8000000000002 Tm (- Exports an individual Passport as JSON.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 714.5000000000002 Tm (Incident and service workflow) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 691.5000000000002 Tm (- Opens an incident against a selected robot.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 677.2000000000003 Tm (- Creates a linked service case and Passport evidence.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 662.9000000000003 Tm (- Supports open, in-progress, waiting, resolved and closed states.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 648.6000000000004 Tm (- Records cause, corrective action, assigned party and replaced parts through the API.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 634.3000000000004 Tm (- Creates a service-completion Passport entry when a case closes.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 620.0000000000005 Tm (- Creates a normalized service-completed event.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 601.7000000000005 Tm (Compatibility, operations and proof reporting) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 578.7000000000005 Tm (- Stores model/capability/version compatibility records.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 564.4000000000005 Tm (- Marks command compatibility as blocked for Phase 1.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 550.1000000000006 Tm (- Shows online robots, open service cases, Passport completeness and certificates due.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 535.8000000000006 Tm (- Shows recent canonical technical events and adapter capabilities.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 521.5000000000007 Tm (- Provides Robot Registry CSV, Passport JSON and tenant JSON exports.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 507.20000000000067 Tm (- Audits export requests.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 492.90000000000066 Tm (- Includes a read-only auditor account for Passport, certificate and service evidence.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 478.60000000000065 Tm (- Creates prototype Outbox records for lifecycle and service changes.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 460.30000000000064 Tm (Frontend and verification) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 437.30000000000064 Tm (- Provides a responsive operations portal and login page.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 423.0000000000006 Tm (- Uses a pink-and-black visual theme while preserving semantic green, amber and red) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 410.7000000000006 Tm (states.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 396.4000000000006 Tm (- Includes frontend forms for robot registration, technical events, incidents and) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 384.1000000000006 Tm (lifecycle evidence.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 369.8000000000006 Tm (- Includes automated tests for authentication, robot isolation, command rejection,) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 357.50000000000057 Tm (lifecycle records, service completion, compatibility, exports, auditor restrictions and) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 345.20000000000056 Tm (Outbox creation.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 330.90000000000055 Tm (- The current automated test suite passes.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 312.60000000000053 Tm (Phase 1 requirements still missing) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 282.60000000000053 Tm (1. Production architecture and persistence) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 259.60000000000053 Tm (- Replace plain JavaScript prototype structure with the approved strict TypeScript) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 247.30000000000052 Tm (modular-monolith structure using Next.js and NestJS.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 233.0000000000005 Tm (- Introduce PostgreSQL as the transactional system of record.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 218.7000000000005 Tm (- Create versioned migrations, constraints, foreign keys, indexes and optimistic-locking) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 206.4000000000005 Tm (fields.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 192.10000000000048 Tm (- Persist tenants, organizations, sites, users, memberships, robots, External Identities,) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 179.80000000000047 Tm (Passport entries, events, service cases, compatibility, deployments, documents, audit) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 167.50000000000045 Tm (and Outbox records.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 153.20000000000044 Tm (- Introduce S3-compatible Object Storage for documents and certificates.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 138.90000000000043 Tm (- Implement encrypted backups and prove restoration in a separate environment.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 120.60000000000043 Tm (2. Identity and access management) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 97.60000000000043 Tm (- IAM-001: replace demo passwords with OIDC/SSO; Altegro must not store human passwords.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 83.30000000000044 Tm (- IAM-002: bind every request to a verified user/service account and tenant.) Tj ET
+BT /F1 7.5 Tf 0.47 0.38 0.43 rg 1 0 0 1 48 30 Tm (Altegro Phase 1 Status Report  |  2 / 5) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Length 6770 >>
+stream
+q 0.914 0.184 0.51 rg 0 816 595 26 re f Q
+BT /F2 8 Tf 1 1 1 rg 1 0 0 1 48 825 Tm (ALTEGRO  |  PHASE 1 STATUS) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 790 Tm (- IAM-003/004/006/008: implement and automatically test the full role/permission matrix) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 777.7 Tm (with organization, site, robot and service-assignment scope.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 763.4000000000001 Tm (- IAM-005: create service accounts with scopes, expiry, revocation and rotation.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 749.1000000000001 Tm (- IAM-009: implement justified, time-limited support access with automatic expiry and) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 736.8000000000002 Tm (customer-visible audit.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 722.5000000000002 Tm (- Enable MFA for privileged users through the selected Identity Provider.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 704.2000000000003 Tm (3. Registry and Passport completion) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 681.2000000000003 Tm (- ORG-001 to ORG-004: implement real organization/site administration and idempotent CRM) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 668.9000000000003 Tm (ownership synchronization.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 654.6000000000004 Tm (- REG-003/005/006: enforce required assignments, duplicate-review workflow and controlled) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 642.3000000000004 Tm (status transitions.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 628.0000000000005 Tm (- REG-007: add pagination and prove search performance against 100,000 synthetic robots.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 613.7000000000005 Tm (- REG-008: add repeatable CSV import with row-level error reporting.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 599.4000000000005 Tm (- PAS-002/003: persist append-only history and make corrections reference the original) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 587.1000000000006 Tm (record.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 572.8000000000006 Tm (- PAS-004/005: implement real document versioning, access control, Object Storage and) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 560.5000000000007 Tm (certificate notifications.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 546.2000000000007 Tm (- PAS-006: make Passport-completeness rules configurable and tested.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 531.9000000000008 Tm (- PAS-007: add controlled PDF export with export timestamp and verification statement.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 513.6000000000008 Tm (4. OEM adapters) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 490.6000000000008 Tm (- INT-001 to INT-009: formalize the shared pull/webhook/import adapter contract,) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 478.3000000000008 Tm (idempotency, retries, rate-limit handling, dead-letter processing, capability manifests,) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 466.0000000000008 Tm (synthetic fixtures and contract tests.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 451.7000000000008 Tm (- INT-010: add AutoXing WebSocket events behind the same canonical interface as REST) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 439.4000000000008 Tm (polling.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 425.10000000000076 Tm (- INT-011: connect the existing CenoBots client to the server and validate official) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 412.80000000000075 Tm (credentials, sandbox, rate limits, version policy and data rights.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 398.50000000000074 Tm (- INT-012: continue to keep all command capabilities separate and disabled.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 380.2000000000007 Tm (5. CRM and service-system adapters) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 357.2000000000007 Tm (- Connect one approved CRM reference adapter for Customer ID, organization and account) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 344.9000000000007 Tm (ownership.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 330.6000000000007 Tm (- Make CRM changes idempotent and prevent duplicate customer records.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 316.3000000000007 Tm (- Connect one approved external service-system adapter.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 302.0000000000007 Tm (- Map provider ticket states to open, in-progress, waiting, resolved and closed.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 287.70000000000067 Tm (- Process signed, replay-protected and idempotent service webhooks.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 273.40000000000066 Tm (- Prove that a second mock service provider passes the same contract tests without) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 261.10000000000065 Tm (Passport-core changes.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 242.80000000000064 Tm (6. Events, audit and jobs) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 219.80000000000064 Tm (- EVT-001/002: validate all canonical event envelopes against versioned schemas.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 205.50000000000063 Tm (- EVT-003: implement a real PostgreSQL Transactional Outbox so business changes and events) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 193.2000000000006 Tm (commit together.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 178.9000000000006 Tm (- EVT-004/005: store immutable, tamper-resistant audit records outside normal user) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 166.6000000000006 Tm (modification paths.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 152.30000000000058 Tm (- Add persistent background workers, exponential backoff, retry controls and dead-letter) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 140.00000000000057 Tm (handling.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 125.70000000000057 Tm (- Add tenant/site filters and data-freshness monitoring to the operations dashboard.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 107.40000000000057 Tm (7. Public API and developer experience) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 84.40000000000057 Tm (- API-001: publish versioned Registry, Passport, Provider, Adapter and Event APIs.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 70.10000000000058 Tm (- API-002: implement client scopes, quotas, expiry and rate limits.) Tj ET
+BT /F1 7.5 Tf 0.47 0.38 0.43 rg 1 0 0 1 48 30 Tm (Altegro Phase 1 Status Report  |  3 / 5) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 9 0 R >>
+endobj
+11 0 obj
+<< /Length 6479 >>
+stream
+q 0.914 0.184 0.51 rg 0 816 595 26 re f Q
+BT /F2 8 Tf 1 1 1 rg 1 0 0 1 48 825 Tm (ALTEGRO  |  PHASE 1 STATUS) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 790 Tm (- API-003: add backward-compatibility contract tests and a deprecation policy.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 775.7 Tm (- API-004: implement signed, replay-protected and idempotent webhooks.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 761.4000000000001 Tm (- API-005: provide Developer documentation, changelog, status and sandbox access.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 747.1000000000001 Tm (- API-006: provide an Adapter SDK, schemas, test harness, example adapter and) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 734.8000000000002 Tm (certification test.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 720.5000000000002 Tm (- API-007: meter usage by client, tenant, provider and endpoint.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 706.2000000000003 Tm (- API-008: translate provider failures into stable Altegro error codes while protecting) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 693.9000000000003 Tm (original diagnostics.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 679.6000000000004 Tm (- API-009: add controlled API-key creation and rotation if capacity permits.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 661.3000000000004 Tm (8. Security, privacy and operations) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 638.3000000000004 Tm (- Meet OWASP ASVS 5.0 Level 2 for the web/API core.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 624.0000000000005 Tm (- Apply the NIST SSDF development controls and maintain the implementation threat model.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 609.7000000000005 Tm (- Require HTTPS/TLS externally and encryption at rest.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 595.4000000000005 Tm (- Store secrets in an approved Secret Manager and apply automatic credential rotation.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 581.1000000000006 Tm (- Add dependency, secret, SAST and container scans as release gates.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 566.8000000000006 Tm (- Produce an SBOM and signed release artifact for every release.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 552.5000000000007 Tm (- Complete incident, credential-revocation, restore and integration-failure runbooks.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 538.2000000000007 Tm (- Define retention, export, deletion, legal-hold and data-right rules for every data) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 525.9000000000008 Tm (class.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 511.6000000000008 Tm (- Deploy in an approved EU cloud region with documented subprocessors.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 497.3000000000008 Tm (- Complete an external security review and penetration test before a customer pilot.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 479.0000000000008 Tm (Required organizational decisions) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 449.0000000000008 Tm (- Name the Product Owner and technical lead.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 434.7000000000008 Tm (- Select the first real AutoXing and CenoBots models.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 420.4000000000008 Tm (- Select the initial 10-15 robots and five pilot customers.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 406.10000000000076 Tm (- Select the first CRM and service-system adapters.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 391.80000000000075 Tm (- Approve the formal role/permission matrix.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 377.50000000000074 Tm (- Define required Passport documents and certificates.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 363.2000000000007 Tm (- Select cloud provider, EU region and OIDC Identity Provider.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 348.9000000000007 Tm (- Confirm Git/CI, container hosting and staging ownership.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 334.6000000000007 Tm (- Confirm OEM credentials, sandbox access, rate limits and data rights.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 320.3000000000007 Tm (- Assign pilot support, Incident Commander, Data Owner and liability responsibilities.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 302.0000000000007 Tm (Recommended implementation sequence) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 272.0000000000007 Tm (1. Freeze the canonical database/API schemas and approved role matrix.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 257.70000000000067 Tm (2. Introduce PostgreSQL, migrations, durable audit and Transactional Outbox.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 243.40000000000066 Tm (3. Introduce OIDC, MFA, memberships and service accounts.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 229.10000000000065 Tm (4. Move documents and certificates to S3-compatible Object Storage.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 214.80000000000064 Tm (5. Complete Registry administration, duplicate handling and Passport rules.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 200.50000000000063 Tm (6. Harden AutoXing with persistent jobs, contract tests, rate limits and WebSocket events.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 186.2000000000006 Tm (7. Connect and validate live CenoBots read-only synchronization.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 171.9000000000006 Tm (8. Implement CRM and external service-system reference adapters.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 157.6000000000006 Tm (9. Publish OpenAPI/AsyncAPI, API client controls, signed webhooks and the Adapter SDK.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 143.30000000000058 Tm (10. Deploy staging, run load/restore/isolation tests and complete the external security) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 131.00000000000057 Tm (review.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 112.70000000000057 Tm (Phase 1 pilot acceptance still to prove) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 82.70000000000057 Tm (- Register 30-50 real robots from AutoXing and CenoBots.) Tj ET
+BT /F1 7.5 Tf 0.47 0.38 0.43 rg 1 0 0 1 48 30 Tm (Altegro Phase 1 Status Report  |  4 / 5) Tj ET
+endstream
+endobj
+12 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 11 0 R >>
+endobj
+13 0 obj
+<< /Length 2552 >>
+stream
+q 0.914 0.184 0.51 rg 0 816 595 26 re f Q
+BT /F2 8 Tf 1 1 1 rg 1 0 0 1 48 825 Tm (ALTEGRO  |  PHASE 1 STATUS) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 790 Tm (- Ensure no active robot lacks an Altegro Robot ID or tenant assignment.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 775.7 Tm (- Achieve at least 80 percent complete Passports across the proof fleet.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 761.4000000000001 Tm (- Synchronize CRM Customer ID and Altegro tenant without manual duplicates.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 747.1000000000001 Tm (- Link at least 20 real external service cases to Robot Passports.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 732.8000000000002 Tm (- Demonstrate comparable normalized events from two OEM sources.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 718.5000000000002 Tm (- Prove tenant isolation with automated negative tests.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 704.2000000000003 Tm (- Demonstrate restore, tenant export and credential revocation.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 689.9000000000003 Tm (- Complete an external security review with no unresolved critical findings.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 675.6000000000004 Tm (- Onboard an already supported robot in under four engineering hours.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 661.3000000000004 Tm (- Certify a third mock OEM using only the Adapter SDK, without changing the Altegro core.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 643.0000000000005 Tm (Current conclusion) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 613.0000000000005 Tm (The current implementation is a strong functional prototype and demonstrates the correct product) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 600.5000000000005 Tm (direction. It must not yet be treated as a production Phase 1 release because persistence,) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 588.0000000000005 Tm (identity, external adapters, durable audit/event processing, API governance, operational) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 575.5000000000005 Tm (recovery and security assurance are incomplete. The immediate next milestone should be a) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 563.0000000000005 Tm (PostgreSQL- and OIDC-backed staging thin slice using real pilot organizations, sites and robots.) Tj ET
+BT /F1 7.5 Tf 0.47 0.38 0.43 rg 1 0 0 1 48 30 Tm (Altegro Phase 1 Status Report  |  5 / 5) Tj ET
+endstream
+endobj
+14 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 13 0 R >>
+endobj
+xref
+0 15
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000148 00000 n 
+0000000245 00000 n 
+0000000347 00000 n 
+0000006233 00000 n 
+0000006369 00000 n 
+0000012746 00000 n 
+0000012882 00000 n 
+0000019704 00000 n 
+0000019841 00000 n 
+0000026373 00000 n 
+0000026511 00000 n 
+0000029116 00000 n 
+trailer
+<< /Size 15 /Root 1 0 R >>
+startxref
+29254
+%%EOF
