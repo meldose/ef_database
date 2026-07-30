@@ -3,8 +3,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const sourcePath = path.join(__dirname, 'Altegro_Phase1_Status_Report_2026-07-30.md');
-const outputPath = path.join(__dirname, 'Altegro_Phase1_Status_Report_2026-07-30.pdf');
+const sourcePath = process.argv[2] ? path.resolve(process.argv[2]) : path.join(__dirname, 'Altegro_Phase1_Status_Report_2026-07-30.md');
+const outputPath = process.argv[3] ? path.resolve(process.argv[3]) : path.join(__dirname, 'Altegro_Phase1_Status_Report_2026-07-30.pdf');
 const markdown = fs.readFileSync(sourcePath, 'utf8');
 
 function cleanInline(value) {

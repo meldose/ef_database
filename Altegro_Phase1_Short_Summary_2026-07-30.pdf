@@ -1,0 +1,101 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 5363 >>
+stream
+q 0.914 0.184 0.51 rg 0 816 595 26 re f Q
+BT /F2 8 Tf 1 1 1 rg 1 0 0 1 48 825 Tm (ALTEGRO  |  PHASE 1 STATUS) Tj ET
+BT /F2 22 Tf 0.914 0.184 0.51 rg 1 0 0 1 48 790 Tm (Altegro Phase 1 - Simple Status Summary) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 747 Tm (Date: 30 July 2026) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 727.5 Tm (Where we are now) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 697.5 Tm (The website is a working prototype. It can register and display robots, synchronize read-only) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 685 Tm (AutoXing data, show Robot Passports, create events and incidents, track service cases, store) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 672.5 Tm (lifecycle evidence, show compatibility information and export data.) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 653 Tm (It is not ready for real customers yet because the data is stored only in memory. Restarting) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 640.5 Tm (Node removes newly created data and accounts.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 621 Tm (What is already working) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 591 Tm (- Every robot receives a unique Altegro Robot ID.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 576.7 Tm (- Users can only see robots allowed for their account.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 562.4000000000001 Tm (- AutoXing robots can be synchronized in read-only mode.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 548.1000000000001 Tm (- Robot status, battery, errors, tasks, maps and safety states can be displayed when) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 535.8000000000002 Tm (available.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 521.5000000000002 Tm (- Robot Passports contain events, documents, certificates, deployments and service) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 509.2000000000002 Tm (history.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 494.9000000000002 Tm (- Incidents can become service cases and completed service work is added to the Passport.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 480.6000000000002 Tm (- Robot, Passport and tenant information can be exported.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 466.3000000000002 Tm (- Robot movement and other remote commands are blocked.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 452.00000000000017 Tm (- Automated prototype tests pass.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 433.70000000000016 Tm (What is still missing) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 403.70000000000016 Tm (- PostgreSQL so information survives server restarts.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 389.40000000000015 Tm (- OIDC/SSO login, MFA and real user permissions.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 375.10000000000014 Tm (- Secure Object Storage for documents and certificates.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 360.8000000000001 Tm (- Durable audit records, Transactional Outbox and background jobs.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 346.5000000000001 Tm (- AutoXing WebSocket events and production retry/rate-limit handling.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 332.2000000000001 Tm (- Live CenoBots synchronization.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 317.9000000000001 Tm (- A real CRM connection for customer information.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 303.6000000000001 Tm (- A real service/ticket-system connection.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 289.30000000000007 Tm (- OpenAPI documentation, API scopes, quotas and signed webhooks.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 275.00000000000006 Tm (- EU staging deployment, backups, monitoring and restore tests.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 260.70000000000005 Tm (- Security scans and an external penetration test.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 242.40000000000003 Tm (What we should do next) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 212.40000000000003 Tm (1. Add PostgreSQL and database migrations.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 198.10000000000002 Tm (2. Add OIDC login and database-backed permissions.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 183.8 Tm (3. Move files and certificates to secure Object Storage.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 169.5 Tm (4. Finish AutoXing and connect CenoBots, CRM and service adapters.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 155.2 Tm (5. Deploy to EU staging and complete backup, isolation and security tests.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 136.89999999999998 Tm (When Phase 1 is complete) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 106.89999999999998 Tm (- 30-50 real robots from AutoXing and CenoBots are registered.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 92.59999999999998 Tm (- At least 80 percent of the robots have complete Passports.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 78.29999999999998 Tm (- CRM synchronization works without duplicate customers.) Tj ET
+BT /F1 7.5 Tf 0.47 0.38 0.43 rg 1 0 0 1 48 30 Tm (Altegro Phase 1 Status Report  |  1 / 2) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 1189 >>
+stream
+q 0.914 0.184 0.51 rg 0 816 595 26 re f Q
+BT /F2 8 Tf 1 1 1 rg 1 0 0 1 48 825 Tm (ALTEGRO  |  PHASE 1 STATUS) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 790 Tm (- At least 20 real service cases are connected to Robot Passports.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 775.7 Tm (- Tenant separation, export, credential revocation and backup restoration are proven.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 761.4000000000001 Tm (- An external security review has no unresolved critical findings.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 743.1000000000001 Tm (Simple conclusion) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 713.1000000000001 Tm (The website demonstrates the correct idea and main workflows. The next step is not more visual) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 700.6000000000001 Tm (design. The next step is persistent storage, real authentication and secure external) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 688.1000000000001 Tm (integrations so the prototype can become a customer-ready Phase 1 system.) Tj ET
+BT /F1 7.5 Tf 0.47 0.38 0.43 rg 1 0 0 1 48 30 Tm (Altegro Phase 1 Status Report  |  2 / 2) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000224 00000 n 
+0000000326 00000 n 
+0000005741 00000 n 
+0000005877 00000 n 
+0000007118 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+7254
+%%EOF
