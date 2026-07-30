@@ -1,4 +1,4 @@
-:root { --ink:#17222d; --muted:#72808c; --line:#e5e9ed; --paper:#fff; --bg:#f5f7f8; --blue:#1d6f82; --blue-dark:#164e5e; --green:#20835f; --green-bg:#e7f5ee; --amber:#a66d16; --amber-bg:#fff4dc; --red:#ac4f4f; --shadow:0 12px 32px rgba(27,45,57,.06); }
+:root { --ink:#171116; --muted:#786a73; --line:#eadde5; --paper:#fff; --bg:#fff7fb; --blue:#e92f82; --blue-dark:#181116; --pink-dark:#a91254; --pink-soft:#fff0f7; --pink-glow:#ffd6e8; --green:#167452; --green-bg:#e7f5ee; --amber:#99600f; --amber-bg:#fff3d8; --red:#a83f50; --shadow:0 14px 38px rgba(55,20,39,.08); }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 button, input, select { font:inherit; } button { cursor:pointer; }
@@ -66,3 +66,35 @@ textarea:focus { border-color:#78aebb; box-shadow:0 0 0 3px #e3f1f3; }
 @media (max-width:850px) { .login-screen { grid-template-columns:minmax(320px,480px); } .login-side { display:none; } }
 @media (max-width:700px) { .login-screen { padding:20px 15px; } .login-card { padding:28px 22px; } .logged-in-user { display:none; } }
 @media (max-width:700px) { .passport-section-grid { grid-template-columns:1fr; } .record-row { align-items:flex-start; flex-direction:column; } }
+
+/* Pink and black Altegro theme */
+.topbar { background:#151014; border-bottom-color:#33232d; box-shadow:0 10px 30px rgba(21,16,20,.12); }
+.brand-mark { background:linear-gradient(145deg,#ff5aa1,var(--blue)); box-shadow:0 8px 22px rgba(233,47,130,.28); }
+.topbar .brand { color:white; }
+.topbar .brand small, .topbar .logged-in-user { color:#d8b7c7; }
+.topbar .icon-button { color:#d8b7c7; }
+.topbar .icon-button:hover, .topbar .logout-button { color:#ff79b4; }
+.topbar .logout-button:hover { color:white; }
+.env-badge { color:#ffd8e9; background:#30202a; border:1px solid #503043; }
+.env-badge i { background:#ff5aa1; box-shadow:0 0 0 3px rgba(255,90,161,.14); }
+select:focus, input:focus, textarea:focus { border-color:#ef6aa6; box-shadow:0 0 0 3px #ffe1ee; }
+.button.primary { background:linear-gradient(135deg,#ff4f99,var(--blue)); box-shadow:0 8px 18px rgba(233,47,130,.18); }
+.button.primary:hover { background:linear-gradient(135deg,var(--blue),var(--pink-dark)); }
+.button.secondary { color:var(--ink); border-color:#e5c8d7; }
+.button.secondary:hover { border-color:var(--blue); color:var(--pink-dark); background:var(--pink-soft); }
+.metric-card { border-top:2px solid var(--pink-glow); }
+.count-pill { color:var(--pink-dark); background:var(--pink-soft); }
+.empty-icon { background:var(--pink-soft); }
+.progress { background:#f3e5ec; }
+.entry { border-left-color:#f3a7c9; }
+.table-wrap th { background:#fff9fc; }
+tbody tr:hover { background:#fffafd; }
+.demo-accounts button { color:var(--ink); background:#fffafd; }
+.demo-accounts button:hover { color:var(--pink-dark); border-color:#ee8ab6; background:var(--pink-soft); }
+.login-screen { background:radial-gradient(circle at 15% 15%,#ffdceb 0,transparent 38%),radial-gradient(circle at 85% 80%,#f6c3da 0,transparent 32%),var(--bg); }
+.login-card { box-shadow:0 22px 60px rgba(55,20,39,.13); }
+.login-side { max-width:470px; color:white; background:#171116; border:1px solid #34232d; border-radius:24px; padding:48px; box-shadow:0 30px 80px rgba(35,13,26,.24); position:relative; overflow:hidden; }
+.login-side:after { content:""; position:absolute; width:220px; height:220px; border-radius:50%; background:rgba(233,47,130,.2); filter:blur(8px); right:-90px; bottom:-110px; }
+.login-side h2, .login-side > p, .login-side-note { position:relative; z-index:1; }
+.login-side > p:not(.eyebrow) { color:#d5bdc9; }
+.login-side-note span { border-color:#653047; color:#ffd7e8; background:#2b1b24; }
