@@ -10,6 +10,7 @@ const { promisify } = require('node:util');
 const PORT = Number(process.env.PORT || 3000);
 const startedAt = new Date().toISOString();
 const MAX_EVENT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
+const DEFAULT_ACCOUNT_PASSWORD = process.env.DEFAULT_ACCOUNT_PASSWORD || 'efrobotics';
 
 const ids = () => crypto.randomUUID();
 const timestamp = () => new Date().toISOString();
@@ -495,7 +496,7 @@ async function handle(req, res) {
   if (req.method === 'POST' && path === '/api/v1/auth/login') {
     const login = await readBody(req);
     const match = Object.entries(demoUsers).find(([, user]) => user.email.toLowerCase() === String(login.email || '').toLowerCase());
-    if (!match || String(login.password || '') !== (match[1].demoPassword || 'demo')) throw httpError(401, 'Invalid email or password');
+    if (!match || String(login.password || '') !== (match[1].demoPassword || DEFAULT_ACCOUNT_PASSWORD)) throw httpError(401, 'Invalid email or password');
     const [token, user] = match;
     return send(res, 200, authenticatedSession(token, user));
   }

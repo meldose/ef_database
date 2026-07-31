@@ -19,7 +19,7 @@ The server listens on `http://localhost:3000`.
 
 Open `http://127.0.0.1:3000/` in a browser for the included operations frontend. It provides a login page, robot registry table, search and status filters, Passport inspection, adapter sync buttons, event and capability panels, logged-in user display, logout, a robot-registration form, and a robot-specific event form.
 
-The frontend starts with a login page. Prototype accounts use password `demo`:
+The frontend starts with a login page. Standard prototype accounts use password `efrobotics`:
 
 - `admin@demo.altegro.local` — Platform Admin
 - `technician@demo.altegro.local` — Technician

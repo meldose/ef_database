@@ -27,7 +27,9 @@ async function loginWithPassword(email, password) {
     let result = await request('/health', { headers: {} });
     assert.equal(result.status, 200);
 
-    let loginResult = await loginWithPassword('admin@demo.altegro.local', 'demo');
+    const oldPasswordLogin = await loginWithPassword('admin@demo.altegro.local', 'demo');
+    assert.equal(oldPasswordLogin.status, 401);
+    let loginResult = await loginWithPassword('admin@demo.altegro.local', 'efrobotics');
     let loginBody = loginResult.body;
     assert.equal(loginResult.status, 200);
     assert.equal(loginBody.user.role, 'platform_admin');
@@ -107,7 +109,7 @@ async function loginWithPassword(email, password) {
     result = await request(`/api/v1/robots/${robotId}/commands`, { method: 'POST', body: JSON.stringify({ command: 'move' }) });
     assert.equal(result.status, 403);
 
-    loginResult = await loginWithPassword('owner@demo.altegro.local', 'demo');
+    loginResult = await loginWithPassword('owner@demo.altegro.local', 'efrobotics');
     assert.equal(loginResult.status, 200);
     result = await requestAs(loginResult.body.token, '/api/v1/robots', { headers: { 'x-tenant-id': 'tenant-other' } });
     assert.equal(result.status, 200);
@@ -189,7 +191,7 @@ async function loginWithPassword(email, password) {
     assert.equal(exportResponse.status, 200);
     assert.equal((await exportResponse.json()).passport.robot.id, robotId);
 
-    loginResult = await loginWithPassword('auditor@demo.altegro.local', 'demo');
+    loginResult = await loginWithPassword('auditor@demo.altegro.local', 'efrobotics');
     assert.equal(loginResult.status, 200);
     loginBody = loginResult.body;
     assert.equal(loginBody.user.role, 'auditor');
