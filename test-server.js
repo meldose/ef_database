@@ -1,10 +1,5 @@
 'use strict';
 
-process.env.PHONE_OTP_ENABLED = 'true';
-process.env.OTP_PROVIDER = 'test';
-process.env.OTP_TEST_CODE = '123456';
-process.env.OTP_RESEND_COOLDOWN_SECONDS = '0';
-
 const assert = require('node:assert/strict');
 const { server, state } = require('./server');
 
@@ -22,20 +17,8 @@ async function requestAs(token, path, options = {}) {
   return request(path, { ...options, headers: { authorization: `Bearer ${token}`, ...(options.headers || {}) } });
 }
 
-async function loginWithOtp(email, password, exerciseControls = false) {
-  let response = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
-  const challenge = await response.json();
-  assert.equal(response.status, 200);
-  assert.equal(challenge.otpRequired, true);
-  assert.ok(challenge.challengeId);
-  assert.equal(challenge.token, undefined);
-  if (exerciseControls) {
-    response = await fetch(`http://localhost:${port}/api/v1/auth/otp/resend`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId: challenge.challengeId }) });
-    assert.equal(response.status, 200);
-    response = await fetch(`http://localhost:${port}/api/v1/auth/otp/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId: challenge.challengeId, code: '000000' }) });
-    assert.equal(response.status, 401);
-  }
-  response = await fetch(`http://localhost:${port}/api/v1/auth/otp/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId: challenge.challengeId, code: '123456' }) });
+async function loginWithPassword(email, password) {
+  const response = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
   return { status: response.status, body: await response.json() };
 }
 
@@ -44,12 +27,15 @@ async function loginWithOtp(email, password, exerciseControls = false) {
     let result = await request('/health', { headers: {} });
     assert.equal(result.status, 200);
 
-    let loginResult = await loginWithOtp('admin@demo.altegro.local', 'demo', true);
+    let loginResult = await loginWithPassword('admin@demo.altegro.local', 'demo');
     let loginBody = loginResult.body;
     assert.equal(loginResult.status, 200);
     assert.equal(loginBody.user.role, 'platform_admin');
     assert.notEqual(loginBody.token, 'demo-platform-admin');
     defaultToken = loginBody.token;
+    result = await request('/api/v1/auth/session');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.user.role, 'platform_admin');
     result = await requestAs('demo-platform-admin', '/api/v1/robots');
     assert.equal(result.status, 401);
     result = await request('/api/v1/demo/tokens');
@@ -61,7 +47,7 @@ async function loginWithOtp(email, password, exerciseControls = false) {
     const robotId = result.body.data[0].id;
     const cenobotsRobotId = result.body.data[1].id;
 
-    loginResult = await loginWithOtp('robot-ax-001@demo.altegro.local', 'AX-robot-001-demo');
+    loginResult = await loginWithPassword('robot-ax-001@demo.altegro.local', 'AX-robot-001-demo');
     loginBody = loginResult.body;
     assert.equal(loginResult.status, 200);
     assert.equal(loginBody.user.role, 'robot_user');
@@ -121,7 +107,7 @@ async function loginWithOtp(email, password, exerciseControls = false) {
     result = await request(`/api/v1/robots/${robotId}/commands`, { method: 'POST', body: JSON.stringify({ command: 'move' }) });
     assert.equal(result.status, 403);
 
-    loginResult = await loginWithOtp('owner@demo.altegro.local', 'demo');
+    loginResult = await loginWithPassword('owner@demo.altegro.local', 'demo');
     assert.equal(loginResult.status, 200);
     result = await requestAs(loginResult.body.token, '/api/v1/robots', { headers: { 'x-tenant-id': 'tenant-other' } });
     assert.equal(result.status, 200);
@@ -136,7 +122,7 @@ async function loginWithOtp(email, password, exerciseControls = false) {
     assert.equal(dynamicAccount.created, false);
     assert.match(dynamicAccount.email, /@demo\.altegro\.local$/);
 
-    loginResult = await loginWithOtp(dynamicAccount.email, dynamicAccount.password);
+    loginResult = await loginWithPassword(dynamicAccount.email, dynamicAccount.password);
     assert.equal(loginResult.status, 200);
     result = await requestAs(loginResult.body.token, '/api/v1/robots');
     assert.equal(result.status, 200);
@@ -147,7 +133,7 @@ async function loginWithOtp(email, password, exerciseControls = false) {
     assert.equal(result.status, 201);
     assert.equal(result.body.account.username, 'manual-robot-001@demo.altegro.local');
 
-    loginResult = await loginWithOtp('manual-robot-001@demo.altegro.local', 'Manual-robot-001');
+    loginResult = await loginWithPassword('manual-robot-001@demo.altegro.local', 'Manual-robot-001');
     assert.equal(loginResult.status, 200);
     result = await requestAs(loginResult.body.token, '/api/v1/robots');
     assert.equal(result.status, 200);
@@ -203,7 +189,7 @@ async function loginWithOtp(email, password, exerciseControls = false) {
     assert.equal(exportResponse.status, 200);
     assert.equal((await exportResponse.json()).passport.robot.id, robotId);
 
-    loginResult = await loginWithOtp('auditor@demo.altegro.local', 'demo');
+    loginResult = await loginWithPassword('auditor@demo.altegro.local', 'demo');
     assert.equal(loginResult.status, 200);
     loginBody = loginResult.body;
     assert.equal(loginBody.user.role, 'auditor');

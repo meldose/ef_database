@@ -1,6 +1,6 @@
 'use strict';
 
-const state = { token: null, user: null, otpChallenge: null, robots: [], serviceCases: [], compatibility: [], summary: null, selectedRobotId: null };
+const state = { token: null, user: null, robots: [], serviceCases: [], compatibility: [], summary: null, selectedRobotId: null };
 const $ = (selector) => document.querySelector(selector);
 const api = async (path, options = {}) => {
   const response = await fetch(path, { ...options, headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -24,11 +24,7 @@ function toast(message, isError = false) {
 }
 
 function showLogin() {
-  $('#loginScreen').classList.remove('hidden'); $('#appShell').classList.add('hidden'); $('#loginForm').classList.remove('hidden'); $('#otpForm').classList.add('hidden'); $('#loginPassword').value = ''; $('#otpCode').value = ''; state.otpChallenge = null;
-}
-
-function showOtpChallenge(payload) {
-  state.otpChallenge = payload; $('#loginForm').classList.add('hidden'); $('#otpForm').classList.remove('hidden'); $('#otpDestination').textContent = `Enter the one-time code sent to ${payload.destination}. It expires in ${Math.ceil(payload.expiresInSeconds / 60)} minutes.`; $('#otpError').textContent = ''; $('#otpCode').value = ''; $('#otpCode').focus();
+  $('#loginScreen').classList.remove('hidden'); $('#appShell').classList.add('hidden'); $('#loginPassword').value = '';
 }
 
 function showApp() {
@@ -54,33 +50,33 @@ async function login(email, password) {
   const payload = await response.json();
   if (!response.ok) throw new Error(payload.error?.message || 'Unable to sign in');
   $('#loginPassword').value = '';
-  if (payload.otpRequired) return showOtpChallenge(payload);
   await completeLogin(payload);
 }
 
 async function completeLogin(payload) {
-  state.token = payload.token; state.user = payload.user; state.otpChallenge = null; showApp(); await refreshAll();
+  state.token = payload.token; state.user = payload.user;
+  sessionStorage.setItem('altegroSession', JSON.stringify({ token:state.token, user:state.user }));
+  showApp(); await refreshAll();
 }
 
-async function verifyOtp(code) {
-  if (!state.otpChallenge) throw new Error('Start the login again');
-  const response = await fetch('/api/v1/auth/otp/verify', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ challengeId:state.otpChallenge.challengeId, code }) });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error?.message || 'OTP verification failed');
-  await completeLogin(payload);
-}
-
-async function resendOtp() {
-  if (!state.otpChallenge) throw new Error('Start the login again');
-  const response = await fetch('/api/v1/auth/otp/resend', { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ challengeId:state.otpChallenge.challengeId }) });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error?.message || 'Could not resend the OTP');
-  showOtpChallenge(payload); toast('A new one-time code was sent');
+async function restoreSession() {
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('altegroSession') || 'null');
+    if (!saved?.token || !saved?.user) return false;
+    const response = await fetch('/api/v1/auth/session', { headers:{ Authorization:`Bearer ${saved.token}` } });
+    if (!response.ok) throw new Error('Saved session is no longer valid');
+    const payload = await response.json();
+    state.token = saved.token; state.user = payload.user; showApp(); await refreshAll();
+    return true;
+  } catch {
+    sessionStorage.removeItem('altegroSession'); state.token = null; state.user = null;
+    return false;
+  }
 }
 
 function logout() {
   const token = state.token; if (token) fetch('/api/v1/auth/logout', { method:'POST', headers:{ Authorization:`Bearer ${token}` } }).catch(() => {});
-  sessionStorage.removeItem('altegroSession'); state.token = null; state.user = null; state.otpChallenge = null; state.robots = []; state.selectedRobotId = null; showLogin();
+  sessionStorage.removeItem('altegroSession'); state.token = null; state.user = null; state.robots = []; state.selectedRobotId = null; showLogin();
 }
 
 async function loadRobots() {
@@ -230,9 +226,6 @@ function bindUi() {
   $('#exportTenant').addEventListener('click', () => download('/api/v1/exports/tenant.json', 'altegro-tenant-export.json').catch((error) => toast(error.message, true)));
   $('#logoutButton').addEventListener('click', logout);
   $('#loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const error = $('#loginError'); error.textContent = ''; try { await login($('#loginEmail').value.trim(), $('#loginPassword').value); } catch (loginError) { error.textContent = loginError.message; } });
-  $('#otpForm').addEventListener('submit', async (event) => { event.preventDefault(); const error = $('#otpError'); error.textContent = ''; try { await verifyOtp($('#otpCode').value.trim()); } catch (otpError) { error.textContent = otpError.message; $('#otpCode').select(); } });
-  $('#resendOtpButton').addEventListener('click', async () => { const error = $('#otpError'); error.textContent = ''; try { await resendOtp(); } catch (otpError) { error.textContent = otpError.message; } });
-  $('#backToLoginButton').addEventListener('click', showLogin);
   const dialog = $('#robotDialog'); const existingRobotSelect = $('#existingRobotId'); const serialInput = $('#serialNumber'); const modelSelect = $('#modelId'); const robotUsername = $('#robotUsername'); const robotPassword = $('#robotPassword'); const accountFields = $('#robotAccountFields'); const registerButton = $('#registerButton'); const serialHint = $('#serialNumberHint');
   const setNewRobotFields = (isNew) => { const manualCredentials = isNew && state.user.role !== 'robot_user'; serialInput.readOnly = !isNew; robotUsername.disabled = !manualCredentials; robotPassword.disabled = !manualCredentials; robotUsername.required = manualCredentials; robotPassword.required = manualCredentials; accountFields.classList.toggle('hidden', state.user.role === 'robot_user'); if (isNew) { serialHint.textContent = state.user.role === 'robot_user' ? 'A separate account will be generated automatically.' : 'Enter a new unique serial number.'; registerButton.textContent = 'Register robot'; } else { serialHint.textContent = 'Existing synchronized robot selected.'; registerButton.textContent = 'Open robot'; } };
   $('#newRobotButton').addEventListener('click', () => { existingRobotSelect.value = ''; serialInput.value = ''; robotUsername.value = ''; robotPassword.value = ''; setNewRobotFields(true); dialog.showModal(); });
@@ -244,4 +237,4 @@ function bindUi() {
   $('#lifecycleForm').addEventListener('submit', async (event) => { if (event.submitter?.value === 'cancel') return; event.preventDefault(); try { const recordType = $('#lifecycleType').value; if (recordType === 'certificate' && !$('#lifecycleValidUntil').value) throw new Error('Certificate expiry date is required'); if (recordType === 'deployment' && !$('#lifecycleVersion').value.trim()) throw new Error('Deployment version is required'); const attachment = recordType === 'document' ? await readAttachment($('#lifecycleAttachment').files[0]) : null; await api(`/api/v1/robots/${$('#lifecycleDialog').dataset.robotId}/lifecycle-records`, { method:'POST', body:JSON.stringify({ recordType, title:$('#lifecycleTitle').value.trim(), description:$('#lifecycleDescription').value.trim(), version:$('#lifecycleVersion').value.trim() || undefined, status:$('#lifecycleStatus').value || undefined, issuer:$('#lifecycleIssuer').value.trim() || undefined, validUntil:$('#lifecycleValidUntil').value ? new Date($('#lifecycleValidUntil').value).toISOString() : undefined, attachment }) }); $('#lifecycleDialog').close(); toast(`${recordType} added to the Robot Passport`); await Promise.all([loadPassport(state.selectedRobotId), loadOperationsSummary()]); } catch (error) { toast(error.message, true); } });
 }
 
-(async function init() { sessionStorage.removeItem('altegroSession'); bindUi(); showLogin(); })();
+(async function init() { bindUi(); if (!await restoreSession()) showLogin(); })();

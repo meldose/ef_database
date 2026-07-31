@@ -23,14 +23,6 @@ const autoXingLiveEnabled = () => ['1', 'true', 'yes'].includes(String(process.e
 const autoXingPollIntervalMs = () => Math.max(0, Number(process.env.AUTOXING_POLL_INTERVAL_MS || 300000));
 const parseJsonEnv = (name, fallback = {}) => { try { return process.env[name] ? JSON.parse(process.env[name]) : fallback; } catch { return fallback; } };
 const autoXingMappingRequired = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_REQUIRE_MAPPING || '').toLowerCase());
-const phoneOtpEnabled = () => !['0', 'false', 'no'].includes(String(process.env.PHONE_OTP_ENABLED || 'true').toLowerCase());
-const otpProvider = () => String(process.env.OTP_PROVIDER || 'console').toLowerCase();
-const otpTtlMs = () => Math.max(60000, Number(process.env.OTP_TTL_SECONDS || 300) * 1000);
-const otpResendCooldownMs = () => Math.max(0, Number(process.env.OTP_RESEND_COOLDOWN_SECONDS || 60) * 1000);
-const OTP_MAX_ATTEMPTS = Math.max(3, Number(process.env.OTP_MAX_ATTEMPTS || 5));
-const otpHashSecret = process.env.OTP_HASH_SECRET || crypto.randomBytes(32).toString('hex');
-const otpChallenges = new Map();
-const otpSendHistory = new Map();
 const authenticatedSessions = new Map();
 
 const state = {
@@ -80,112 +72,9 @@ function publicUser(user) {
 }
 
 function authenticatedSession(token, user) {
-  if (!phoneOtpEnabled()) return { token, user: publicUser(user) };
   const sessionToken = crypto.randomBytes(32).toString('base64url');
-  authenticatedSessions.set(sessionToken, { userToken: token, expiresAt: Date.now() + Math.max(60000, Number(process.env.OTP_SESSION_TTL_SECONDS || 900) * 1000) });
+  authenticatedSessions.set(sessionToken, { userToken: token, expiresAt: Date.now() + Math.max(60000, Number(process.env.AUTH_SESSION_TTL_SECONDS || 28800) * 1000) });
   return { token: sessionToken, user: publicUser(user) };
-}
-
-function phoneForUser(user) {
-  const phoneMap = parseJsonEnv('OTP_PHONE_MAP');
-  return String(phoneMap[user.email] || phoneMap[user.id] || process.env.OTP_DEFAULT_PHONE || '').trim();
-}
-
-function maskedDestination(phone) {
-  if (!phone) return 'the server terminal';
-  const normalized = String(phone).replace(/\s+/g, '');
-  if (normalized.length < 6) return 'your verified phone';
-  return `${normalized.slice(0, 3)}${'•'.repeat(Math.min(7, normalized.length - 5))}${normalized.slice(-2)}`;
-}
-
-function otpDigest(challengeId, code) {
-  return crypto.createHmac('sha256', otpHashSecret).update(`${challengeId}:${code}`).digest();
-}
-
-function cleanupOtpChallenges() {
-  const now = Date.now();
-  for (const [id, challenge] of otpChallenges) if (challenge.expiresAt <= now) otpChallenges.delete(id);
-}
-
-function enforceOtpSendRate(user) {
-  const now = Date.now(); const windowStart = now - 10 * 60 * 1000;
-  const recent = (otpSendHistory.get(user.id) || []).filter((sentAt) => sentAt > windowStart);
-  if (recent.length >= 5) throw httpError(429, 'Too many OTP requests. Try again later.');
-  recent.push(now); otpSendHistory.set(user.id, recent);
-}
-
-function twilioConfiguration() {
-  const configuration = { accountSid: process.env.TWILIO_ACCOUNT_SID || '', authToken: process.env.TWILIO_AUTH_TOKEN || '', serviceSid: process.env.TWILIO_VERIFY_SERVICE_SID || '' };
-  const missing = Object.entries(configuration).filter(([, value]) => !value).map(([key]) => key);
-  if (missing.length) throw httpError(503, `Twilio Verify is not configured; missing ${missing.join(', ')}`);
-  return configuration;
-}
-
-async function twilioVerifyRequest(endpoint, values) {
-  const configuration = twilioConfiguration();
-  const response = await fetch(`https://verify.twilio.com/v2/Services/${encodeURIComponent(configuration.serviceSid)}/${endpoint}`, { method: 'POST', headers: { authorization: `Basic ${Buffer.from(`${configuration.accountSid}:${configuration.authToken}`).toString('base64')}`, 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' }, body: new URLSearchParams(values).toString() });
-  let payload = {}; try { payload = await response.json(); } catch {}
-  return { response, payload };
-}
-
-async function deliverOtp(challenge, code) {
-  const provider = otpProvider();
-  if (provider === 'twilio') {
-    if (!/^\+[1-9]\d{7,14}$/.test(challenge.phone)) throw httpError(503, 'A valid E.164 phone number is required for SMS OTP');
-    const { response } = await twilioVerifyRequest('Verifications', { To: challenge.phone, Channel: 'sms' });
-    if (!response.ok) throw httpError(503, 'The SMS provider could not send the OTP', { provider: 'twilio', status: response.status });
-    return;
-  }
-  if (!['console', 'test'].includes(provider)) throw httpError(503, `Unsupported OTP provider: ${provider}`);
-  if (provider === 'console') console.log(`[OTP] ${challenge.userEmail} ${maskedDestination(challenge.phone)} code ${code}; expires in ${Math.round(otpTtlMs() / 1000)} seconds`);
-}
-
-async function createOtpChallenge(token, user) {
-  cleanupOtpChallenges(); enforceOtpSendRate(user);
-  for (const [id, challenge] of otpChallenges) if (challenge.userId === user.id) otpChallenges.delete(id);
-  const provider = otpProvider(); const phone = phoneForUser(user);
-  if (provider === 'twilio' && !phone) throw httpError(503, `No verified phone number is configured for ${user.email}`);
-  const id = ids(); const code = provider === 'test' ? String(process.env.OTP_TEST_CODE || '123456') : String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-  const challenge = { id, token, userId: user.id, userEmail: user.email, phone, provider, codeDigest: provider === 'twilio' ? null : otpDigest(id, code), createdAt: Date.now(), sentAt: Date.now(), expiresAt: Date.now() + otpTtlMs(), attempts: 0 };
-  await deliverOtp(challenge, code); otpChallenges.set(id, challenge);
-  recordAudit(user, 'auth.otp.requested', 'user', user.id, 'success', { provider, destination: maskedDestination(phone) });
-  return { otpRequired: true, challengeId: id, destination: maskedDestination(phone), expiresInSeconds: Math.round(otpTtlMs() / 1000), resendAfterSeconds: Math.round(otpResendCooldownMs() / 1000) };
-}
-
-async function resendOtpChallenge(challengeId) {
-  cleanupOtpChallenges(); const challenge = otpChallenges.get(challengeId);
-  if (!challenge) throw httpError(400, 'OTP challenge is invalid or expired');
-  const waitMs = challenge.sentAt + otpResendCooldownMs() - Date.now();
-  if (waitMs > 0) throw httpError(429, `Wait ${Math.ceil(waitMs / 1000)} seconds before requesting another code`);
-  const user = demoUsers[challenge.token]; if (!user) throw httpError(400, 'OTP challenge is invalid');
-  enforceOtpSendRate(user);
-  const code = challenge.provider === 'test' ? String(process.env.OTP_TEST_CODE || '123456') : String(crypto.randomInt(0, 1000000)).padStart(6, '0');
-  challenge.codeDigest = challenge.provider === 'twilio' ? null : otpDigest(challenge.id, code); challenge.sentAt = Date.now(); challenge.expiresAt = Date.now() + otpTtlMs(); challenge.attempts = 0;
-  await deliverOtp(challenge, code); recordAudit(user, 'auth.otp.resent', 'user', user.id, 'success', { provider: challenge.provider });
-  return { otpRequired: true, challengeId: challenge.id, destination: maskedDestination(challenge.phone), expiresInSeconds: Math.round(otpTtlMs() / 1000), resendAfterSeconds: Math.round(otpResendCooldownMs() / 1000) };
-}
-
-async function verifyOtpChallenge(challengeId, code) {
-  cleanupOtpChallenges(); const challenge = otpChallenges.get(challengeId);
-  if (!challenge) throw httpError(401, 'OTP code is invalid or expired');
-  if (!/^\d{6,10}$/.test(String(code || ''))) throw httpError(400, 'Enter a valid OTP code');
-  challenge.attempts += 1;
-  let approved = false;
-  if (challenge.provider === 'twilio') {
-    const { response, payload } = await twilioVerifyRequest('VerificationCheck', { To: challenge.phone, Code: String(code) });
-    approved = response.ok && payload.status === 'approved';
-  } else {
-    const supplied = otpDigest(challenge.id, String(code));
-    approved = supplied.length === challenge.codeDigest.length && crypto.timingSafeEqual(supplied, challenge.codeDigest);
-  }
-  const user = demoUsers[challenge.token];
-  if (!approved || !user) {
-    if (challenge.attempts >= OTP_MAX_ATTEMPTS) otpChallenges.delete(challenge.id);
-    if (user) recordAudit(user, 'auth.otp.verify', 'user', user.id, 'rejected', { attempts: challenge.attempts });
-    throw httpError(401, challenge.attempts >= OTP_MAX_ATTEMPTS ? 'OTP challenge locked after too many attempts' : 'OTP code is invalid or expired');
-  }
-  otpChallenges.delete(challenge.id); recordAudit(user, 'auth.otp.verify', 'user', user.id, 'success', { provider: challenge.provider });
-  return authenticatedSession(challenge.token, user);
 }
 
 function seed() {
@@ -457,7 +346,6 @@ function getActor(req) {
   const header = req.headers.authorization || '';
   const token = header.startsWith('Bearer ') ? header.slice(7) : null;
   if (!token) return null;
-  if (!phoneOtpEnabled()) return demoUsers[token] || null;
   const session = authenticatedSessions.get(token);
   if (!session) return null;
   if (session.expiresAt <= Date.now()) { authenticatedSessions.delete(token); return null; }
@@ -602,31 +490,23 @@ async function handle(req, res) {
   const path = url.pathname;
   if (req.method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: 'altegro-prototype', startedAt, now: timestamp() });
   if (req.method === 'GET' && path === '/api/v1/demo/tokens') {
-    if (phoneOtpEnabled()) throw httpError(404, 'Demo bearer tokens are disabled while OTP authentication is enabled');
-    return send(res, 200, { warning: 'Demo tokens only. Do not use in production.', tokens: Object.fromEntries(Object.entries(demoUsers).map(([token, user]) => [token, { role: user.role, tenantId: user.tenantId, robotSerialNumber: actorRobotSerials(user)[0] || null, robotSerialNumbers: actorRobotSerials(user) }])) });
+    throw httpError(404, 'Static demo bearer tokens are disabled; sign in with username and password');
   }
   if (req.method === 'POST' && path === '/api/v1/auth/login') {
     const login = await readBody(req);
     const match = Object.entries(demoUsers).find(([, user]) => user.email.toLowerCase() === String(login.email || '').toLowerCase());
     if (!match || String(login.password || '') !== (match[1].demoPassword || 'demo')) throw httpError(401, 'Invalid email or password');
     const [token, user] = match;
-    if (!phoneOtpEnabled()) return send(res, 200, authenticatedSession(token, user));
-    return send(res, 200, await createOtpChallenge(token, user));
-  }
-  if (req.method === 'POST' && path === '/api/v1/auth/otp/verify') {
-    const verification = await readBody(req);
-    if (!verification.challengeId || !verification.code) throw httpError(400, 'challengeId and code are required');
-    return send(res, 200, await verifyOtpChallenge(String(verification.challengeId), String(verification.code)));
-  }
-  if (req.method === 'POST' && path === '/api/v1/auth/otp/resend') {
-    const resend = await readBody(req);
-    if (!resend.challengeId) throw httpError(400, 'challengeId is required');
-    return send(res, 200, await resendOtpChallenge(String(resend.challengeId)));
+    return send(res, 200, authenticatedSession(token, user));
   }
   if (req.method === 'POST' && path === '/api/v1/auth/logout') {
     const header = req.headers.authorization || ''; const token = header.startsWith('Bearer ') ? header.slice(7) : null;
     if (token) authenticatedSessions.delete(token);
     return send(res, 200, { loggedOut: true });
+  }
+  if (req.method === 'GET' && path === '/api/v1/auth/session') {
+    const actor = requireActor(req);
+    return send(res, 200, { user: publicUser(actor) });
   }
   if (req.method === 'GET' && serveFrontend(path, res)) return;
 
