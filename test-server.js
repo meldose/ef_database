@@ -1,14 +1,20 @@
 'use strict';
 
+process.env.PHONE_OTP_ENABLED = 'true';
+process.env.OTP_PROVIDER = 'test';
+process.env.OTP_TEST_CODE = '123456';
+process.env.OTP_RESEND_COOLDOWN_SECONDS = '0';
+
 const assert = require('node:assert/strict');
 const { server, state } = require('./server');
 
 const port = 3107;
+let defaultToken = 'demo-platform-admin';
 server.close();
 server.listen(port);
 
 async function request(path, options = {}) {
-  const response = await fetch(`http://localhost:${port}${path}`, { ...options, headers: { authorization: 'Bearer demo-platform-admin', 'content-type': 'application/json', ...(options.headers || {}) } });
+  const response = await fetch(`http://localhost:${port}${path}`, { ...options, headers: { authorization: `Bearer ${defaultToken}`, 'content-type': 'application/json', ...(options.headers || {}) } });
   return { status: response.status, body: await response.json() };
 }
 
@@ -16,16 +22,38 @@ async function requestAs(token, path, options = {}) {
   return request(path, { ...options, headers: { authorization: `Bearer ${token}`, ...(options.headers || {}) } });
 }
 
+async function loginWithOtp(email, password, exerciseControls = false) {
+  let response = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
+  const challenge = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(challenge.otpRequired, true);
+  assert.ok(challenge.challengeId);
+  assert.equal(challenge.token, undefined);
+  if (exerciseControls) {
+    response = await fetch(`http://localhost:${port}/api/v1/auth/otp/resend`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId: challenge.challengeId }) });
+    assert.equal(response.status, 200);
+    response = await fetch(`http://localhost:${port}/api/v1/auth/otp/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId: challenge.challengeId, code: '000000' }) });
+    assert.equal(response.status, 401);
+  }
+  response = await fetch(`http://localhost:${port}/api/v1/auth/otp/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ challengeId: challenge.challengeId, code: '123456' }) });
+  return { status: response.status, body: await response.json() };
+}
+
 (async () => {
   try {
     let result = await request('/health', { headers: {} });
     assert.equal(result.status, 200);
 
-    let loginResponse = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'admin@demo.altegro.local', password: 'demo' }) });
-    let loginBody = await loginResponse.json();
-    assert.equal(loginResponse.status, 200);
+    let loginResult = await loginWithOtp('admin@demo.altegro.local', 'demo', true);
+    let loginBody = loginResult.body;
+    assert.equal(loginResult.status, 200);
     assert.equal(loginBody.user.role, 'platform_admin');
-    assert.equal(loginBody.token, 'demo-platform-admin');
+    assert.notEqual(loginBody.token, 'demo-platform-admin');
+    defaultToken = loginBody.token;
+    result = await requestAs('demo-platform-admin', '/api/v1/robots');
+    assert.equal(result.status, 401);
+    result = await request('/api/v1/demo/tokens');
+    assert.equal(result.status, 404);
 
     result = await request('/api/v1/robots');
     assert.equal(result.status, 200);
@@ -33,32 +61,33 @@ async function requestAs(token, path, options = {}) {
     const robotId = result.body.data[0].id;
     const cenobotsRobotId = result.body.data[1].id;
 
-    loginResponse = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'robot-ax-001@demo.altegro.local', password: 'AX-robot-001-demo' }) });
-    loginBody = await loginResponse.json();
-    assert.equal(loginResponse.status, 200);
+    loginResult = await loginWithOtp('robot-ax-001@demo.altegro.local', 'AX-robot-001-demo');
+    loginBody = loginResult.body;
+    assert.equal(loginResult.status, 200);
     assert.equal(loginBody.user.role, 'robot_user');
     assert.equal(loginBody.user.scope.serialNumber, 'AX-DEMO-001');
+    const robotAxSessionToken = loginBody.token;
 
-    result = await requestAs('demo-robot-ax-001', '/api/v1/robots');
+    result = await requestAs(robotAxSessionToken, '/api/v1/robots');
     assert.equal(result.status, 200);
     assert.equal(result.body.count, 1);
     assert.equal(result.body.data[0].serialNumber, 'AX-DEMO-001');
 
-    result = await requestAs('demo-robot-ax-001', `/api/v1/robots/${cenobotsRobotId}/passport`);
+    result = await requestAs(robotAxSessionToken, `/api/v1/robots/${cenobotsRobotId}/passport`);
     assert.equal(result.status, 404);
 
-    result = await requestAs('demo-robot-ax-001', '/api/v1/events');
+    result = await requestAs(robotAxSessionToken, '/api/v1/events');
     assert.equal(result.status, 200);
     assert.ok(result.body.data.every((event) => event.robotId === robotId));
 
-    result = await requestAs('demo-robot-ax-001', `/api/v1/robots/${robotId}/events`, { method: 'POST', body: JSON.stringify({ title: 'Should be blocked', description: 'Robot accounts cannot create events.', eventType: 'note', sourceSystem: 'manual-test', severity: 'info', occurredAt: '2026-07-27T14:00:00.000Z' }) });
+    result = await requestAs(robotAxSessionToken, `/api/v1/robots/${robotId}/events`, { method: 'POST', body: JSON.stringify({ title: 'Should be blocked', description: 'Robot accounts cannot create events.', eventType: 'note', sourceSystem: 'manual-test', severity: 'info', occurredAt: '2026-07-27T14:00:00.000Z' }) });
     assert.equal(result.status, 403);
 
-    result = await requestAs('demo-robot-ax-001', '/api/v1/robots', { method: 'POST', body: JSON.stringify({ modelId: 'model-mock-m3', siteId: 'site-berlin', organizationId: 'org-demo', operatorOrganizationId: 'org-service', serialNumber: 'ROBOT-USER-CREATED-001' }) });
+    result = await requestAs(robotAxSessionToken, '/api/v1/robots', { method: 'POST', body: JSON.stringify({ modelId: 'model-mock-m3', siteId: 'site-berlin', organizationId: 'org-demo', operatorOrganizationId: 'org-service', serialNumber: 'ROBOT-USER-CREATED-001' }) });
     assert.equal(result.status, 201);
     assert.equal(result.body.account, null);
     assert.equal(result.body.accountReused, true);
-    result = await requestAs('demo-robot-ax-001', '/api/v1/robots');
+    result = await requestAs(robotAxSessionToken, '/api/v1/robots');
     assert.equal(result.status, 200);
     assert.equal(result.body.count, 2);
     assert.ok(result.body.data.some((robot) => robot.serialNumber === 'ROBOT-USER-CREATED-001'));
@@ -92,7 +121,9 @@ async function requestAs(token, path, options = {}) {
     result = await request(`/api/v1/robots/${robotId}/commands`, { method: 'POST', body: JSON.stringify({ command: 'move' }) });
     assert.equal(result.status, 403);
 
-    result = await request('/api/v1/robots', { headers: { authorization: 'Bearer demo-owner', 'x-tenant-id': 'tenant-other' } });
+    loginResult = await loginWithOtp('owner@demo.altegro.local', 'demo');
+    assert.equal(loginResult.status, 200);
+    result = await requestAs(loginResult.body.token, '/api/v1/robots', { headers: { 'x-tenant-id': 'tenant-other' } });
     assert.equal(result.status, 200);
     assert.equal(result.body.count, 4);
 
@@ -105,9 +136,9 @@ async function requestAs(token, path, options = {}) {
     assert.equal(dynamicAccount.created, false);
     assert.match(dynamicAccount.email, /@demo\.altegro\.local$/);
 
-    loginResponse = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: dynamicAccount.email, password: dynamicAccount.password }) });
-    assert.equal(loginResponse.status, 200);
-    result = await requestAs(dynamicAccount.token, '/api/v1/robots');
+    loginResult = await loginWithOtp(dynamicAccount.email, dynamicAccount.password);
+    assert.equal(loginResult.status, 200);
+    result = await requestAs(loginResult.body.token, '/api/v1/robots');
     assert.equal(result.status, 200);
     assert.equal(result.body.count, 1);
     assert.equal(result.body.data[0].serialNumber, 'AX-PILOT-016');
@@ -116,9 +147,9 @@ async function requestAs(token, path, options = {}) {
     assert.equal(result.status, 201);
     assert.equal(result.body.account.username, 'manual-robot-001@demo.altegro.local');
 
-    loginResponse = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'manual-robot-001@demo.altegro.local', password: 'Manual-robot-001' }) });
-    assert.equal(loginResponse.status, 200);
-    result = await requestAs('demo-robot-manual-robot-001', '/api/v1/robots');
+    loginResult = await loginWithOtp('manual-robot-001@demo.altegro.local', 'Manual-robot-001');
+    assert.equal(loginResult.status, 200);
+    result = await requestAs(loginResult.body.token, '/api/v1/robots');
     assert.equal(result.status, 200);
     assert.equal(result.body.count, 1);
     assert.equal(result.body.data[0].serialNumber, 'MANUAL-ROBOT-001');
@@ -165,23 +196,24 @@ async function requestAs(token, path, options = {}) {
     result = await request('/api/v1/compatibility', { method: 'POST', body: JSON.stringify({ modelId: 'model-autoxing-a1', capability: 'event.alert', versionConstraint: 'wrapper-backed', status: 'compatible', evidence: 'Contract test fixture' }) });
     assert.equal(result.status, 201);
 
-    let exportResponse = await fetch(`http://localhost:${port}/api/v1/exports/robots.csv`, { headers: { authorization: 'Bearer demo-platform-admin' } });
+    let exportResponse = await fetch(`http://localhost:${port}/api/v1/exports/robots.csv`, { headers: { authorization: `Bearer ${defaultToken}` } });
     assert.equal(exportResponse.status, 200);
     assert.match(await exportResponse.text(), /robot_id.*serial_number/);
-    exportResponse = await fetch(`http://localhost:${port}/api/v1/robots/${robotId}/export`, { headers: { authorization: 'Bearer demo-platform-admin' } });
+    exportResponse = await fetch(`http://localhost:${port}/api/v1/robots/${robotId}/export`, { headers: { authorization: `Bearer ${defaultToken}` } });
     assert.equal(exportResponse.status, 200);
     assert.equal((await exportResponse.json()).passport.robot.id, robotId);
 
-    loginResponse = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: 'auditor@demo.altegro.local', password: 'demo' }) });
-    assert.equal(loginResponse.status, 200);
-    loginBody = await loginResponse.json();
+    loginResult = await loginWithOtp('auditor@demo.altegro.local', 'demo');
+    assert.equal(loginResult.status, 200);
+    loginBody = loginResult.body;
     assert.equal(loginBody.user.role, 'auditor');
-    result = await requestAs('demo-auditor', '/api/v1/adapters');
+    const auditorSessionToken = loginBody.token;
+    result = await requestAs(auditorSessionToken, '/api/v1/adapters');
     assert.equal(result.status, 200);
     assert.equal(result.body.data.length, 0);
-    result = await requestAs('demo-auditor', '/api/v1/incidents', { method: 'POST', body: JSON.stringify({ robotId, title: 'Must be blocked', description: 'Auditors are read-only.', severity: 'warning' }) });
+    result = await requestAs(auditorSessionToken, '/api/v1/incidents', { method: 'POST', body: JSON.stringify({ robotId, title: 'Must be blocked', description: 'Auditors are read-only.', severity: 'warning' }) });
     assert.equal(result.status, 403);
-    exportResponse = await fetch(`http://localhost:${port}/api/v1/exports/tenant.json`, { headers: { authorization: 'Bearer demo-auditor' } });
+    exportResponse = await fetch(`http://localhost:${port}/api/v1/exports/tenant.json`, { headers: { authorization: `Bearer ${auditorSessionToken}` } });
     assert.equal(exportResponse.status, 200);
     assert.equal((await exportResponse.json()).tenantId, 'tenant-demo');
 

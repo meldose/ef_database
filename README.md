@@ -30,6 +30,44 @@ The frontend starts with a login page. Prototype accounts use password `demo`:
 
 The role is assigned by the backend after login; it is no longer selected from the dashboard.
 
+## Phone OTP authentication
+
+Phone OTP is enabled by default. Login now requires the account password followed by a one-time code. In the local prototype, `OTP_PROVIDER=console` prints the code only in the terminal running `npm start`; the browser never receives the code.
+
+Local configuration:
+
+```bash
+export PHONE_OTP_ENABLED=true
+export OTP_PROVIDER=console
+export OTP_TTL_SECONDS=300
+export OTP_RESEND_COOLDOWN_SECONDS=60
+export OTP_MAX_ATTEMPTS=5
+npm start
+```
+
+After entering a valid password, look for a terminal line beginning with `[OTP]`. The challenge is single-use, hashed in memory, expires after five minutes, locks after repeated failures, and is rate-limited. Reloading the page requires password and OTP again.
+
+For real SMS, the prototype includes an optional Twilio Verify provider using the official HTTPS API. Phone numbers must use E.164 format and are mapped server-side by account email:
+
+```bash
+export PHONE_OTP_ENABLED=true
+export OTP_PROVIDER=twilio
+export OTP_PHONE_MAP='{"admin@demo.altegro.local":"+4915112345678"}'
+export TWILIO_ACCOUNT_SID=your_account_sid
+export TWILIO_AUTH_TOKEN=your_auth_token
+export TWILIO_VERIFY_SERVICE_SID=VA_your_verify_service_sid
+export OTP_HASH_SECRET=replace_with_a_long_random_secret
+npm start
+```
+
+Add every permitted account to `OTP_PHONE_MAP`, or configure `OTP_DEFAULT_PHONE` only for controlled testing. Never commit phone numbers, Twilio credentials, or `OTP_HASH_SECRET`. A Twilio trial account may require recipient numbers to be verified first. Production should move phone enrollment and MFA policy to the selected OIDC Identity Provider rather than keeping identity data in this prototype.
+
+To temporarily disable OTP for isolated development tests:
+
+```bash
+export PHONE_OTP_ENABLED=false
+```
+
 Robot-scoped prototype accounts use separate credentials and can only see their assigned robot:
 
 - `robot-ax-001@demo.altegro.local` / `AX-robot-001-demo` — `AX-DEMO-001`
@@ -48,6 +86,8 @@ npm test
 
 ## Demo tokens
 
+The public demo-token endpoint is disabled while phone OTP is enabled because static bearer tokens would bypass MFA. Use the browser login or the password-plus-OTP API flow. The endpoint below is available only when `PHONE_OTP_ENABLED=false` for isolated development:
+
 ```bash
 curl http://localhost:3000/api/v1/demo/tokens
 ```
@@ -59,7 +99,7 @@ curl -H "Authorization: Bearer demo-platform-admin" \
   http://localhost:3000/api/v1/robots
 ```
 
-Available demo roles are `owner`, `technician`, `platform_admin`, `data_admin`, and `support_admin`.
+Available demo roles are `owner`, `technician`, `platform_admin`, `data_admin`, `support_admin`, and `auditor`.
 
 ## Useful test calls
 

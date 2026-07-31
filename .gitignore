@@ -1,2 +1,5 @@
 robot-accounts.txt
 __pycache__/
+.env
+.env.*
+!.env.example

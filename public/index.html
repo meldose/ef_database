@@ -19,7 +19,14 @@
           <button class="button primary login-button" type="submit">Sign in <span>→</span></button>
           <p id="loginError" class="login-error" role="alert"></p>
         </form>
-        <div class="demo-access"><span>Prototype access</span><strong>Fleet accounts: password demo</strong><div class="demo-accounts"><button type="button" data-demo-email="admin@demo.altegro.local">Platform Admin</button><button type="button" data-demo-email="technician@demo.altegro.local">Technician</button><button type="button" data-demo-email="owner@demo.altegro.local">Owner</button><button type="button" data-demo-email="auditor@demo.altegro.local">Auditor</button></div><strong class="demo-scope-heading">Robot accounts: each has a separate password</strong><div class="demo-accounts robot-demo-accounts"><button type="button" data-demo-email="robot-ax-001@demo.altegro.local" data-demo-password="AX-robot-001-demo">AX-DEMO-001</button><button type="button" data-demo-email="robot-cb-001@demo.altegro.local" data-demo-password="CB-robot-001-demo">CB-DEMO-001</button><button type="button" data-demo-email="robot-se52512706922ne@demo.altegro.local" data-demo-password="SE-robot-001-demo">SE52512706922NE</button></div></div>
+        <form id="otpForm" class="hidden">
+          <p class="otp-heading">Verify your sign-in</p>
+          <p id="otpDestination" class="login-copy">Enter the one-time code sent to your verified phone.</p>
+          <label>One-time code<input id="otpCode" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6,10}" minlength="6" maxlength="10" required placeholder="000000" /></label>
+          <button class="button primary login-button" type="submit">Verify code <span>→</span></button>
+          <div class="otp-actions"><button type="button" class="text-button" id="resendOtpButton">Resend code</button><button type="button" class="text-button" id="backToLoginButton">Back to login</button></div>
+          <p id="otpError" class="login-error" role="alert"></p>
+        </form>
       </div>
       <div class="login-side"><p class="eyebrow">Manufacturer-neutral control plane</p><h2>One Passport for every robot.</h2><p>Connect identity, lifecycle records, service events and technical integrations in one controlled operational view.</p><div class="login-side-note"><span>Phase 1</span><span>Commands disabled</span><span>EU-first design</span></div></div>
     </section>
