@@ -45,23 +45,29 @@
         </div>
         <div class="hero-actions">
           <button class="button secondary" id="exportTenant">Export tenant</button>
-          <button class="button secondary" id="syncAutoXing">Sync AutoXing</button>
-          <button class="button secondary" id="syncCenoBots">Sync CenoBots</button>
+          <button class="button secondary sync-button" id="syncAutoXing"><span class="button-label">Sync AutoXing</span></button>
+          <button class="button secondary sync-button" id="syncCenoBots"><span class="button-label">Sync CenoBots</span></button>
           <button class="button primary" id="newRobotButton">＋ Register robot</button>
         </div>
       </section>
+      <div id="syncStatus" class="sync-status hidden" role="status" aria-live="polite"></div>
 
       <section class="metrics" aria-label="Fleet metrics">
-        <article class="metric-card"><span class="metric-label">Total robots</span><strong id="metricTotal">—</strong><small>Tenant registry</small></article>
-        <article class="metric-card"><span class="metric-label">Active</span><strong class="green" id="metricActive">—</strong><small>Verified fleet</small></article>
-        <article class="metric-card"><span class="metric-label">Draft</span><strong class="amber" id="metricDraft">—</strong><small>Awaiting verification</small></article>
-        <article class="metric-card"><span class="metric-label">Events</span><strong id="metricEvents">—</strong><small>Normalized technical events</small></article>
+        <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="all"><span class="metric-label">Total robots</span><strong id="metricTotal">—</strong><small>Show the full registry</small></article>
+        <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="active"><span class="metric-label">Active</span><strong class="green" id="metricActive">—</strong><small>Filter verified fleet</small></article>
+        <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="draft"><span class="metric-label">Draft</span><strong class="amber" id="metricDraft">—</strong><small>Filter awaiting verification</small></article>
+        <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="events"><span class="metric-label">Events</span><strong id="metricEvents">—</strong><small>Open technical events</small></article>
       </section>
       <section class="metrics proof-metrics" aria-label="2027 proof metrics">
-        <article class="metric-card"><span class="metric-label">Online now</span><strong class="green" id="metricOnline">—</strong><small>Normalized live status</small></article>
-        <article class="metric-card"><span class="metric-label">Open service cases</span><strong class="amber" id="metricOpenCases">—</strong><small>Incident-to-service flow</small></article>
+        <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="online"><span class="metric-label">Online now</span><strong class="green" id="metricOnline">—</strong><small>Filter online robots</small></article>
+        <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="service"><span class="metric-label">Open service cases</span><strong class="amber" id="metricOpenCases">—</strong><small>Open service workflow</small></article>
         <article class="metric-card"><span class="metric-label">Complete Passports</span><strong id="metricPassportComplete">—</strong><small>Target ≥ 80%</small></article>
         <article class="metric-card"><span class="metric-label">Certificates due</span><strong id="metricCertificatesDue">—</strong><small>Expired or due in 30 days</small></article>
+      </section>
+      <section class="metrics status-metrics" aria-label="Operational alerts">
+        <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="offline"><span class="metric-label">Offline now</span><strong class="amber" id="metricOffline">—</strong><small>Filter offline robots</small></article>
+        <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="errors"><span class="metric-label">Error events</span><strong id="metricErrors">—</strong><small>Filter technical errors</small></article>
+        <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="maintenance"><span class="metric-label">Maintenance due</span><strong id="metricMaintenanceDue">—</strong><small>Filter maintenance alerts</small></article>
       </section>
 
       <section class="workspace-grid">
@@ -71,8 +77,10 @@
             <span class="count-pill" id="robotCount">0</span>
           </div>
           <div class="toolbar">
-            <label class="search-box"><span>⌕</span><input id="searchInput" type="search" placeholder="Search ID, serial or model…" /></label>
-            <select id="statusFilter" aria-label="Filter by status"><option value="">All statuses</option><option value="active">Active</option><option value="draft">Draft</option><option value="suspended">Suspended</option></select>
+            <label class="search-box"><span aria-hidden="true">⌕</span><span class="sr-only">Search robots</span><input id="searchInput" type="search" placeholder="Search ID, serial, model or site…" /></label>
+            <select id="statusFilter" aria-label="Filter robots by status"><option value="">All statuses</option><option value="active">Active</option><option value="draft">Draft</option><option value="verified">Verified</option><option value="suspended">Suspended</option><option value="decommissioned">Decommissioned</option></select>
+            <select id="liveFilter" aria-label="Filter robots by live status"><option value="">Any connection</option><option value="online">Online</option><option value="offline">Offline</option><option value="unknown">Not synchronized</option></select>
+            <select id="sortRobots" aria-label="Sort robots"><option value="serialNumber:asc">Serial A–Z</option><option value="serialNumber:desc">Serial Z–A</option><option value="updatedAt:desc">Recently updated</option><option value="status:asc">Status</option><option value="siteId:asc">Site</option><option value="modelId:asc">Model</option></select>
           </div>
           <div class="table-wrap">
             <table>
@@ -80,6 +88,7 @@
               <tbody id="robotTable"><tr><td colspan="6" class="empty">Loading registry…</td></tr></tbody>
             </table>
           </div>
+          <div class="pagination" aria-label="Robot registry pagination"><span id="paginationSummary">0 robots</span><div><button class="text-button" id="previousPage" type="button">Previous</button><span id="pageIndicator">Page 1</span><button class="text-button" id="nextPage" type="button">Next</button><select id="pageSize" aria-label="Robots per page"><option value="10">10 / page</option><option value="25">25 / page</option><option value="50">50 / page</option></select></div></div>
         </article>
 
         <aside class="panel detail-panel" id="detailPanel">
@@ -89,11 +98,18 @@
       </section>
 
       <section class="lower-grid">
-        <article class="panel">
+        <article class="panel" id="eventsPanel">
           <div class="panel-header"><div><p class="eyebrow">Canonical event envelope</p><h2>Recent technical events</h2></div><button class="text-button" id="refreshEvents">Refresh</button></div>
+          <div class="event-filters">
+            <select id="eventRobotFilter" aria-label="Filter events by robot"><option value="">All robots</option></select>
+            <select id="eventSeverityFilter" aria-label="Filter events by severity"><option value="">All severities</option><option value="info">Info</option><option value="warning">Warning</option><option value="error">Error</option><option value="critical">Critical</option><option value="problem">Error and critical</option></select>
+            <select id="eventTypeFilter" aria-label="Filter events by type"><option value="">All event types</option><option value="online">Online</option><option value="offline">Offline</option><option value="error">Error</option><option value="warning">Warning</option><option value="battery">Battery</option><option value="maintenance">Maintenance</option><option value="maintenance_due">Maintenance due</option><option value="inspection">Inspection</option><option value="incident">Incident</option><option value="mission_status">Mission status</option><option value="service_completed">Service completed</option></select>
+            <label>From<input id="eventFromFilter" type="date" /></label><label>To<input id="eventToFilter" type="date" /></label>
+            <button class="text-button" id="clearEventFilters" type="button">Clear</button>
+          </div>
           <div id="eventsList" class="event-list"><div class="empty">Loading events…</div></div>
         </article>
-        <article class="panel">
+        <article class="panel" id="servicePanel">
           <div class="panel-header"><div><p class="eyebrow">Integration plane</p><h2>Adapter capabilities</h2></div><button class="text-button" id="refreshAdapters">Refresh</button></div>
           <div id="adaptersList" class="adapter-list"><div class="empty">Loading adapters…</div></div>
         </article>
@@ -120,7 +136,7 @@
         <div class="form-grid"><label>Occurred at<input id="eventOccurredAt" type="datetime-local" required /></label><label>Source system<input id="eventSource" required value="manual-portal" /></label></div>
         <label>Source event ID <span class="field-hint">optional · generated when empty</span><input id="eventSourceId" maxlength="200" placeholder="SERVICE-CASE-2026-001" /></label>
         <label>Description<textarea id="eventDescription" required maxlength="4000" rows="5" placeholder="Describe what happened, what was checked, and any follow-up required."></textarea></label>
-        <label>Attachment <span class="field-hint">optional · max 2 MB</span><input id="eventAttachment" type="file" /></label>
+        <label>Attachment <span class="field-hint">optional · PDF, image, text, CSV or JSON · max 2 MB</span><input id="eventAttachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.json" /></label>
         <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" id="saveEventButton" value="default">Add event</button></div>
       </form>
     </dialog>
@@ -142,7 +158,7 @@
         <div class="form-grid"><label id="lifecycleVersionField">Version<input id="lifecycleVersion" maxlength="80" value="1.0" /></label><label id="lifecycleStatusField">Status<select id="lifecycleStatus"></select></label></div>
         <div class="form-grid"><label id="lifecycleIssuerField">Issuer<input id="lifecycleIssuer" maxlength="160" placeholder="Certification body" /></label><label id="lifecycleExpiryField">Valid until<input id="lifecycleValidUntil" type="date" /></label></div>
         <label>Description<textarea id="lifecycleDescription" maxlength="4000" rows="4" placeholder="Evidence, approval and verification notes."></textarea></label>
-        <label id="lifecycleAttachmentField">Attachment <span class="field-hint">optional · max 2 MB</span><input id="lifecycleAttachment" type="file" /></label>
+        <label id="lifecycleAttachmentField">Attachment <span class="field-hint">optional · PDF, image, text, CSV or JSON · max 2 MB</span><input id="lifecycleAttachment" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.json" /></label>
         <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Add to Passport</button></div>
       </form>
     </dialog>
@@ -165,7 +181,7 @@
         <div class="dialog-actions"><button class="button primary" value="default">Done</button></div>
       </form>
     </dialog>
-    <div id="toast" class="toast" role="status"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
     <script src="/app.js"></script>
   </body>
 </html>

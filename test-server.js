@@ -10,7 +10,7 @@ server.listen(port);
 
 async function request(path, options = {}) {
   const response = await fetch(`http://localhost:${port}${path}`, { ...options, headers: { authorization: `Bearer ${defaultToken}`, 'content-type': 'application/json', ...(options.headers || {}) } });
-  return { status: response.status, body: await response.json() };
+  return { status: response.status, body: await response.json(), headers: response.headers };
 }
 
 async function requestAs(token, path, options = {}) {
@@ -26,6 +26,9 @@ async function loginWithPassword(email, password) {
   try {
     let result = await request('/health', { headers: {} });
     assert.equal(result.status, 200);
+    assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(result.headers.get('x-frame-options'), 'DENY');
+    assert.match(result.headers.get('content-security-policy'), /frame-ancestors 'none'/);
 
     const oldPasswordLogin = await loginWithPassword('admin@demo.altegro.local', 'demo');
     assert.equal(oldPasswordLogin.status, 401);
@@ -46,8 +49,17 @@ async function loginWithPassword(email, password) {
     result = await request('/api/v1/robots');
     assert.equal(result.status, 200);
     assert.equal(result.body.count, 2);
+    assert.equal(result.body.pagination.page, 1);
+    assert.equal(result.body.facets.total, 2);
     const robotId = result.body.data[0].id;
     const cenobotsRobotId = result.body.data[1].id;
+
+    result = await request('/api/v1/robots?pageSize=1&page=2&sort=serialNumber&order=asc');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.length, 1);
+    assert.equal(result.body.pagination.pageCount, 2);
+    result = await request('/api/v1/robots?q=site-berlin');
+    assert.equal(result.body.count, 2);
 
     loginResult = await loginWithPassword('robot-ax-001@demo.altegro.local', 'AX-robot-001-demo');
     loginBody = loginResult.body;
@@ -97,6 +109,18 @@ async function loginWithPassword(email, password) {
     assert.equal(result.status, 201);
     assert.equal(result.body.data.title, 'Battery inspection completed');
     assert.equal(result.body.data.attachment.name, 'inspection.txt');
+    const attachmentEventId = result.body.data.eventId;
+    let attachmentResponse = await fetch(`http://localhost:${port}/api/v1/events/${attachmentEventId}/attachment`, { headers: { authorization: `Bearer ${defaultToken}` } });
+    assert.equal(attachmentResponse.status, 200);
+    assert.equal(await attachmentResponse.text(), 'inspection evidence');
+
+    result = await request('/api/v1/events?severity=info&eventType=inspection');
+    assert.equal(result.status, 200);
+    assert.ok(result.body.data.some((event) => event.eventId === attachmentEventId));
+    assert.ok(result.body.data.every((event) => event.severity === 'info' && event.eventType === 'inspection'));
+
+    result = await request(`/api/v1/robots/${robotId}/events`, { method: 'POST', body: JSON.stringify({ title: 'Blocked upload', description: 'Executable files are not accepted.', eventType: 'inspection', sourceSystem: 'manual-test', severity: 'info', occurredAt: '2026-07-27T14:00:00.000Z', attachment: { name: 'unsafe.exe', contentType: 'application/octet-stream', contentBase64: Buffer.from('unsafe').toString('base64') } }) });
+    assert.equal(result.status, 400);
 
     result = await request(`/api/v1/robots/${robotId}/events`);
     assert.equal(result.status, 200);
@@ -204,6 +228,16 @@ async function loginWithPassword(email, password) {
     exportResponse = await fetch(`http://localhost:${port}/api/v1/exports/tenant.json`, { headers: { authorization: `Bearer ${auditorSessionToken}` } });
     assert.equal(exportResponse.status, 200);
     assert.equal((await exportResponse.json()).tenantId, 'tenant-demo');
+
+    result = await request('/api/v1/robots', { method: 'POST', body: JSON.stringify({ modelId: 'model-mock-m3', siteId: 'site-berlin', organizationId: 'org-demo', serialNumber: 'manual-robot-001', username: 'duplicate-robot@demo.altegro.local', password: 'Duplicate-robot-001' }) });
+    assert.equal(result.status, 409);
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const failedLogin = await loginWithPassword('rate-limit-test@demo.altegro.local', 'wrong-password');
+      assert.equal(failedLogin.status, 401);
+    }
+    const rateLimitedLogin = await loginWithPassword('rate-limit-test@demo.altegro.local', 'wrong-password');
+    assert.equal(rateLimitedLogin.status, 429);
 
     result = await request('/api/v1/outbox');
     assert.equal(result.status, 200);

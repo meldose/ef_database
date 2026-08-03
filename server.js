@@ -11,6 +11,12 @@ const PORT = Number(process.env.PORT || 3000);
 const startedAt = new Date().toISOString();
 const MAX_EVENT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_ACCOUNT_PASSWORD = process.env.DEFAULT_ACCOUNT_PASSWORD || 'efrobotics';
+const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX_FAILURES = 5;
+const loginFailures = new Map();
+const allowedAttachmentTypes = new Set(['application/pdf', 'application/json', 'text/plain', 'text/csv', 'image/png', 'image/jpeg', 'image/webp', 'application/octet-stream']);
+const allowedAttachmentExtensions = new Set(['.pdf', '.json', '.txt', '.csv', '.png', '.jpg', '.jpeg', '.webp']);
 
 const ids = () => crypto.randomUUID();
 const timestamp = () => new Date().toISOString();
@@ -318,13 +324,18 @@ async function syncAutoXingLive(actor) {
 function getPassport(robotId) {
   const robot = state.robots.get(robotId);
   const entries = state.passportEntries.get(robotId) || [];
+  const safeEntries = entries.map((entry) => {
+    const copy = clone(entry);
+    if (copy.data?.attachment) delete copy.data.attachment.contentBase64;
+    return copy;
+  });
   return {
     robot: clone(robot),
     model: clone(state.models.get(robot.modelId)),
     owner: clone(state.organizations.get(robot.organizationId)),
     operator: clone(state.organizations.get(robot.operatorOrganizationId)),
     site: clone(state.sites.get(robot.siteId)),
-    entries: clone(entries),
+    entries: safeEntries,
     documents: clone(state.documents.filter((item) => item.robotId === robotId).map(({ attachment, ...item }) => ({ ...item, attachment: attachment ? { name: attachment.name, contentType: attachment.contentType, size: attachment.size, sha256: attachment.sha256 } : null }))),
     certificates: clone(state.certificates.filter((item) => item.robotId === robotId)),
     deployments: clone(state.deployments.filter((item) => item.robotId === robotId)),
@@ -355,7 +366,7 @@ function getActor(req) {
 
 function requireActor(req) {
   const actor = getActor(req);
-  if (!actor) throw httpError(401, 'Bearer token required. See /api/v1/demo/tokens.');
+  if (!actor) throw httpError(401, 'Your session is missing, expired, or has been revoked');
   return actor;
 }
 
@@ -416,7 +427,7 @@ function operationsSummary(actor) {
   const completePassports = robots.filter((robot) => calculateCompleteness(robot, state.passportEntries.get(robot.id) || []).percentage >= 80).length;
   return {
     robots: { total: robots.length, active: robots.filter((item) => item.status === 'active').length, draft: robots.filter((item) => item.status === 'draft').length, online: robots.filter((item) => item.online === true).length, offline: robots.filter((item) => item.online === false).length },
-    events: { total: events.length, activeErrors: events.filter((item) => ['error', 'critical'].includes(item.severity)).length },
+    events: { total: events.length, activeErrors: events.filter((item) => ['error', 'critical'].includes(item.severity)).length, maintenanceDue: events.filter((item) => item.eventType === 'maintenance_due').length },
     service: { total: cases.length, open: cases.filter((item) => !['resolved', 'closed'].includes(item.status)).length, closed: cases.filter((item) => item.status === 'closed').length },
     passport: { complete: completePassports, percentage: robots.length ? Math.round((completePassports / robots.length) * 100) : 0, certificatesDue: expiringCertificates },
     proof: { robotTargetMinimum: 30, customerTargetMinimum: 5, siteTargetMinimum: 10, passportTargetPercentage: 80, serviceCaseTargetMinimum: 20 },
@@ -426,9 +437,15 @@ function operationsSummary(actor) {
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', (chunk) => { data += chunk; if (data.length > 5_000_000) reject(httpError(413, 'Request body too large; event attachments are limited to 2 MB')); });
+    let data = ''; let bytes = 0; let tooLarge = false;
+    req.on('data', (chunk) => {
+      if (tooLarge) return;
+      bytes += chunk.length;
+      if (bytes > MAX_JSON_BODY_BYTES) { tooLarge = true; reject(httpError(413, 'Request body is limited to 5 MB')); return; }
+      data += chunk;
+    });
     req.on('end', () => {
+      if (tooLarge) return;
       if (!data) return resolve({});
       try { resolve(JSON.parse(data)); } catch { reject(httpError(400, 'Request body must be valid JSON')); }
     });
@@ -440,23 +457,59 @@ function httpError(status, message, details) {
   const error = new Error(message); error.status = status; error.details = details; return error;
 }
 
+function loginRateKey(req, email) {
+  return `${req.socket.remoteAddress || 'unknown'}:${String(email || '').trim().toLowerCase()}`;
+}
+
+function activeLoginFailures(req, email) {
+  const key = loginRateKey(req, email); const cutoff = Date.now() - LOGIN_WINDOW_MS;
+  const attempts = (loginFailures.get(key) || []).filter((value) => value > cutoff);
+  if (attempts.length) loginFailures.set(key, attempts); else loginFailures.delete(key);
+  return { key, attempts };
+}
+
+function enforceLoginRateLimit(req, email) {
+  const { attempts } = activeLoginFailures(req, email);
+  if (attempts.length >= LOGIN_MAX_FAILURES) throw httpError(429, 'Too many failed sign-in attempts. Try again in 15 minutes.');
+}
+
+function recordLoginFailure(req, email) {
+  const { key, attempts } = activeLoginFailures(req, email); attempts.push(Date.now()); loginFailures.set(key, attempts);
+}
+
+function clearLoginFailures(req, email) {
+  loginFailures.delete(loginRateKey(req, email));
+}
+
 function validateEventAttachment(attachment) {
   if (!attachment) return null;
   if (!attachment.name || !attachment.contentType || !attachment.contentBase64) throw httpError(400, 'Attachment requires name, contentType, and contentBase64');
+  const originalName = String(attachment.name).trim();
+  const name = pathUtil.basename(originalName.replaceAll('\\', '/')).replace(/[\u0000-\u001f\u007f]/g, '').slice(0, 120);
+  const extension = pathUtil.extname(name).toLowerCase();
+  const contentType = String(attachment.contentType).toLowerCase().split(';')[0].trim();
+  if (!name || name !== originalName || !allowedAttachmentExtensions.has(extension)) throw httpError(400, 'Attachment filename or extension is not allowed');
+  if (!allowedAttachmentTypes.has(contentType)) throw httpError(400, 'Attachment type is not allowed');
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(String(attachment.contentBase64)) || String(attachment.contentBase64).length % 4 !== 0) throw httpError(400, 'Attachment content must be valid base64');
   const content = Buffer.from(attachment.contentBase64, 'base64');
   if (content.length > MAX_EVENT_ATTACHMENT_BYTES) throw httpError(413, 'Event attachment is limited to 2 MB');
-  return { name: String(attachment.name).slice(0, 255), contentType: String(attachment.contentType).slice(0, 120), size: content.length, sha256: crypto.createHash('sha256').update(content).digest('hex'), contentBase64: attachment.contentBase64 };
+  return { name, contentType, size: content.length, sha256: crypto.createHash('sha256').update(content).digest('hex'), contentBase64: attachment.contentBase64 };
+}
+
+function securityHeaders(contentType, extra = {}) {
+  return { 'content-type': contentType, 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'", 'referrer-policy': 'no-referrer', 'permissions-policy': 'camera=(), microphone=(), geolocation=()', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'cross-origin-resource-policy': 'same-origin', ...extra };
 }
 
 function send(res, status, payload) {
   const body = JSON.stringify(payload);
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'content-length': Buffer.byteLength(body) });
+  res.writeHead(status, securityHeaders('application/json; charset=utf-8', { 'content-length': Buffer.byteLength(body) }));
   res.end(body);
 }
 
 function sendDownload(res, contentType, filename, body) {
   const content = Buffer.from(body);
-  res.writeHead(200, { 'content-type': contentType, 'content-disposition': `attachment; filename="${filename}"`, 'content-length': content.length });
+  const safeFilename = pathUtil.basename(String(filename)).replace(/[^a-zA-Z0-9._-]/g, '_');
+  res.writeHead(200, securityHeaders(contentType, { 'content-disposition': `attachment; filename="${safeFilename}"`, 'content-length': content.length }));
   res.end(content);
 }
 
@@ -473,7 +526,7 @@ function serveFrontend(pathname, res) {
   try {
     const body = fs.readFileSync(filePath);
     const contentTypes = { 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'styles.css': 'text/css; charset=utf-8' };
-    res.writeHead(200, { 'content-type': contentTypes[requested], 'content-length': body.length });
+    res.writeHead(200, securityHeaders(contentTypes[requested], { 'content-length': body.length }));
     res.end(body);
     return true;
   } catch {
@@ -495,9 +548,12 @@ async function handle(req, res) {
   }
   if (req.method === 'POST' && path === '/api/v1/auth/login') {
     const login = await readBody(req);
-    const match = Object.entries(demoUsers).find(([, user]) => user.email.toLowerCase() === String(login.email || '').toLowerCase());
-    if (!match || String(login.password || '') !== (match[1].demoPassword || DEFAULT_ACCOUNT_PASSWORD)) throw httpError(401, 'Invalid email or password');
+    const email = String(login.email || '').trim().toLowerCase();
+    enforceLoginRateLimit(req, email);
+    const match = Object.entries(demoUsers).find(([, user]) => user.email.toLowerCase() === email);
+    if (!match || String(login.password || '') !== (match[1].demoPassword || DEFAULT_ACCOUNT_PASSWORD)) { recordLoginFailure(req, email); throw httpError(401, 'Invalid email or password'); }
     const [token, user] = match;
+    clearLoginFailures(req, email);
     return send(res, 200, authenticatedSession(token, user));
   }
   if (req.method === 'POST' && path === '/api/v1/auth/logout') {
@@ -551,7 +607,7 @@ async function handle(req, res) {
     const accounts = ensureAllRobotUsers().map(({ token, email, password, serialNumber, robotId, created }) => ({ token, email, password, serialNumber, robotId, created }));
     return send(res, 200, { warning: 'Prototype credentials only. Do not use in production.', data: accounts, count: accounts.length });
   }
-  if (req.method === 'GET' && path === '/api/v1/adapters') return send(res, 200, { data: ['robot_user', 'auditor'].includes(actor.role) ? [] : [...state.adapters.values()].map(({ sync, ...adapter }) => adapter) });
+  if (req.method === 'GET' && path === '/api/v1/adapters') return send(res, 200, { data: ['robot_user', 'auditor'].includes(actor.role) ? [] : [...state.adapters.values()].map(({ sync, lastError, ...adapter }) => ({ ...adapter, lastError: lastError ? 'Synchronization failed. Retry the operation or check the protected server log.' : null })) });
   if (req.method === 'GET' && path === '/api/v1/adapters/autoxing/resources') {
     if (actor.role === 'robot_user') return send(res, 200, { data: { businesses: [], buildings: [], maps: [], syncedAt: state.autoxing.lastSyncAt, resourceErrors: [] } });
     return send(res, 200, { data: { businesses: clone(state.autoxing.businesses), buildings: clone(state.autoxing.buildings), maps: clone([...state.autoxing.maps.values()]), syncedAt: state.autoxing.lastSyncAt, resourceErrors: clone(state.autoxing.resourceErrors) } });
@@ -567,10 +623,27 @@ async function handle(req, res) {
     }
     return send(res, 200, { data: clone(tasks), count: tasks.length, syncedAt: state.autoxing.lastSyncAt });
   }
+  const eventAttachment = route(req.method, path, /^\/api\/v1\/events\/([^/]+)\/attachment$/);
+  if (eventAttachment && req.method === 'GET') {
+    const event = state.events.find((item) => item.eventId === eventAttachment.id);
+    const robot = event ? state.robots.get(event.robotId) : null;
+    if (!event || !robot || !visibleToActor(actor, robot)) throw httpError(404, 'Event attachment not found');
+    if (!event.attachment?.contentBase64) throw httpError(404, 'Event has no downloadable attachment');
+    recordAudit(actor, 'event.attachment.download', 'robot', robot.id, 'success', { eventId: event.eventId });
+    return sendDownload(res, event.attachment.contentType, event.attachment.name, Buffer.from(event.attachment.contentBase64, 'base64'));
+  }
   if (req.method === 'GET' && path === '/api/v1/events') {
-    const visibleRobotIds = new Set([...state.robots.values()].filter((robot) => visibleToActor(actor, robot)).map((robot) => robot.id));
-    const data = state.events.filter((event) => visibleRobotIds.has(event.robotId)).filter((event) => !url.searchParams.get('robotId') || event.robotId === url.searchParams.get('robotId'));
-    return send(res, 200, { data });
+    const robotIds = visibleRobotIds(actor); let data = state.events.filter((event) => robotIds.has(event.robotId));
+    const filters = { robotId: url.searchParams.get('robotId'), eventType: url.searchParams.get('eventType') };
+    for (const [field, value] of Object.entries(filters)) if (value) data = data.filter((event) => event[field] === value);
+    const severity = url.searchParams.get('severity'); if (severity) data = data.filter((event) => severity === 'problem' ? ['error', 'critical'].includes(event.severity) : event.severity === severity);
+    const from = url.searchParams.get('from'); const to = url.searchParams.get('to'); const q = String(url.searchParams.get('q') || '').trim().toLowerCase();
+    if (from && !Number.isNaN(Date.parse(from))) data = data.filter((event) => Date.parse(event.occurredAt) >= Date.parse(from));
+    if (to && !Number.isNaN(Date.parse(to))) data = data.filter((event) => Date.parse(event.occurredAt) <= Date.parse(to));
+    if (q) data = data.filter((event) => [event.title, event.description, event.eventType, event.sourceSystem].some((value) => String(value || '').toLowerCase().includes(q)));
+    data.sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
+    const count = data.length; const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') || 25)));
+    return send(res, 200, { data: data.slice(0, limit).map((event) => ({ ...clone(event), attachment: event.attachment ? { name: event.attachment.name, contentType: event.attachment.contentType, size: event.attachment.size, sha256: event.attachment.sha256 } : null })), count });
   }
   if (req.method === 'GET' && path === '/api/v1/audit') {
     const robotIds = visibleRobotIds(actor);
@@ -578,10 +651,23 @@ async function handle(req, res) {
     return send(res, 200, { data: state.audit.filter((item) => item.actorId === actor.id || privileged || (actor.role === 'auditor' && robotIds.has(item.objectId))) });
   }
   if (req.method === 'GET' && path === '/api/v1/robots') {
-    let data = [...state.robots.values()].filter((robot) => visibleToActor(actor, robot));
-    for (const field of ['status', 'modelId', 'siteId', 'serialNumber']) if (url.searchParams.get(field)) data = data.filter((robot) => robot[field] === url.searchParams.get(field));
-    if (url.searchParams.get('q')) { const q = url.searchParams.get('q').toLowerCase(); data = data.filter((robot) => JSON.stringify(robot).toLowerCase().includes(q)); }
-    return send(res, 200, { data: data.map(clone), count: data.length });
+    const allVisible = [...state.robots.values()].filter((robot) => visibleToActor(actor, robot)); let data = [...allVisible];
+    for (const field of ['status', 'modelId', 'siteId']) if (url.searchParams.get(field)) data = data.filter((robot) => robot[field] === url.searchParams.get(field));
+    if (url.searchParams.get('serialNumber')) { const serial = url.searchParams.get('serialNumber').trim().toLowerCase(); data = data.filter((robot) => robot.serialNumber.toLowerCase() === serial); }
+    const live = url.searchParams.get('live');
+    if (live === 'online') data = data.filter((robot) => robot.online === true);
+    if (live === 'offline') data = data.filter((robot) => robot.online === false);
+    if (live === 'unknown') data = data.filter((robot) => robot.online == null);
+    if (url.searchParams.get('q')) {
+      const q = url.searchParams.get('q').trim().toLowerCase();
+      data = data.filter((robot) => [robot.id, robot.serialNumber, robot.modelId, robot.siteId, robot.organizationId, robot.operatorOrganizationId, ...(robot.externalIdentities || []).flatMap((identity) => [identity.system, identity.externalId])].some((value) => String(value || '').toLowerCase().includes(q)));
+    }
+    const sort = ['serialNumber', 'modelId', 'siteId', 'status', 'updatedAt'].includes(url.searchParams.get('sort')) ? url.searchParams.get('sort') : 'serialNumber';
+    const direction = url.searchParams.get('order') === 'desc' ? -1 : 1;
+    data.sort((a, b) => String(a[sort] || '').localeCompare(String(b[sort] || ''), undefined, { numeric: true, sensitivity: 'base' }) * direction);
+    const count = data.length; const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get('pageSize') || 10))); const pageCount = Math.max(1, Math.ceil(count / pageSize)); const requestedPage = Math.max(1, Number(url.searchParams.get('page') || 1)); const page = Math.min(requestedPage, pageCount);
+    const facets = { total: allVisible.length, active: allVisible.filter((robot) => robot.status === 'active').length, draft: allVisible.filter((robot) => robot.status === 'draft').length, online: allVisible.filter((robot) => robot.online === true).length, offline: allVisible.filter((robot) => robot.online === false).length };
+    return send(res, 200, { data: data.slice((page - 1) * pageSize, page * pageSize).map(clone), count, facets, pagination: { page, pageSize, pageCount, from: count ? (page - 1) * pageSize + 1 : 0, to: Math.min(page * pageSize, count) } });
   }
 
   if (req.method === 'POST' && path === '/api/v1/incidents') {
@@ -616,14 +702,18 @@ async function handle(req, res) {
     if (!canRegisterRobot(actor)) throw httpError(403, 'Robot registration permission required');
     for (const field of ['modelId', 'siteId', 'organizationId', 'serialNumber']) if (!body[field]) throw httpError(400, `Missing required field: ${field}`);
     if (!state.models.has(body.modelId) || !state.sites.has(body.siteId) || !state.organizations.has(body.organizationId)) throw httpError(400, 'Unknown model, site, or organization');
+    const serialNumber = String(body.serialNumber).trim();
+    if (!serialNumber || serialNumber.length > 120 || !/^[\p{L}\p{N}][\p{L}\p{N}._/-]*$/u.test(serialNumber)) throw httpError(400, 'Serial number must be 1–120 letters, numbers, dots, underscores, slashes, or hyphens');
     const username = body.username ? String(body.username).trim().toLowerCase() : null;
     const password = body.password ? String(body.password) : null;
     if ((username && !password) || (!username && password)) throw httpError(400, 'Username and password must be provided together');
-    if (username && !username.includes('@')) throw httpError(400, 'Username must be an email address');
+    if (username && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) throw httpError(400, 'Username must be a valid email address');
     if (password && password.length < 8) throw httpError(400, 'Password must be at least 8 characters');
     if (actor.role !== 'robot_user' && (!username || !password)) throw httpError(400, 'Username and password are required for this registration');
-    if ([...state.robots.values()].some((item) => item.tenantId === actor.tenantId && item.serialNumber === body.serialNumber)) throw httpError(409, 'A robot with that serial number already exists');
-    const robot = { id: ids(), tenantId: actor.tenantId, organizationId: body.organizationId, operatorOrganizationId: body.operatorOrganizationId || body.organizationId, siteId: body.siteId, modelId: body.modelId, serialNumber: body.serialNumber, status: 'draft', externalIdentities: body.externalIdentities || [], createdAt: timestamp(), updatedAt: timestamp() };
+    if ([...state.robots.values()].some((item) => item.tenantId === actor.tenantId && item.serialNumber.toLowerCase() === serialNumber.toLowerCase())) throw httpError(409, 'A robot with that serial number already exists');
+    const externalIdentities = Array.isArray(body.externalIdentities) ? body.externalIdentities.filter((identity) => identity?.system && identity?.externalId).map((identity) => ({ system:String(identity.system).slice(0, 80), externalId:String(identity.externalId).slice(0, 200) })) : [];
+    if (externalIdentities.some((identity) => [...state.robots.values()].some((item) => item.externalIdentities?.some((existing) => existing.system === identity.system && existing.externalId === identity.externalId)))) throw httpError(409, 'An external robot identity is already registered');
+    const robot = { id: ids(), tenantId: actor.tenantId, organizationId: body.organizationId, operatorOrganizationId: body.operatorOrganizationId || body.organizationId, siteId: body.siteId, modelId: body.modelId, serialNumber, status: 'draft', externalIdentities, createdAt: timestamp(), updatedAt: timestamp() };
     const account = actor.role === 'robot_user' && !username ? null : createRobotUser(robot, { email: username, password });
     if (actor.role === 'robot_user' && !username) addRobotToActorScope(actor, robot.serialNumber);
     state.robots.set(robot.id, robot);
@@ -745,7 +835,12 @@ async function handle(req, res) {
 }
 
 seed();
-const server = http.createServer((req, res) => handle(req, res).catch((error) => send(res, error.status || 500, { error: { code: error.status === 401 ? 'UNAUTHENTICATED' : 'REQUEST_FAILED', message: error.message, details: error.details, correlationId: ids() } })));
+const server = http.createServer((req, res) => handle(req, res).catch((error) => {
+  const status = Number(error.status) || 500; const correlationId = ids();
+  if (status >= 500) console.error(`[${correlationId}] ${req.method} ${req.url}:`, error);
+  const code = status === 401 ? 'UNAUTHENTICATED' : status === 403 ? 'FORBIDDEN' : status === 409 ? 'CONFLICT' : status === 429 ? 'RATE_LIMITED' : status >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_FAILED';
+  send(res, status, { error: { code, message: status >= 500 ? 'The operation could not be completed. Retry or contact support with the correlation ID.' : error.message, details: status < 500 ? error.details : undefined, correlationId } });
+}));
 
 let autoXingPollTimer = null;
 let autoXingPollRunning = false;

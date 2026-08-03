@@ -175,6 +175,12 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - Prototype Outbox records for lifecycle and service changes
 - Robot-specific event creation with title, description, date/time, type, severity, source, and optional attachment metadata/content
 - Basic search/filtering
+- Server-side Robot Registry sorting and pagination with live-status filters
+- Event filtering by robot, severity, type, and date, plus controlled attachment downloads
+- Synchronization progress, elapsed time, partial/error feedback, and retry controls
+- Automatic expired-session handling and duplicate robot validation
+- Login throttling, upload allow-listing, request-size limits, safe public errors, and baseline HTTP security headers
+- Keyboard-accessible metric filters and responsive mobile layouts
 - Stable JSON error responses
 
 ## Intentionally not production-ready
