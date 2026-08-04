@@ -39,8 +39,8 @@ async function loginWithPassword(email, password) {
     const frontendResponse = await fetch(`http://localhost:${port}/`);
     assert.equal(frontendResponse.status, 200);
     const frontendHtml = await frontendResponse.text();
-    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'resourceExplorer', 'taskHistoryList', 'robotAccountsList', 'compatibilityForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
-    for (const view of ['overview', 'robots', 'operations', 'autoxing', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
+    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'resourceExplorer', 'taskHistoryList', 'robotAccountsList', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
+    for (const view of ['overview', 'robots', 'operations', 'autoxing', 'workforce', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
 
     const oldPasswordLogin = await loginWithPassword('admin@demo.altegro.local', 'demo');
     assert.equal(oldPasswordLogin.status, 401);
@@ -72,6 +72,38 @@ async function loginWithPassword(email, password) {
     const robotId = result.body.data[0].id;
     const cenobotsRobotId = result.body.data[1].id;
 
+    result = await request(`/api/v1/workforce/matrix?robotId=${robotId}`);
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.rows.length, 4);
+    for (const name of ['Midhun Eldose', 'Ahmed Galai', 'Michell Blawat', 'Elvis Heil']) {
+      assert.ok(result.body.data.technicians.some((technician) => technician.name === name && technician.jobTitle === 'Service Technician'));
+    }
+    const lenaRow = result.body.data.rows.find((row) => row.technician.id === 'technician-lena');
+    const noraRow = result.body.data.rows.find((row) => row.technician.id === 'technician-nora');
+    assert.equal(lenaRow.eligibility.eligible, true);
+    assert.equal(noraRow.eligibility.eligible, false);
+    result = await request('/api/v1/robot-assignments', { method:'POST', body:JSON.stringify({ robotId, technicianId:'technician-nora' }) });
+    assert.equal(result.status, 409);
+    result = await request('/api/v1/robot-assignments', { method:'POST', body:JSON.stringify({ robotId, technicianId:'technician-lena' }) });
+    assert.equal(result.status, 201);
+    const seededAssignmentId = result.body.data.id;
+    result = await request(`/api/v1/robots/${robotId}/passport`);
+    assert.ok(result.body.data.workforce.assignedTechnicians.some((item) => item.technician.id === 'technician-lena'));
+    result = await request(`/api/v1/robot-assignments/${seededAssignmentId}`, { method:'DELETE' });
+    assert.equal(result.status, 200);
+
+    result = await request('/api/v1/technicians', { method:'POST', body:JSON.stringify({ name:'Test Qualified Technician', email:'qualified-technician@example.test', organizationId:'org-service' }) });
+    assert.equal(result.status, 201);
+    const qualifiedTechnicianId = result.body.data.id;
+    result = await request(`/api/v1/technicians/${qualifiedTechnicianId}/qualifications`, { method:'POST', body:JSON.stringify({ kind:'skill', code:'autoxing_service', level:'advanced' }) });
+    assert.equal(result.status, 201);
+    result = await request(`/api/v1/technicians/${qualifiedTechnicianId}/qualifications`, { method:'POST', body:JSON.stringify({ kind:'certificate', code:'robot_electrical_safety', issuer:'Test Academy', validUntil:'2030-12-31T00:00:00.000Z', modelIds:['model-autoxing-a1'] }) });
+    assert.equal(result.status, 201);
+    result = await request(`/api/v1/workforce/matrix?robotId=${robotId}`);
+    assert.equal(result.body.data.rows.find((row) => row.technician.id === qualifiedTechnicianId).eligibility.status, 'qualified');
+    result = await request('/api/v1/robot-assignments', { method:'POST', body:JSON.stringify({ robotId, technicianId:qualifiedTechnicianId }) });
+    assert.equal(result.status, 201);
+
     result = await request('/api/v1/robots?pageSize=1&page=2&sort=serialNumber&order=asc');
     assert.equal(result.status, 200);
     assert.equal(result.body.data.length, 1);
@@ -97,6 +129,8 @@ async function loginWithPassword(email, password) {
     result = await requestAs(robotAxSessionToken, '/api/v1/events');
     assert.equal(result.status, 200);
     assert.ok(result.body.data.every((event) => event.robotId === robotId));
+    result = await requestAs(robotAxSessionToken, '/api/v1/workforce/matrix');
+    assert.equal(result.status, 403);
 
     state.autoxing.tasks.set('task-ax-scope', { taskId: 'task-ax-scope', raw: { robotId: 'AX-1001' } });
     state.autoxing.tasks.set('task-cb-scope', { taskId: 'task-cb-scope', raw: { robotId: 'CB-1001' } });

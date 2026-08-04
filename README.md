@@ -54,6 +54,23 @@ Use `ALTEGRO_DATA_FILE` to choose another location, or `ALTEGRO_PERSISTENCE=fals
 
 The dashboard alert button summarizes visible offline robots, error and critical events, expiring certificates, open service cases, and failed integrations. `GET /api/v1/notifications` exposes the same tenant- and role-scoped view.
 
+## Technician qualifications
+
+The dedicated **Technicians → Technician qualification matrix** compares technicians with the required skills and certificates for each visible robot model. Valid certificates may be restricted to specific models. Assignments are rejected when a required skill or valid certificate is missing, while certificates expiring within 60 days produce a warning. Assignment and removal actions are written to the Robot Passport, audit history, Outbox, and persistent state.
+
+Workforce endpoints:
+
+```text
+GET    /api/v1/workforce/matrix
+GET    /api/v1/technicians
+POST   /api/v1/technicians
+POST   /api/v1/technicians/:id/qualifications
+POST   /api/v1/robot-assignments
+DELETE /api/v1/robot-assignments/:id
+```
+
+Platform, data, and support administrators can manage technicians and assignments. Other human roles receive a read-only matrix; robot accounts cannot access workforce data.
+
 Run the smoke tests in a second command:
 
 ```bash
@@ -201,7 +218,9 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - Platform robot-account administration without password disclosure
 - Robot Registry CSV export from the dashboard
 - Role-controlled compatibility record editor
-- Responsive five-tab dashboard with keyboard navigation and remembered selection
+- Responsive six-tab dashboard with keyboard navigation and remembered selection
+- Technician skill/certificate matching with enforced robot assignment eligibility
+- Workforce assignment evidence in Robot Passports, audit history, notifications, and Outbox
 
 ## Container deployment
 

@@ -44,6 +44,7 @@
         <button type="button" role="tab" aria-selected="false" data-dashboard-tab="robots">Robots</button>
         <button type="button" role="tab" aria-selected="false" data-dashboard-tab="operations">Events &amp; Service</button>
         <button type="button" role="tab" aria-selected="false" data-dashboard-tab="autoxing">AutoXing</button>
+        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="workforce">Technicians</button>
         <button type="button" role="tab" aria-selected="false" data-dashboard-tab="admin">Administration</button>
       </nav>
       <section class="hero" data-dashboard-view="overview">
@@ -152,6 +153,14 @@
           <div id="robotAccountsList" class="record-list"><div class="empty">Loading robot accounts…</div></div>
         </article>
       </section>
+      <section class="lower-grid" id="workforceSection" data-dashboard-view="workforce">
+        <article class="panel audit-panel">
+          <div class="panel-header"><div><p class="eyebrow">Skills and certificate gate</p><h2>Technician qualification matrix</h2></div><button class="button primary" id="newTechnicianButton" type="button">＋ Add technician</button></div>
+          <div class="workforce-toolbar"><label>Robot<select id="workforceRobotFilter"><option value="">All visible robots</option></select></label><label>Eligibility<select id="workforceStatusFilter"><option value="">All eligibility states</option><option value="qualified">Qualified</option><option value="expiring_soon">Expiring soon</option><option value="not_qualified">Not qualified</option><option value="assigned">Assigned</option></select></label><button class="text-button" id="refreshWorkforce" type="button">Refresh</button></div>
+          <div id="workforceSummary" class="workforce-summary"></div>
+          <div id="workforceMatrixList" class="workforce-list"><div class="empty">Loading technician eligibility…</div></div>
+        </article>
+      </section>
       <section class="lower-grid" data-dashboard-view="admin">
         <article class="panel audit-panel">
           <div class="panel-header"><div><p class="eyebrow">Accountability</p><h2>Recent audit activity</h2></div><button class="text-button" id="refreshAudit">Refresh</button></div>
@@ -224,6 +233,27 @@
         <div class="form-grid"><label>Version constraint<input id="compatibilityVersion" required maxlength="120" placeholder="wrapper-backed" /></label><label>Status<select id="compatibilityStatus" required><option value="testing_required">Testing required</option><option value="compatible">Compatible</option><option value="incompatible">Incompatible</option><option value="deprecated">Deprecated</option><option value="blocked">Blocked</option></select></label></div>
         <label>Evidence<textarea id="compatibilityEvidence" maxlength="1000" rows="4" placeholder="Test result, contract version, or safety reason"></textarea></label>
         <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Save record</button></div>
+      </form>
+    </dialog>
+    <dialog id="technicianDialog">
+      <form method="dialog" id="technicianForm">
+        <div class="dialog-header"><div><p class="eyebrow">Workforce administration</p><h2>Add technician</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close">×</button></div>
+        <p class="dialog-copy">Create the person first, then add verified skills and certificates from the qualification matrix.</p>
+        <label>Full name<input id="technicianName" required maxlength="160" placeholder="Alex Morgan" /></label>
+        <label>Email address<input id="technicianEmail" type="email" required maxlength="200" placeholder="alex@example.com" /></label>
+        <label>Organization<select id="technicianOrganization"><option value="org-service">Demo Robot Care</option><option value="org-demo">Demo Customer GmbH</option><option value="org-ef">EF Systemhaus</option></select></label>
+        <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Create technician</button></div>
+      </form>
+    </dialog>
+    <dialog id="qualificationDialog">
+      <form method="dialog" id="qualificationForm">
+        <div class="dialog-header"><div><p class="eyebrow">Verified capability</p><h2>Add qualification</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close">×</button></div>
+        <p class="dialog-copy" id="qualificationTechnicianName"></p>
+        <label>Qualification type<select id="qualificationKind"><option value="skill">Skill</option><option value="certificate">Certificate</option></select></label>
+        <label>Code<select id="qualificationCode"></select></label>
+        <label id="qualificationLevelField">Level<select id="qualificationLevel"><option value="qualified">Qualified</option><option value="intermediate">Intermediate</option><option value="advanced">Advanced</option><option value="expert">Expert</option></select></label>
+        <div id="certificateFields" class="hidden"><label>Issuer<input id="qualificationIssuer" maxlength="160" placeholder="Training or certification body" /></label><label>Valid until<input id="qualificationValidUntil" type="date" /></label><label>Approved robot model<select id="qualificationModel"><option value="">All robot models</option></select></label></div>
+        <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Save qualification</button></div>
       </form>
     </dialog>
     <dialog id="notificationsDialog" class="notifications-dialog" aria-labelledby="notificationsTitle">

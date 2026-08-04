@@ -45,6 +45,9 @@ const state = {
   robots: new Map(),
   passportEntries: new Map(),
   serviceCases: new Map(),
+  technicians: new Map(),
+  modelRequirements: new Map(),
+  robotAssignments: new Map(),
   documents: [],
   certificates: [],
   deployments: [],
@@ -112,7 +115,7 @@ function persistedSnapshot() {
     sessions: mapEntries(authenticatedSessions).filter(([, session]) => session.expiresAt > Date.now()),
     state: {
       tenants: mapEntries(state.tenants), organizations: mapEntries(state.organizations), sites: mapEntries(state.sites), models: mapEntries(state.models), robots: mapEntries(state.robots),
-      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), documents: state.documents, certificates: state.certificates,
+      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), documents: state.documents, certificates: state.certificates,
       deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox,
       autoxing: { ...state.autoxing, pois: mapEntries(state.autoxing.pois), areas: mapEntries(state.autoxing.areas), maps: mapEntries(state.autoxing.maps), tasks: mapEntries(state.autoxing.tasks) },
       adapterRuntime: mapEntries(state.adapters).map(([provider, adapter]) => [provider, { lastSyncAt: adapter.lastSyncAt || null, lastSyncStatus: adapter.lastSyncStatus || 'never', lastError: adapter.lastError || null }])
@@ -152,7 +155,7 @@ function loadPersistedState() {
     for (const [token, user] of Object.entries(saved.users || {})) demoUsers[token] = user;
     initializeCredentialHashes();
     replaceMap(authenticatedSessions, (saved.sessions || []).filter(([, session]) => session.expiresAt > Date.now()));
-    for (const name of ['tenants', 'organizations', 'sites', 'models', 'robots', 'passportEntries', 'serviceCases']) replaceMap(state[name], saved.state[name]);
+    for (const name of ['tenants', 'organizations', 'sites', 'models', 'robots', 'passportEntries', 'serviceCases', 'technicians', 'modelRequirements', 'robotAssignments']) replaceMap(state[name], saved.state[name]);
     for (const name of ['documents', 'certificates', 'deployments', 'compatibilityRecords', 'events', 'audit', 'outbox']) if (Array.isArray(saved.state[name])) state[name] = saved.state[name];
     const autoXing = saved.state.autoxing || {};
     state.autoxing.businesses = autoXing.businesses || []; state.autoxing.buildings = autoXing.buildings || []; state.autoxing.lastSyncAt = autoXing.lastSyncAt || null; state.autoxing.resourceErrors = autoXing.resourceErrors || [];
@@ -162,6 +165,20 @@ function loadPersistedState() {
   } catch (error) {
     console.error(`Could not load ${DATA_FILE}; starting from the seeded state: ${error.message}`);
     return false;
+  }
+}
+
+function applyRequestedTechnicianRoster() {
+  const roster = [
+    ['technician-lena','Midhun Eldose','midhun.eldose@robotcare.demo'],
+    ['technician-omar','Ahmed Galai','ahmed.galai@robotcare.demo'],
+    ['technician-nora','Michell Blawat','michell.blawat@robotcare.demo'],
+    ['technician-elvis','Elvis Heil','elvis.heil@robotcare.demo']
+  ];
+  for (const [id,name,email] of roster) {
+    const existing = state.technicians.get(id);
+    if (existing) { Object.assign(existing,{ name,email,jobTitle:'Service Technician',updatedAt:timestamp() }); continue; }
+    state.technicians.set(id,{ id,tenantId:'tenant-demo',organizationId:'org-service',name,email,jobTitle:'Service Technician',status:'active',skills:id === 'technician-omar' ? [{ code:'fleet_diagnostics',level:'advanced',verifiedAt:timestamp() }] : [{ code:'autoxing_service',level:'qualified',verifiedAt:timestamp() },{ code:'cleaning_robot_service',level:'qualified',verifiedAt:timestamp() }],certificates:id === 'technician-omar' ? [] : [{ id:`cert-${id}-safety`,type:'robot_electrical_safety',issuer:'Demo Technical Academy',validUntil:new Date(Date.now()+365*86400000).toISOString(),modelIds:['model-autoxing-a1','model-cenobots-c1'] }],createdAt:timestamp(),updatedAt:timestamp() });
   }
 }
 
@@ -185,6 +202,16 @@ function seed() {
   state.models.set('model-autoxing-a1', { id: 'model-autoxing-a1', manufacturer: 'AutoXing', model: 'A1', category: 'cleaning', capabilities: ['read.status', 'read.battery', 'event.alert'] });
   state.models.set('model-cenobots-c1', { id: 'model-cenobots-c1', manufacturer: 'CenoBots', model: 'C1', category: 'cleaning', capabilities: ['read.status', 'read.battery', 'read.service_history'] });
   state.models.set('model-mock-m3', { id: 'model-mock-m3', manufacturer: 'Mock OEM', model: 'M3', category: 'transport', capabilities: ['read.status', 'event.status'] });
+  state.modelRequirements.set('model-autoxing-a1', { modelId: 'model-autoxing-a1', requiredSkills: ['autoxing_service'], requiredCertificates: ['robot_electrical_safety'], updatedAt: timestamp() });
+  state.modelRequirements.set('model-cenobots-c1', { modelId: 'model-cenobots-c1', requiredSkills: ['cleaning_robot_service'], requiredCertificates: ['robot_electrical_safety'], updatedAt: timestamp() });
+  state.modelRequirements.set('model-mock-m3', { modelId: 'model-mock-m3', requiredSkills: ['fleet_diagnostics'], requiredCertificates: [], updatedAt: timestamp() });
+  const certificateFuture = new Date(Date.now() + 365 * 86400000).toISOString();
+  const certificateSoon = new Date(Date.now() + 35 * 86400000).toISOString();
+  const certificatePast = new Date(Date.now() - 30 * 86400000).toISOString();
+  state.technicians.set('technician-lena', { id:'technician-lena', tenantId:'tenant-demo', organizationId:'org-service', name:'Midhun Eldose', email:'midhun.eldose@robotcare.demo', jobTitle:'Service Technician', status:'active', skills:[{ code:'autoxing_service', level:'advanced', verifiedAt:timestamp() },{ code:'cleaning_robot_service', level:'advanced', verifiedAt:timestamp() }], certificates:[{ id:'cert-lena-safety', type:'robot_electrical_safety', issuer:'Demo Technical Academy', validUntil:certificateFuture, modelIds:['model-autoxing-a1','model-cenobots-c1'] }], createdAt:timestamp(), updatedAt:timestamp() });
+  state.technicians.set('technician-omar', { id:'technician-omar', tenantId:'tenant-demo', organizationId:'org-service', name:'Ahmed Galai', email:'ahmed.galai@robotcare.demo', jobTitle:'Service Technician', status:'active', skills:[{ code:'fleet_diagnostics', level:'advanced', verifiedAt:timestamp() }], certificates:[], createdAt:timestamp(), updatedAt:timestamp() });
+  state.technicians.set('technician-nora', { id:'technician-nora', tenantId:'tenant-demo', organizationId:'org-service', name:'Michell Blawat', email:'michell.blawat@robotcare.demo', jobTitle:'Service Technician', status:'active', skills:[{ code:'cleaning_robot_service', level:'intermediate', verifiedAt:timestamp() }], certificates:[{ id:'cert-nora-safety', type:'robot_electrical_safety', issuer:'Demo Technical Academy', validUntil:certificatePast, modelIds:['model-cenobots-c1'] },{ id:'cert-nora-autoxing', type:'autoxing_service_authorization', issuer:'Demo OEM Academy', validUntil:certificateSoon, modelIds:['model-autoxing-a1'] }], createdAt:timestamp(), updatedAt:timestamp() });
+  state.technicians.set('technician-elvis', { id:'technician-elvis', tenantId:'tenant-demo', organizationId:'org-service', name:'Elvis Heil', email:'elvis.heil@robotcare.demo', jobTitle:'Service Technician', status:'active', skills:[{ code:'autoxing_service', level:'advanced', verifiedAt:timestamp() },{ code:'cleaning_robot_service', level:'qualified', verifiedAt:timestamp() }], certificates:[{ id:'cert-elvis-safety', type:'robot_electrical_safety', issuer:'Demo Technical Academy', validUntil:certificateFuture, modelIds:['model-autoxing-a1','model-cenobots-c1'] }], createdAt:timestamp(), updatedAt:timestamp() });
   state.compatibilityRecords.push(
     { id: ids(), tenantId: 'tenant-demo', modelId: 'model-autoxing-a1', capability: 'read.status', versionConstraint: 'wrapper-backed', status: 'compatible', evidence: 'AutoXing reference-adapter contract', verifiedAt: timestamp(), verifiedBy: 'Altegro Engineering' },
     { id: ids(), tenantId: 'tenant-demo', modelId: 'model-autoxing-a1', capability: 'remote.command', versionConstraint: 'all', status: 'blocked', evidence: 'Phase 1 command safety gate', verifiedAt: timestamp(), verifiedBy: 'Altegro Security' },
@@ -435,6 +462,7 @@ function getPassport(robotId) {
     deployments: clone(state.deployments.filter((item) => item.robotId === robotId)),
     serviceCases: clone([...state.serviceCases.values()].filter((item) => item.robotId === robotId)),
     compatibility: clone(state.compatibilityRecords.filter((item) => item.modelId === robot.modelId)),
+    workforce: { requirements:workRequirementsForRobot(robot), assignedTechnicians:[...state.robotAssignments.values()].filter((item) => item.robotId === robotId && item.status === 'active').map((assignment) => { const technician = state.technicians.get(assignment.technicianId); return technician ? { assignment:clone(assignment), technician:{ id:technician.id, name:technician.name, email:technician.email, jobTitle:technician.jobTitle || 'Service Technician' }, eligibility:technicianEligibility(technician, robot) } : null; }).filter(Boolean) },
     completeness: calculateCompleteness(robot, entries)
   };
 }
@@ -513,6 +541,49 @@ function serviceCasesForActor(actor) {
   return [...state.serviceCases.values()].filter((item) => robotIds.has(item.robotId));
 }
 
+function canManageWorkforce(actor) {
+  return ['platform_admin', 'data_admin', 'support_admin'].includes(actor.role);
+}
+
+function techniciansForActor(actor) {
+  if (actor.role === 'robot_user') return [];
+  return [...state.technicians.values()].filter((technician) => technician.tenantId === actor.tenantId);
+}
+
+function workRequirementsForRobot(robot) {
+  const modelRequirements = state.modelRequirements.get(robot.modelId) || { requiredSkills: [], requiredCertificates: [] };
+  const robotRequirements = robot.workRequirements || {};
+  return { modelId: robot.modelId, requiredSkills: [...new Set([...(modelRequirements.requiredSkills || []), ...(robotRequirements.requiredSkills || [])])], requiredCertificates: [...new Set([...(modelRequirements.requiredCertificates || []), ...(robotRequirements.requiredCertificates || [])])] };
+}
+
+function technicianEligibility(technician, robot) {
+  const requirements = workRequirementsForRobot(robot);
+  const skillCodes = new Set((technician.skills || []).map((skill) => String(skill.code).toLowerCase()));
+  const missingSkills = requirements.requiredSkills.filter((code) => !skillCodes.has(String(code).toLowerCase()));
+  const now = Date.now(); const expiringCutoff = now + 60 * 86400000; const matchingCertificates = [];
+  const missingCertificates = requirements.requiredCertificates.filter((type) => {
+    const match = (technician.certificates || []).find((certificate) => String(certificate.type).toLowerCase() === String(type).toLowerCase() && (!certificate.modelIds?.length || certificate.modelIds.includes(robot.modelId)) && Date.parse(certificate.validUntil) >= now);
+    if (match) matchingCertificates.push(match);
+    return !match;
+  });
+  const expiringCertificates = matchingCertificates.filter((certificate) => Date.parse(certificate.validUntil) <= expiringCutoff).map((certificate) => ({ id:certificate.id, type:certificate.type, validUntil:certificate.validUntil }));
+  const status = missingSkills.length || missingCertificates.length ? 'not_qualified' : expiringCertificates.length ? 'expiring_soon' : 'qualified';
+  return { status, eligible: status !== 'not_qualified', requirements, missingSkills, missingCertificates, expiringCertificates };
+}
+
+function workforceMatrix(actor, robotId = null) {
+  if (actor.role === 'robot_user') throw httpError(403, 'Workforce qualification access is not available to robot accounts');
+  let robots = [...state.robots.values()].filter((robot) => visibleToActor(actor, robot));
+  if (robotId) robots = robots.filter((robot) => robot.id === robotId);
+  const technicians = techniciansForActor(actor).filter((technician) => technician.status === 'active');
+  const rows = [];
+  for (const robot of robots) for (const technician of technicians) {
+    const assignment = [...state.robotAssignments.values()].find((item) => item.robotId === robot.id && item.technicianId === technician.id && item.status === 'active') || null;
+    rows.push({ robot: { id:robot.id, serialNumber:robot.serialNumber, modelId:robot.modelId }, technician: { id:technician.id, name:technician.name, email:technician.email, jobTitle:technician.jobTitle || 'Service Technician', organizationId:technician.organizationId }, eligibility: technicianEligibility(technician, robot), assignment: assignment ? clone(assignment) : null });
+  }
+  return { rows, robots: robots.map((robot) => ({ id:robot.id, serialNumber:robot.serialNumber, modelId:robot.modelId, requirements:workRequirementsForRobot(robot) })), technicians:clone(technicians), assignments:clone([...state.robotAssignments.values()].filter((item) => robots.some((robot) => robot.id === item.robotId))), permissions:{ manage:canManageWorkforce(actor) }, generatedAt:timestamp() };
+}
+
 function operationsSummary(actor) {
   const robots = [...state.robots.values()].filter((robot) => visibleToActor(actor, robot));
   const robotIds = new Set(robots.map((robot) => robot.id));
@@ -546,6 +617,12 @@ function operationalNotifications(actor) {
     notifications.push({ id: `certificate:${certificate.id}`, type: 'certificate_due', severity: Date.parse(certificate.validUntil) < Date.now() ? 'critical' : 'warning', title: certificate.title, message: `${robot?.serialNumber || 'Robot'} · certificate ${Date.parse(certificate.validUntil) < Date.now() ? 'expired' : 'expires soon'}.`, robotId: certificate.robotId, occurredAt: certificate.validUntil });
   }
   for (const serviceCase of serviceCasesForActor(actor).filter((item) => !['resolved', 'closed'].includes(item.status)).slice(0, 10)) notifications.push({ id: `service:${serviceCase.id}`, type: 'service_case', severity: serviceCase.severity || 'warning', title: serviceCase.title, message: `Service case ${serviceCase.externalId} is ${serviceCase.status.replaceAll('_', ' ')}.`, robotId: serviceCase.robotId, occurredAt: serviceCase.updatedAt });
+  for (const assignment of state.robotAssignments.values()) {
+    if (assignment.status !== 'active' || !robotIds.has(assignment.robotId)) continue;
+    const robot = state.robots.get(assignment.robotId); const technician = state.technicians.get(assignment.technicianId); if (!robot || !technician) continue;
+    const eligibility = technicianEligibility(technician,robot);
+    if (eligibility.status !== 'qualified') notifications.push({ id:`qualification:${assignment.id}`, type:'technician_qualification', severity:eligibility.status === 'not_qualified' ? 'error' : 'warning', title:`${technician.name} · ${eligibility.status.replaceAll('_',' ')}`, message:`Assignment to ${robot.serialNumber} requires qualification review.`, robotId:robot.id, occurredAt:technician.updatedAt || assignment.assignedAt });
+  }
   if (!['robot_user', 'auditor'].includes(actor.role)) for (const adapter of state.adapters.values()) if (adapter.lastSyncStatus === 'error') notifications.push({ id: `adapter:${adapter.provider}`, type: 'integration_error', severity: 'error', title: `${adapter.provider} synchronization failed`, message: 'Retry synchronization or inspect the protected server log.', robotId: null, occurredAt: adapter.lastSyncAt || startedAt });
   const rank = { critical: 0, error: 1, warning: 2, info: 3 };
   notifications.sort((a, b) => (rank[a.severity] ?? 4) - (rank[b.severity] ?? 4) || Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
@@ -696,6 +773,53 @@ async function handle(req, res) {
 
   if (req.method === 'GET' && path === '/api/v1/operations/summary') return send(res, 200, { data: operationsSummary(actor) });
   if (req.method === 'GET' && path === '/api/v1/notifications') { const data = operationalNotifications(actor); return send(res, 200, { data, count: data.length, generatedAt: timestamp() }); }
+  if (req.method === 'GET' && path === '/api/v1/workforce/matrix') { const data = workforceMatrix(actor, url.searchParams.get('robotId')); return send(res, 200, { data }); }
+  if (req.method === 'GET' && path === '/api/v1/technicians') {
+    if (actor.role === 'robot_user') throw httpError(403, 'Technician access is not available to robot accounts');
+    const data = techniciansForActor(actor); return send(res, 200, { data, count:data.length });
+  }
+  if (req.method === 'POST' && path === '/api/v1/technicians') {
+    if (!canManageWorkforce(actor)) throw httpError(403, 'Workforce administration permission required');
+    for (const field of ['name','email']) if (!body[field]) throw httpError(400, `Missing required field: ${field}`);
+    const email = String(body.email).trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw httpError(400, 'Technician email must be valid');
+    if ([...state.technicians.values()].some((item) => item.tenantId === actor.tenantId && item.email.toLowerCase() === email)) throw httpError(409, 'A technician with that email already exists');
+    const technician = { id:ids(), tenantId:actor.tenantId, organizationId:body.organizationId || 'org-service', name:String(body.name).trim().slice(0,160), email, jobTitle:String(body.jobTitle || 'Service Technician').slice(0,120), status:'active', skills:[], certificates:[], createdAt:timestamp(), updatedAt:timestamp() };
+    state.technicians.set(technician.id, technician); appendOutbox('technician.created','technician',technician.id,{ name:technician.name }); recordAudit(actor,'technician.create','technician',technician.id); return send(res,201,{ data:technician });
+  }
+  const technicianQualification = route(req.method, path, /^\/api\/v1\/technicians\/([^/]+)\/qualifications$/);
+  if (technicianQualification && req.method === 'POST') {
+    if (!canManageWorkforce(actor)) throw httpError(403, 'Workforce administration permission required');
+    const technician = state.technicians.get(technicianQualification.id); if (!technician || technician.tenantId !== actor.tenantId) throw httpError(404, 'Technician not found');
+    const code = String(body.code || '').trim().toLowerCase(); if (!code || !/^[a-z0-9][a-z0-9._-]{1,119}$/.test(code)) throw httpError(400, 'Qualification code must contain letters, numbers, dots, underscores, or hyphens');
+    let qualification;
+    if (body.kind === 'skill') {
+      qualification = { code, level:String(body.level || 'qualified').slice(0,80), verifiedAt:timestamp() };
+      technician.skills = (technician.skills || []).filter((item) => item.code !== code); technician.skills.push(qualification);
+    } else if (body.kind === 'certificate') {
+      if (!body.issuer || !body.validUntil || Number.isNaN(Date.parse(body.validUntil))) throw httpError(400, 'Certificate issuer and a valid expiry date are required');
+      const modelIds = Array.isArray(body.modelIds) ? body.modelIds.filter((modelId) => state.models.has(modelId)) : [];
+      qualification = { id:ids(), type:code, issuer:String(body.issuer).slice(0,160), validUntil:new Date(body.validUntil).toISOString(), modelIds };
+      technician.certificates = (technician.certificates || []).filter((item) => !(item.type === code && JSON.stringify(item.modelIds || []) === JSON.stringify(modelIds))); technician.certificates.push(qualification);
+    } else throw httpError(400, 'Qualification kind must be skill or certificate');
+    technician.updatedAt = timestamp(); appendOutbox('technician.qualification.updated','technician',technician.id,{ kind:body.kind, code }); recordAudit(actor,'technician.qualification.add','technician',technician.id,'success',{ kind:body.kind, code }); return send(res,201,{ data:qualification, technician });
+  }
+  if (req.method === 'POST' && path === '/api/v1/robot-assignments') {
+    if (!canManageWorkforce(actor)) throw httpError(403, 'Workforce administration permission required');
+    const robot = state.robots.get(body.robotId); if (!robot || !visibleToActor(actor,robot)) throw httpError(404,'Robot not found');
+    const technician = state.technicians.get(body.technicianId); if (!technician || technician.tenantId !== actor.tenantId || technician.status !== 'active') throw httpError(404,'Technician not found');
+    const eligibility = technicianEligibility(technician,robot); if (!eligibility.eligible) throw httpError(409,'Technician is missing required qualifications',{ missingSkills:eligibility.missingSkills, missingCertificates:eligibility.missingCertificates });
+    const existing = [...state.robotAssignments.values()].find((item) => item.robotId === robot.id && item.technicianId === technician.id && item.status === 'active'); if (existing) return send(res,200,{ data:existing, eligibility, idempotent:true });
+    const assignment = { id:ids(), tenantId:actor.tenantId, robotId:robot.id, technicianId:technician.id, status:'active', notes:String(body.notes || '').slice(0,1000), assignedBy:actor.id, assignedAt:timestamp(), endedAt:null };
+    state.robotAssignments.set(assignment.id,assignment); appendPassportEntry(robot.id,{ type:'technician_assigned',source:'altegro',data:{ assignmentId:assignment.id,technicianId:technician.id,technicianName:technician.name,eligibilityStatus:eligibility.status } },actor); appendOutbox('robot.technician.assigned','robot',robot.id,{ assignmentId:assignment.id,technicianId:technician.id }); recordAudit(actor,'technician.assign','robot',robot.id,'success',{ assignmentId:assignment.id,technicianId:technician.id }); return send(res,201,{ data:assignment, eligibility });
+  }
+  const robotAssignment = route(req.method,path,/^\/api\/v1\/robot-assignments\/([^/]+)$/);
+  if (robotAssignment && req.method === 'DELETE') {
+    if (!canManageWorkforce(actor)) throw httpError(403,'Workforce administration permission required');
+    const assignment = state.robotAssignments.get(robotAssignment.id); if (!assignment || assignment.tenantId !== actor.tenantId) throw httpError(404,'Assignment not found');
+    const robot = state.robots.get(assignment.robotId); if (!robot || !visibleToActor(actor,robot)) throw httpError(404,'Assignment not found');
+    assignment.status='ended'; assignment.endedAt=timestamp(); appendPassportEntry(robot.id,{ type:'technician_unassigned',source:'altegro',data:{ assignmentId:assignment.id,technicianId:assignment.technicianId,endedAt:assignment.endedAt } },actor); appendOutbox('robot.technician.unassigned','robot',robot.id,{ assignmentId:assignment.id,technicianId:assignment.technicianId }); recordAudit(actor,'technician.unassign','robot',robot.id,'success',{ assignmentId:assignment.id,technicianId:assignment.technicianId }); return send(res,200,{ data:assignment });
+  }
   if (req.method === 'GET' && path === '/api/v1/compatibility') return send(res, 200, { data: state.compatibilityRecords.filter((item) => item.tenantId === actor.tenantId), count: state.compatibilityRecords.filter((item) => item.tenantId === actor.tenantId).length });
   if (req.method === 'POST' && path === '/api/v1/compatibility') {
     if (!['platform_admin', 'data_admin'].includes(actor.role)) throw httpError(403, 'Compatibility administration permission required');
@@ -962,8 +1086,9 @@ async function handle(req, res) {
 
 seed();
 initializeCredentialHashes();
-const restoredFromDisk = loadPersistedState();
-if (persistenceEnabled() && !restoredFromDisk) persistState();
+loadPersistedState();
+applyRequestedTechnicianRoster();
+if (persistenceEnabled()) persistState();
 const server = http.createServer(async (req, res) => {
   try {
     await handle(req, res);

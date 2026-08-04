@@ -1,6 +1,6 @@
 'use strict';
 
-const state = { token: null, user: null, robots: [], robotOptions: [], serviceCases: [], compatibility: [], notifications: [], audit: [], autoXingResources: null, autoXingTasks: [], robotAccounts: [], summary: null, selectedRobotId: null, registry: { page:1, pageSize:10, pageCount:1, count:0 }, sync: { provider:null, startedAt:0, timer:null } };
+const state = { token: null, user: null, robots: [], robotOptions: [], serviceCases: [], compatibility: [], notifications: [], audit: [], autoXingResources: null, autoXingTasks: [], robotAccounts: [], workforce: null, summary: null, selectedRobotId: null, registry: { page:1, pageSize:10, pageCount:1, count:0 }, sync: { provider:null, startedAt:0, timer:null } };
 const $ = (selector) => document.querySelector(selector);
 const api = async (path, options = {}) => {
   const response = await fetch(path, { ...options, headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -17,7 +17,7 @@ const download = async (path, fallbackName) => {
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 const formatDate = (value) => value ? new Date(value).toLocaleString([], { dateStyle:'medium', timeStyle:'short' }) : '—';
 const toDateTimeLocal = (date = new Date()) => { const offset = date.getTimezoneOffset(); return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16); };
-const dashboardViews = new Set(['overview', 'robots', 'operations', 'autoxing', 'admin']);
+const dashboardViews = new Set(['overview', 'robots', 'operations', 'autoxing', 'workforce', 'admin']);
 
 function toast(message, isError = false) {
   const element = $('#toast'); element.textContent = message; element.classList.toggle('error', isError); element.classList.add('show');
@@ -43,6 +43,8 @@ function showApp() {
   $('#resourceExplorerPanel').classList.toggle('hidden', robotUser);
   $('#taskHistoryPanel').classList.toggle('audit-panel', robotUser);
   $('#robotAccountsSection').classList.toggle('hidden', state.user.role !== 'platform_admin');
+  $('#workforceSection').classList.toggle('hidden', robotUser);
+  $('#newTechnicianButton').classList.toggle('hidden', !['platform_admin','data_admin','support_admin'].includes(state.user.role));
   $('#newCompatibilityButton').classList.toggle('hidden', !['platform_admin', 'data_admin'].includes(state.user.role));
   const accountFields = $('#robotAccountFields'); if (accountFields) accountFields.classList.toggle('hidden', robotUser);
   setDashboardView(sessionStorage.getItem('altegroDashboardView') || 'overview');
@@ -81,8 +83,14 @@ function populateTaskRobotFilter() {
   if (selected && robots.some((robot) => robot.id === selected)) select.value = selected;
 }
 
+function populateWorkforceRobotFilter() {
+  const select = $('#workforceRobotFilter'); if (!select) return; const selected = select.value;
+  select.innerHTML = '<option value="">All visible robots</option>' + state.robotOptions.map((robot) => `<option value="${escapeHtml(robot.id)}">${escapeHtml(robot.serialNumber)} · ${escapeHtml(robot.modelId.replace('model-','').replaceAll('-',' '))}</option>`).join('');
+  if (selected && state.robotOptions.some((robot) => robot.id === selected)) select.value = selected;
+}
+
 async function loadRobotOptions() {
-  const payload = await api('/api/v1/robots?pageSize=100&sort=serialNumber&order=asc'); state.robotOptions = payload.data; populateExistingRobotSelect(); populateEventRobotFilter(); populateTaskRobotFilter();
+  const payload = await api('/api/v1/robots?pageSize=100&sort=serialNumber&order=asc'); state.robotOptions = payload.data; populateExistingRobotSelect(); populateEventRobotFilter(); populateTaskRobotFilter(); populateWorkforceRobotFilter();
 }
 
 async function login(email, password) {
@@ -152,7 +160,7 @@ async function loadPassport(robotId) {
 }
 
 function renderPassport(passport) {
-  const robot = passport.robot; const model = passport.model || {}; const entries = [...(passport.entries || [])].reverse(); const technicalEvents = entries.filter((entry) => entry.type === 'technical_event'); const documents = passport.documents || []; const certificates = passport.certificates || []; const deployments = passport.deployments || []; const cases = passport.serviceCases || []; const compatibility = passport.compatibility || [];
+  const robot = passport.robot; const model = passport.model || {}; const entries = [...(passport.entries || [])].reverse(); const technicalEvents = entries.filter((entry) => entry.type === 'technical_event'); const documents = passport.documents || []; const certificates = passport.certificates || []; const deployments = passport.deployments || []; const cases = passport.serviceCases || []; const compatibility = passport.compatibility || []; const workforce = passport.workforce || { requirements:{ requiredSkills:[], requiredCertificates:[] }, assignedTechnicians:[] };
   const compactRecords = (items, empty, formatter) => items.length ? items.slice().reverse().slice(0, 5).map(formatter).join('') : `<div class="serial provider-empty">${empty}</div>`;
   $('#passportContent').className = 'passport-body';
   $('#passportContent').innerHTML = `<div class="passport-title"><div><p class="eyebrow">Immutable Altegro identity</p><h3>${escapeHtml(robot.serialNumber)}</h3><div class="identity-code">${escapeHtml(robot.id)}</div></div><span class="status status-${escapeHtml(robot.status)}">${escapeHtml(robot.status)}</span></div>
@@ -165,6 +173,8 @@ function renderPassport(passport) {
       <section><div class="subhead"><h4>Certificates</h4><span class="count-pill">${certificates.length}</span></div>${compactRecords(certificates, 'No certificates recorded.', (item) => `<div class="mini-record"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.issuer)} · expires ${formatDate(item.validUntil)}</small></div>`)}</section>
       <section><div class="subhead"><h4>Deployments</h4><span class="count-pill">${deployments.length}</span></div>${compactRecords(deployments, 'No deployment evidence.', (item) => `<div class="mini-record"><strong>${escapeHtml(item.packageName)} · ${escapeHtml(item.version)}</strong><small>${escapeHtml(item.status)}${item.rollbackVersion ? ` · rollback ${escapeHtml(item.rollbackVersion)}` : ''}</small></div>`)}</section>
       <section><div class="subhead"><h4>Service cases</h4><span class="count-pill">${cases.length}</span></div>${compactRecords(cases, 'No service cases linked.', (item) => `<div class="mini-record"><strong>${escapeHtml(item.title || item.externalId)}</strong><small>${escapeHtml(item.status)} · ${escapeHtml(item.assignedTo || 'unassigned')}</small></div>`)}</section>
+      <section><div class="subhead"><h4>Work requirements</h4><span class="count-pill">${(workforce.requirements.requiredSkills || []).length + (workforce.requirements.requiredCertificates || []).length}</span></div><div class="mini-record"><strong>Skills</strong><small>${(workforce.requirements.requiredSkills || []).map((item) => escapeHtml(item.replaceAll('_',' '))).join(', ') || 'No required skills'}</small></div><div class="mini-record"><strong>Certificates</strong><small>${(workforce.requirements.requiredCertificates || []).map((item) => escapeHtml(item.replaceAll('_',' '))).join(', ') || 'No required certificates'}</small></div></section>
+      <section><div class="subhead"><h4>Assigned technicians</h4><span class="count-pill">${workforce.assignedTechnicians.length}</span></div>${compactRecords(workforce.assignedTechnicians, 'No technicians assigned.', (item) => `<div class="mini-record"><strong>${escapeHtml(item.technician.name)}</strong><small>${escapeHtml(item.technician.jobTitle || 'Service Technician')} · ${escapeHtml(item.eligibility.status.replaceAll('_',' '))} · ${escapeHtml(item.technician.email)}</small></div>`)}</section>
     </div>
     <div class="subhead"><h4>Compatibility</h4><span class="serial">${compatibility.length} model records</span></div><div class="compatibility-chips">${compatibility.map((item) => `<span class="compatibility-${escapeHtml(item.status)}">${escapeHtml(item.capability)} · ${escapeHtml(item.status.replaceAll('_', ' '))}</span>`).join('') || '<span class="serial">No compatibility records.</span>'}</div>
     <div class="subhead"><h4>Technical event timeline</h4><span class="serial">${technicalEvents.length} events</span></div>
@@ -309,6 +319,43 @@ function openCompatibilityDialog() {
   $('#compatibilityDialog').showModal();
 }
 
+function renderWorkforceMatrix() {
+  if (!state.workforce) return;
+  const statusFilter = $('#workforceStatusFilter').value; let rows = state.workforce.rows;
+  if (statusFilter === 'assigned') rows = rows.filter((row) => row.assignment);
+  else if (statusFilter) rows = rows.filter((row) => row.eligibility.status === statusFilter);
+  const qualified = state.workforce.rows.filter((row) => row.eligibility.status === 'qualified').length;
+  const expiring = state.workforce.rows.filter((row) => row.eligibility.status === 'expiring_soon').length;
+  const blocked = state.workforce.rows.filter((row) => row.eligibility.status === 'not_qualified').length;
+  const assigned = state.workforce.rows.filter((row) => row.assignment).length;
+  $('#workforceSummary').innerHTML = `<div class="resource-metric"><strong>${qualified}</strong><span>Qualified</span></div><div class="resource-metric"><strong>${expiring}</strong><span>Expiring soon</span></div><div class="resource-metric"><strong>${blocked}</strong><span>Not qualified</span></div><div class="resource-metric"><strong>${assigned}</strong><span>Assigned</span></div>`;
+  $('#workforceMatrixList').innerHTML = rows.length ? rows.map((row) => { const missing = [...row.eligibility.missingSkills.map((item) => `Skill: ${item.replaceAll('_',' ')}`), ...row.eligibility.missingCertificates.map((item) => `Certificate: ${item.replaceAll('_',' ')}`)]; const expiringText = row.eligibility.expiringCertificates.map((item) => `${item.type.replaceAll('_',' ')} expires ${formatDate(item.validUntil)}`); const canManage = state.workforce.permissions.manage; return `<div class="workforce-row"><div><strong>${escapeHtml(row.technician.name)}</strong><small>${escapeHtml(row.technician.jobTitle || 'Service Technician')} · ${escapeHtml(row.technician.email)}</small></div><div><strong>${escapeHtml(row.robot.serialNumber)}</strong><small>${escapeHtml(row.robot.modelId.replace('model-','').replaceAll('-',' '))}</small></div><div><span class="eligibility eligibility-${escapeHtml(row.eligibility.status)}">${escapeHtml(row.eligibility.status.replaceAll('_',' '))}</span><div class="workforce-requirements">${missing.length ? `Missing: ${escapeHtml(missing.join(' · '))}` : expiringText.length ? escapeHtml(expiringText.join(' · ')) : 'All required qualifications are valid.'}</div></div><div class="workforce-actions">${row.assignment ? `<span class="assignment-active">Assigned</span>${canManage ? `<button class="text-button" type="button" data-unassign="${escapeHtml(row.assignment.id)}">Remove</button>` : ''}` : canManage && row.eligibility.eligible ? `<button class="button primary mini" type="button" data-assign-technician="${escapeHtml(row.technician.id)}" data-assign-robot="${escapeHtml(row.robot.id)}">Assign</button>` : ''}${canManage ? `<button class="text-button" type="button" data-qualify-technician="${escapeHtml(row.technician.id)}" data-technician-name="${escapeHtml(row.technician.name)}">＋ Qualification</button>` : ''}</div></div>`; }).join('') : '<div class="empty">No technician and robot combinations match this filter.</div>';
+}
+
+async function loadWorkforceMatrix() {
+  if (state.user.role === 'robot_user') return;
+  const robotId = $('#workforceRobotFilter').value; const payload = await api(`/api/v1/workforce/matrix${robotId ? `?robotId=${encodeURIComponent(robotId)}` : ''}`); state.workforce = payload.data; renderWorkforceMatrix();
+}
+
+function openTechnicianDialog() {
+  $('#technicianName').value = ''; $('#technicianEmail').value = ''; $('#technicianOrganization').value = 'org-service'; $('#technicianDialog').showModal();
+}
+
+function updateQualificationFields() {
+  const certificate = $('#qualificationKind').value === 'certificate'; $('#qualificationLevelField').classList.toggle('hidden', certificate); $('#certificateFields').classList.toggle('hidden', !certificate);
+  const requirements = (state.workforce?.robots || []).flatMap((robot) => certificate ? robot.requirements.requiredCertificates : robot.requirements.requiredSkills);
+  const defaults = certificate ? ['robot_electrical_safety','autoxing_service_authorization'] : ['autoxing_service','cleaning_robot_service','fleet_diagnostics'];
+  const codes = [...new Set([...requirements,...defaults])].sort(); $('#qualificationCode').innerHTML = codes.map((code) => `<option value="${escapeHtml(code)}">${escapeHtml(code.replaceAll('_',' '))}</option>`).join('');
+}
+
+function openQualificationDialog(technicianId, technicianName) {
+  const dialog = $('#qualificationDialog'); dialog.dataset.technicianId = technicianId; $('#qualificationTechnicianName').textContent = `Add a verified skill or certificate for ${technicianName}.`; $('#qualificationKind').value = 'skill'; $('#qualificationLevel').value = 'qualified'; $('#qualificationIssuer').value = ''; $('#qualificationValidUntil').value = ''; const models = [...new Set(state.robotOptions.map((robot) => robot.modelId))].sort(); $('#qualificationModel').innerHTML = '<option value="">All robot models</option>' + models.map((modelId) => `<option value="${escapeHtml(modelId)}">${escapeHtml(modelId.replace('model-','').replaceAll('-',' '))}</option>`).join(''); updateQualificationFields(); dialog.showModal();
+}
+
+async function refreshWorkforceAndPassport(robotId = null) {
+  await Promise.all([loadWorkforceMatrix(), loadNotifications(), loadAudit(), robotId && state.selectedRobotId === robotId ? loadPassport(robotId) : Promise.resolve()]);
+}
+
 function setSyncButtons(running) {
   document.querySelectorAll('.sync-button, #syncSelected').forEach((button) => { button.disabled = running; button.classList.toggle('running', running); });
 }
@@ -330,7 +377,7 @@ async function syncAdapter(provider) {
     if (error.status !== 401) { setSyncStatus(`${provider} synchronization failed. ${error.message}`, 'error', provider); toast(`Sync failed: ${error.message}`, true); await loadAdapters().catch(() => {}); }
   } finally { clearInterval(state.sync.timer); state.sync.timer = null; state.sync.provider = null; setSyncButtons(false); }
 }
-async function refreshAll() { try { await Promise.all([loadRobotOptions(), loadRobots(), loadEvents(), loadAdapters(), loadOperationsSummary(), loadServiceCases(), loadCompatibility(), loadNotifications(), loadAudit(), loadAutoXingResources(), loadAutoXingTasks(), loadRobotAccounts()]); } catch (error) { if (error.status !== 401) toast(error.message, true); } }
+async function refreshAll() { try { await Promise.all([loadRobotOptions(), loadRobots(), loadEvents(), loadAdapters(), loadOperationsSummary(), loadServiceCases(), loadCompatibility(), loadNotifications(), loadAudit(), loadAutoXingResources(), loadAutoXingTasks(), loadRobotAccounts(), loadWorkforceMatrix()]); } catch (error) { if (error.status !== 401) toast(error.message, true); } }
 
 function setFormBusy(form, busy) {
   form.querySelectorAll('button[type="submit"], button:not([type])').forEach((button) => { if (button.value !== 'cancel') button.disabled = busy; });
@@ -361,6 +408,9 @@ function bindUi() {
   $('#refreshTasks').addEventListener('click', () => loadAutoXingTasks().catch((error) => toast(error.message, true)));
   $('#taskRobotFilter').addEventListener('change', () => loadAutoXingTasks().catch((error) => toast(error.message, true)));
   $('#refreshRobotAccounts').addEventListener('click', () => loadRobotAccounts().catch((error) => toast(error.message, true)));
+  $('#refreshWorkforce').addEventListener('click', () => loadWorkforceMatrix().catch((error) => toast(error.message, true)));
+  $('#workforceRobotFilter').addEventListener('change', () => loadWorkforceMatrix().catch((error) => toast(error.message, true)));
+  $('#workforceStatusFilter').addEventListener('change', renderWorkforceMatrix);
   ['eventRobotFilter','eventSeverityFilter','eventTypeFilter','eventFromFilter','eventToFilter'].forEach((id) => $(`#${id}`).addEventListener('change', loadEvents)); $('#clearEventFilters').addEventListener('click', () => { ['eventRobotFilter','eventSeverityFilter','eventTypeFilter','eventFromFilter','eventToFilter'].forEach((id) => { $(`#${id}`).value = ''; }); loadEvents(); });
   document.querySelectorAll('[data-metric-action]').forEach((card) => { card.addEventListener('click', () => applyMetricAction(card.dataset.metricAction)); card.addEventListener('keydown', (event) => { if (['Enter',' '].includes(event.key)) { event.preventDefault(); applyMetricAction(card.dataset.metricAction); } }); });
   $('#syncAutoXing').addEventListener('click', () => syncAdapter('autoxing')); $('#syncCenoBots').addEventListener('click', () => syncAdapter('cenobots'));
@@ -369,6 +419,16 @@ function bindUi() {
   $('#logoutButton').addEventListener('click', logout);
   $('#notificationsButton').addEventListener('click', async () => { try { await loadNotifications(); $('#notificationsDialog').showModal(); } catch (error) { toast(error.message, true); } });
   $('#newCompatibilityButton').addEventListener('click', openCompatibilityDialog);
+  $('#newTechnicianButton').addEventListener('click', openTechnicianDialog);
+  $('#qualificationKind').addEventListener('change', updateQualificationFields);
+  $('#workforceMatrixList').addEventListener('click', async (event) => {
+    const qualify = event.target.closest('[data-qualify-technician]'); if (qualify) return openQualificationDialog(qualify.dataset.qualifyTechnician, qualify.dataset.technicianName);
+    const assign = event.target.closest('[data-assign-technician]'); const unassign = event.target.closest('[data-unassign]');
+    try {
+      if (assign) { await api('/api/v1/robot-assignments',{ method:'POST',body:JSON.stringify({ technicianId:assign.dataset.assignTechnician, robotId:assign.dataset.assignRobot }) }); toast('Qualified technician assigned'); await refreshWorkforceAndPassport(assign.dataset.assignRobot); }
+      if (unassign) { const row = state.workforce.rows.find((item) => item.assignment?.id === unassign.dataset.unassign); await api(`/api/v1/robot-assignments/${unassign.dataset.unassign}`,{ method:'DELETE' }); toast('Technician assignment removed'); await refreshWorkforceAndPassport(row?.robot.id); }
+    } catch (error) { toast(error.message,true); }
+  });
   $('#loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const error = $('#loginError'); const form = event.currentTarget; error.textContent = ''; setFormBusy(form, true); try { await login($('#loginEmail').value.trim(), $('#loginPassword').value); } catch (loginError) { error.textContent = loginError.message; } finally { setFormBusy(form, false); } });
   const dialog = $('#robotDialog'); const existingRobotSelect = $('#existingRobotId'); const serialInput = $('#serialNumber'); const modelSelect = $('#modelId'); const robotUsername = $('#robotUsername'); const robotPassword = $('#robotPassword'); const accountFields = $('#robotAccountFields'); const registerButton = $('#registerButton'); const serialHint = $('#serialNumberHint');
   const setNewRobotFields = (isNew) => { const manualCredentials = isNew && state.user.role !== 'robot_user'; serialHint.classList.remove('field-error'); serialInput.readOnly = !isNew; robotUsername.disabled = !manualCredentials; robotPassword.disabled = !manualCredentials; robotUsername.required = manualCredentials; robotPassword.required = manualCredentials; accountFields.classList.toggle('hidden', state.user.role === 'robot_user'); if (isNew) { serialHint.textContent = state.user.role === 'robot_user' ? 'The robot will be added to your current account.' : 'Enter a new unique serial number.'; registerButton.textContent = 'Register robot'; } else { serialHint.textContent = 'Existing synchronized robot selected.'; registerButton.textContent = 'Open robot'; } };
@@ -404,6 +464,14 @@ function bindUi() {
   $('#compatibilityForm').addEventListener('submit', async (event) => {
     if (event.submitter?.value === 'cancel') return; event.preventDefault(); const form = event.currentTarget; setFormBusy(form, true);
     try { await api('/api/v1/compatibility', { method:'POST', body:JSON.stringify({ modelId:$('#compatibilityModel').value, capability:$('#compatibilityCapability').value.trim(), versionConstraint:$('#compatibilityVersion').value.trim(), status:$('#compatibilityStatus').value, evidence:$('#compatibilityEvidence').value.trim() }) }); $('#compatibilityDialog').close(); toast('Compatibility record added'); await Promise.all([loadCompatibility(), state.selectedRobotId ? loadPassport(state.selectedRobotId) : Promise.resolve()]); } catch (error) { toast(error.message, true); } finally { setFormBusy(form, false); }
+  });
+  $('#technicianForm').addEventListener('submit', async (event) => {
+    if (event.submitter?.value === 'cancel') return; event.preventDefault(); const form=event.currentTarget; setFormBusy(form,true);
+    try { const payload=await api('/api/v1/technicians',{ method:'POST',body:JSON.stringify({ name:$('#technicianName').value.trim(),email:$('#technicianEmail').value.trim(),organizationId:$('#technicianOrganization').value }) }); $('#technicianDialog').close(); toast('Technician created'); await loadWorkforceMatrix(); openQualificationDialog(payload.data.id,payload.data.name); } catch(error){ toast(error.message,true); } finally { setFormBusy(form,false); }
+  });
+  $('#qualificationForm').addEventListener('submit', async (event) => {
+    if (event.submitter?.value === 'cancel') return; event.preventDefault(); const form=event.currentTarget; setFormBusy(form,true); const kind=$('#qualificationKind').value; const technicianId=$('#qualificationDialog').dataset.technicianId;
+    try { await api(`/api/v1/technicians/${technicianId}/qualifications`,{ method:'POST',body:JSON.stringify({ kind,code:$('#qualificationCode').value,level:$('#qualificationLevel').value,issuer:kind==='certificate'?$('#qualificationIssuer').value.trim():undefined,validUntil:kind==='certificate'?$('#qualificationValidUntil').value:undefined,modelIds:kind==='certificate'&&$('#qualificationModel').value?[$('#qualificationModel').value]:[] }) }); $('#qualificationDialog').close(); toast('Qualification saved'); await loadWorkforceMatrix(); } catch(error){ toast(error.message,true); } finally { setFormBusy(form,false); }
   });
 }
 
