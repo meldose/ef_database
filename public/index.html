@@ -39,7 +39,14 @@
     </header>
 
     <main class="shell" id="mainContent" tabindex="-1">
-      <section class="hero">
+      <nav class="dashboard-tabs" id="dashboardTabs" role="tablist" aria-label="Dashboard sections">
+        <button type="button" role="tab" aria-selected="true" data-dashboard-tab="overview">Overview</button>
+        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="robots">Robots</button>
+        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="operations">Events &amp; Service</button>
+        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="autoxing">AutoXing</button>
+        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="admin">Administration</button>
+      </nav>
+      <section class="hero" data-dashboard-view="overview">
         <div>
           <p class="eyebrow">Operations center / Demo Customer Tenant</p>
           <h1>Robot fleet overview</h1>
@@ -47,6 +54,7 @@
         </div>
         <div class="hero-actions">
           <button class="button secondary" id="exportTenant">Export tenant</button>
+          <button class="button secondary" id="exportRobotsCsv">Export robots CSV</button>
           <button class="button secondary sync-button" id="syncAutoXing"><span class="button-label">Sync AutoXing</span></button>
           <button class="button secondary sync-button" id="syncCenoBots"><span class="button-label">Sync CenoBots</span></button>
           <button class="button primary" id="newRobotButton">＋ Register robot</button>
@@ -54,25 +62,25 @@
       </section>
       <div id="syncStatus" class="sync-status hidden" role="status" aria-live="polite"></div>
 
-      <section class="metrics" aria-label="Fleet metrics">
+      <section class="metrics" aria-label="Fleet metrics" data-dashboard-view="overview">
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="all"><span class="metric-label">Total robots</span><strong id="metricTotal">—</strong><small>Show the full registry</small></article>
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="active"><span class="metric-label">Active</span><strong class="green" id="metricActive">—</strong><small>Filter verified fleet</small></article>
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="draft"><span class="metric-label">Draft</span><strong class="amber" id="metricDraft">—</strong><small>Filter awaiting verification</small></article>
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="events"><span class="metric-label">Events</span><strong id="metricEvents">—</strong><small>Open technical events</small></article>
       </section>
-      <section class="metrics proof-metrics" aria-label="2027 proof metrics">
+      <section class="metrics proof-metrics" aria-label="2027 proof metrics" data-dashboard-view="overview">
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="online"><span class="metric-label">Online now</span><strong class="green" id="metricOnline">—</strong><small>Filter online robots</small></article>
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="service"><span class="metric-label">Open service cases</span><strong class="amber" id="metricOpenCases">—</strong><small>Open service workflow</small></article>
         <article class="metric-card"><span class="metric-label">Complete Passports</span><strong id="metricPassportComplete">—</strong><small>Target ≥ 80%</small></article>
         <article class="metric-card"><span class="metric-label">Certificates due</span><strong id="metricCertificatesDue">—</strong><small>Expired or due in 30 days</small></article>
       </section>
-      <section class="metrics status-metrics" aria-label="Operational alerts">
+      <section class="metrics status-metrics" aria-label="Operational alerts" data-dashboard-view="overview">
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="offline"><span class="metric-label">Offline now</span><strong class="amber" id="metricOffline">—</strong><small>Filter offline robots</small></article>
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="errors"><span class="metric-label">Error events</span><strong id="metricErrors">—</strong><small>Filter technical errors</small></article>
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="maintenance"><span class="metric-label">Maintenance due</span><strong id="metricMaintenanceDue">—</strong><small>Filter maintenance alerts</small></article>
       </section>
 
-      <section class="workspace-grid">
+      <section class="workspace-grid" data-dashboard-view="robots">
         <article class="panel registry-panel">
           <div class="panel-header">
             <div><p class="eyebrow">Canonical registry</p><h2>Robots</h2></div>
@@ -101,7 +109,7 @@
       </section>
 
       <section class="lower-grid">
-        <article class="panel" id="eventsPanel">
+        <article class="panel" id="eventsPanel" data-dashboard-view="operations">
           <div class="panel-header"><div><p class="eyebrow">Canonical event envelope</p><h2>Recent technical events</h2></div><button class="text-button" id="refreshEvents">Refresh</button></div>
           <div class="event-filters">
             <select id="eventRobotFilter" aria-label="Filter events by robot"><option value="">All robots</option></select>
@@ -112,22 +120,39 @@
           </div>
           <div id="eventsList" class="event-list"><div class="empty">Loading events…</div></div>
         </article>
-        <article class="panel" id="servicePanel">
+        <article class="panel" id="servicePanel" data-dashboard-view="autoxing">
           <div class="panel-header"><div><p class="eyebrow">Integration plane</p><h2>Adapter capabilities</h2></div><button class="text-button" id="refreshAdapters">Refresh</button></div>
           <div id="adaptersList" class="adapter-list"><div class="empty">Loading adapters…</div></div>
         </article>
       </section>
-      <section class="lower-grid">
-        <article class="panel">
-          <div class="panel-header"><div><p class="eyebrow">Service link</p><h2>Incident and service workflow</h2></div><button class="text-button" id="refreshServiceCases">Refresh</button></div>
-          <div id="serviceCasesList" class="record-list"><div class="empty">Loading service cases…</div></div>
+      <section class="lower-grid" id="autoxingWorkspace" data-dashboard-view="autoxing">
+        <article class="panel" id="resourceExplorerPanel">
+          <div class="panel-header"><div><p class="eyebrow">AutoXing fleet resources</p><h2>Resource explorer</h2></div><button class="text-button" id="refreshResources">Refresh</button></div>
+          <div id="resourceExplorer" class="record-list"><div class="empty">Loading businesses, buildings, and maps…</div></div>
         </article>
-        <article class="panel">
-          <div class="panel-header"><div><p class="eyebrow">Compatibility gate</p><h2>Model compatibility</h2></div><span class="lock-label">Commands blocked</span></div>
-          <div id="compatibilityList" class="record-list"><div class="empty">Loading compatibility records…</div></div>
+        <article class="panel" id="taskHistoryPanel">
+          <div class="panel-header"><div><p class="eyebrow">Read-only operations</p><h2>AutoXing task history</h2></div><button class="text-button" id="refreshTasks">Refresh</button></div>
+          <div class="task-toolbar"><label for="taskRobotFilter">Robot</label><select id="taskRobotFilter"><option value="">All visible AutoXing robots</option></select></div>
+          <div id="taskHistoryList" class="record-list"><div class="empty">Loading task history…</div></div>
         </article>
       </section>
       <section class="lower-grid">
+        <article class="panel" data-dashboard-view="operations">
+          <div class="panel-header"><div><p class="eyebrow">Service link</p><h2>Incident and service workflow</h2></div><button class="text-button" id="refreshServiceCases">Refresh</button></div>
+          <div id="serviceCasesList" class="record-list"><div class="empty">Loading service cases…</div></div>
+        </article>
+        <article class="panel" data-dashboard-view="admin">
+          <div class="panel-header"><div><p class="eyebrow">Compatibility gate</p><h2>Model compatibility</h2></div><button class="text-button" id="newCompatibilityButton" type="button">＋ Add record</button></div>
+          <div id="compatibilityList" class="record-list"><div class="empty">Loading compatibility records…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid" id="robotAccountsSection" data-dashboard-view="admin">
+        <article class="panel audit-panel">
+          <div class="panel-header"><div><p class="eyebrow">Platform administration</p><h2>Robot accounts</h2></div><button class="text-button" id="refreshRobotAccounts">Refresh</button></div>
+          <div id="robotAccountsList" class="record-list"><div class="empty">Loading robot accounts…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid" data-dashboard-view="admin">
         <article class="panel audit-panel">
           <div class="panel-header"><div><p class="eyebrow">Accountability</p><h2>Recent audit activity</h2></div><button class="text-button" id="refreshAudit">Refresh</button></div>
           <div id="auditList" class="record-list"><div class="empty">Loading audit history…</div></div>
@@ -188,6 +213,17 @@
         <p class="dialog-copy">Use this username and password to log in and view only the newly registered robot.</p>
         <pre id="createdAccountCredentials" class="credential-display"></pre>
         <div class="dialog-actions"><button class="button primary" value="default">Done</button></div>
+      </form>
+    </dialog>
+    <dialog id="compatibilityDialog">
+      <form method="dialog" id="compatibilityForm">
+        <div class="dialog-header"><div><p class="eyebrow">Compatibility gate</p><h2>Add compatibility record</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close">×</button></div>
+        <p class="dialog-copy">Record tested capabilities and explicitly block unsafe or unsupported operations.</p>
+        <label>Robot model<select id="compatibilityModel" required></select></label>
+        <label>Capability<input id="compatibilityCapability" required maxlength="120" placeholder="read.status" /></label>
+        <div class="form-grid"><label>Version constraint<input id="compatibilityVersion" required maxlength="120" placeholder="wrapper-backed" /></label><label>Status<select id="compatibilityStatus" required><option value="testing_required">Testing required</option><option value="compatible">Compatible</option><option value="incompatible">Incompatible</option><option value="deprecated">Deprecated</option><option value="blocked">Blocked</option></select></label></div>
+        <label>Evidence<textarea id="compatibilityEvidence" maxlength="1000" rows="4" placeholder="Test result, contract version, or safety reason"></textarea></label>
+        <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Save record</button></div>
       </form>
     </dialog>
     <dialog id="notificationsDialog" class="notifications-dialog" aria-labelledby="notificationsTitle">

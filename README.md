@@ -197,6 +197,11 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - HttpOnly SameSite session cookies with optional HTTPS-only mode
 - Role-scoped operational notifications
 - Container build, health check, persistent volume, and graceful shutdown
+- Fleet-level AutoXing resource explorer and role-scoped task history
+- Platform robot-account administration without password disclosure
+- Robot Registry CSV export from the dashboard
+- Role-controlled compatibility record editor
+- Responsive five-tab dashboard with keyboard navigation and remembered selection
 
 ## Container deployment
 

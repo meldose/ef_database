@@ -1,6 +1,6 @@
 'use strict';
 
-const state = { token: null, user: null, robots: [], robotOptions: [], serviceCases: [], compatibility: [], notifications: [], audit: [], summary: null, selectedRobotId: null, registry: { page:1, pageSize:10, pageCount:1, count:0 }, sync: { provider:null, startedAt:0, timer:null } };
+const state = { token: null, user: null, robots: [], robotOptions: [], serviceCases: [], compatibility: [], notifications: [], audit: [], autoXingResources: null, autoXingTasks: [], robotAccounts: [], summary: null, selectedRobotId: null, registry: { page:1, pageSize:10, pageCount:1, count:0 }, sync: { provider:null, startedAt:0, timer:null } };
 const $ = (selector) => document.querySelector(selector);
 const api = async (path, options = {}) => {
   const response = await fetch(path, { ...options, headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -17,6 +17,7 @@ const download = async (path, fallbackName) => {
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 const formatDate = (value) => value ? new Date(value).toLocaleString([], { dateStyle:'medium', timeStyle:'short' }) : '—';
 const toDateTimeLocal = (date = new Date()) => { const offset = date.getTimezoneOffset(); return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16); };
+const dashboardViews = new Set(['overview', 'robots', 'operations', 'autoxing', 'admin']);
 
 function toast(message, isError = false) {
   const element = $('#toast'); element.textContent = message; element.classList.toggle('error', isError); element.classList.add('show');
@@ -38,7 +39,25 @@ function showApp() {
   ['syncAutoXing', 'syncCenoBots'].forEach((id) => { const element = $(`#${id}`); if (element) element.classList.toggle('hidden', robotUser || auditor); });
   $('#newRobotButton').classList.toggle('hidden', auditor);
   $('#exportTenant').classList.toggle('hidden', robotUser);
+  $('#exportRobotsCsv').classList.toggle('hidden', robotUser);
+  $('#resourceExplorerPanel').classList.toggle('hidden', robotUser);
+  $('#taskHistoryPanel').classList.toggle('audit-panel', robotUser);
+  $('#robotAccountsSection').classList.toggle('hidden', state.user.role !== 'platform_admin');
+  $('#newCompatibilityButton').classList.toggle('hidden', !['platform_admin', 'data_admin'].includes(state.user.role));
   const accountFields = $('#robotAccountFields'); if (accountFields) accountFields.classList.toggle('hidden', robotUser);
+  setDashboardView(sessionStorage.getItem('altegroDashboardView') || 'overview');
+}
+
+function setDashboardView(requestedView) {
+  const view = dashboardViews.has(requestedView) ? requestedView : 'overview';
+  sessionStorage.setItem('altegroDashboardView', view);
+  document.querySelectorAll('[data-dashboard-view]').forEach((element) => element.classList.toggle('view-hidden', element.dataset.dashboardView !== view));
+  document.querySelectorAll('[data-dashboard-tab]').forEach((button) => { const selected = button.dataset.dashboardTab === view; button.setAttribute('aria-selected', String(selected)); button.tabIndex = selected ? 0 : -1; });
+  document.querySelectorAll('.lower-grid').forEach((grid) => {
+    const visibleChildren = [...grid.children].filter((child) => !child.classList.contains('view-hidden') && !child.classList.contains('hidden'));
+    grid.classList.toggle('view-grid-empty', !grid.classList.contains('view-hidden') && !grid.classList.contains('hidden') && visibleChildren.length === 0);
+    grid.classList.toggle('view-grid-single', visibleChildren.length === 1);
+  });
 }
 
 function populateExistingRobotSelect() {
@@ -55,8 +74,15 @@ function populateEventRobotFilter() {
   if (selected && state.robotOptions.some((robot) => robot.id === selected)) select.value = selected;
 }
 
+function populateTaskRobotFilter() {
+  const select = $('#taskRobotFilter'); if (!select) return; const selected = select.value;
+  const robots = state.robotOptions.filter((robot) => robot.externalIdentities?.some((identity) => identity.system === 'autoxing'));
+  select.innerHTML = '<option value="">All visible AutoXing robots</option>' + robots.map((robot) => `<option value="${escapeHtml(robot.id)}">${escapeHtml(robot.serialNumber)}</option>`).join('');
+  if (selected && robots.some((robot) => robot.id === selected)) select.value = selected;
+}
+
 async function loadRobotOptions() {
-  const payload = await api('/api/v1/robots?pageSize=100&sort=serialNumber&order=asc'); state.robotOptions = payload.data; populateExistingRobotSelect(); populateEventRobotFilter();
+  const payload = await api('/api/v1/robots?pageSize=100&sort=serialNumber&order=asc'); state.robotOptions = payload.data; populateExistingRobotSelect(); populateEventRobotFilter(); populateTaskRobotFilter();
 }
 
 async function login(email, password) {
@@ -231,7 +257,7 @@ async function loadNotifications() {
   $('#notificationCount').textContent = payload.count > 99 ? '99+' : String(payload.count);
   const list = $('#notificationsList');
   list.innerHTML = payload.data.length ? payload.data.map((item) => `<button type="button" class="notification-item ${escapeHtml(item.severity)}" ${item.robotId ? `data-notification-robot="${escapeHtml(item.robotId)}"` : ''}><span class="notification-dot" aria-hidden="true"></span><strong>${escapeHtml(item.title)}</strong><time datetime="${escapeHtml(item.occurredAt)}">${formatDate(item.occurredAt)}</time><p>${escapeHtml(item.message)}</p></button>`).join('') : '<div class="empty">No operational alerts. Your visible fleet is clear.</div>';
-  list.querySelectorAll('[data-notification-robot]').forEach((button) => button.addEventListener('click', async () => { $('#notificationsDialog').close(); await loadPassport(button.dataset.notificationRobot); $('#detailPanel').scrollIntoView({ behavior:'smooth', block:'start' }); }));
+  list.querySelectorAll('[data-notification-robot]').forEach((button) => button.addEventListener('click', async () => { $('#notificationsDialog').close(); setDashboardView('robots'); await loadPassport(button.dataset.notificationRobot); $('#detailPanel').scrollIntoView({ behavior:'smooth', block:'start' }); }));
 }
 
 async function loadServiceCases() {
@@ -256,6 +282,33 @@ async function loadAdapters() {
   $('#adaptersList').innerHTML = payload.data.map((adapter) => `<div class="adapter-item"><div><strong>${escapeHtml(adapter.provider)}</strong><small>${escapeHtml(adapter.status)} · v${escapeHtml(adapter.version)}<br />Last sync: ${formatDate(adapter.lastSyncAt)} · ${escapeHtml(adapter.lastSyncStatus || '—')}</small>${adapter.lastError ? `<small class="adapter-error">${escapeHtml(adapter.lastError)}</small>` : ''}</div><div class="adapter-capabilities">Read: ${escapeHtml(adapter.capabilities.read.join(', '))}<br />Events: ${escapeHtml(adapter.capabilities.event.join(', ') || 'none')}<br /><b>Commands: disabled</b></div></div>`).join('');
 }
 
+async function loadAutoXingResources() {
+  if (state.user.role === 'robot_user') return;
+  const payload = await api('/api/v1/adapters/autoxing/resources'); state.autoXingResources = payload.data;
+  const data = payload.data; const warnings = data.resourceErrors || [];
+  const namedResources = [...(data.businesses || []).slice(0, 4).map((item) => ({ kind:'Business', name:item.name || item.businessName || item.id || item.businessId || 'Unnamed business' })), ...(data.buildings || []).slice(0, 4).map((item) => ({ kind:'Building', name:item.name || item.buildingName || item.id || item.buildingId || 'Unnamed building' }))];
+  $('#resourceExplorer').innerHTML = `<div class="resource-metrics"><div class="resource-metric"><strong>${(data.businesses || []).length}</strong><span>Businesses</span></div><div class="resource-metric"><strong>${(data.buildings || []).length}</strong><span>Buildings</span></div><div class="resource-metric"><strong>${(data.maps || []).length}</strong><span>Maps</span></div><div class="resource-metric"><strong>${warnings.length}</strong><span>Warnings</span></div></div>${warnings.map((warning) => `<div class="resource-warning">${escapeHtml(warning.message || warning.error || JSON.stringify(warning))}</div>`).join('')}${namedResources.map((item) => `<div class="mini-record"><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.kind)}</small></div>`).join('') || '<div class="serial provider-empty">No fleet resources returned yet. Run AutoXing synchronization first.</div>'}<div class="serial provider-empty">Last resource sync: ${formatDate(data.syncedAt)}</div>`;
+}
+
+async function loadAutoXingTasks() {
+  const robotId = $('#taskRobotFilter').value; const suffix = robotId ? `?robotId=${encodeURIComponent(robotId)}` : '';
+  const payload = await api(`/api/v1/autoxing/tasks${suffix}`); state.autoXingTasks = payload.data;
+  $('#taskHistoryList').innerHTML = payload.data.length ? payload.data.slice(0, 20).map((task) => { const robotExternalId = task.externalRobotId || task.robotId || task.raw?.robotId || task.raw?.robot_id || 'Unassigned'; const taskId = task.taskId || task.id || 'Unknown task'; const statusValue = task.status || task.taskStatus || task.raw?.status || 'unknown'; const status = typeof statusValue === 'object' ? JSON.stringify(statusValue).slice(0, 120) : String(statusValue); const occurredAt = task.updatedAt || task.createdAt || task.raw?.updatedAt || task.raw?.createdAt || payload.syncedAt; return `<div class="record-row"><div><strong>${escapeHtml(taskId)}</strong><small>${escapeHtml(robotExternalId)} · ${escapeHtml(status)}</small></div><time class="event-time" datetime="${escapeHtml(occurredAt || '')}">${formatDate(occurredAt)}</time></div>`; }).join('') : '<div class="empty">No AutoXing tasks are available for this selection.</div>';
+}
+
+async function loadRobotAccounts() {
+  if (state.user.role !== 'platform_admin') return;
+  const payload = await api('/api/v1/robot-accounts'); state.robotAccounts = payload.data;
+  $('#robotAccountsList').innerHTML = payload.data.length ? payload.data.map((account) => `<div class="record-row"><div><strong>${escapeHtml(account.email)}</strong><small>${escapeHtml(account.serialNumber || 'No robot assigned')} · ${escapeHtml(account.robotId || 'Pending synchronization')}</small></div><span class="account-status">${escapeHtml(account.credentialStatus || 'password set')}</span></div>`).join('') : '<div class="empty">No robot accounts are available.</div>';
+}
+
+function openCompatibilityDialog() {
+  const models = [...new Set([...state.robotOptions.map((robot) => robot.modelId), ...state.compatibility.map((item) => item.modelId)])].filter(Boolean).sort();
+  $('#compatibilityModel').innerHTML = models.map((modelId) => `<option value="${escapeHtml(modelId)}">${escapeHtml(modelId.replace('model-', '').replaceAll('-', ' '))}</option>`).join('');
+  $('#compatibilityCapability').value = ''; $('#compatibilityVersion').value = ''; $('#compatibilityStatus').value = 'testing_required'; $('#compatibilityEvidence').value = '';
+  $('#compatibilityDialog').showModal();
+}
+
 function setSyncButtons(running) {
   document.querySelectorAll('.sync-button, #syncSelected').forEach((button) => { button.disabled = running; button.classList.toggle('running', running); });
 }
@@ -277,7 +330,7 @@ async function syncAdapter(provider) {
     if (error.status !== 401) { setSyncStatus(`${provider} synchronization failed. ${error.message}`, 'error', provider); toast(`Sync failed: ${error.message}`, true); await loadAdapters().catch(() => {}); }
   } finally { clearInterval(state.sync.timer); state.sync.timer = null; state.sync.provider = null; setSyncButtons(false); }
 }
-async function refreshAll() { try { await Promise.all([loadRobotOptions(), loadRobots(), loadEvents(), loadAdapters(), loadOperationsSummary(), loadServiceCases(), loadCompatibility(), loadNotifications(), loadAudit()]); } catch (error) { if (error.status !== 401) toast(error.message, true); } }
+async function refreshAll() { try { await Promise.all([loadRobotOptions(), loadRobots(), loadEvents(), loadAdapters(), loadOperationsSummary(), loadServiceCases(), loadCompatibility(), loadNotifications(), loadAudit(), loadAutoXingResources(), loadAutoXingTasks(), loadRobotAccounts()]); } catch (error) { if (error.status !== 401) toast(error.message, true); } }
 
 function setFormBusy(form, busy) {
   form.querySelectorAll('button[type="submit"], button:not([type])').forEach((button) => { if (button.value !== 'cancel') button.disabled = busy; });
@@ -292,22 +345,30 @@ function resetRegistryPage() { state.registry.page = 1; return loadRobots(); }
 
 function applyMetricAction(action) {
   document.querySelectorAll('[data-metric-action]').forEach((card) => card.classList.toggle('active-filter', card.dataset.metricAction === action && ['active','draft','online','offline'].includes(action)));
-  if (action === 'events') return $('#eventsPanel').scrollIntoView({ behavior:'smooth', block:'start' });
-  if (action === 'service') return $('#servicePanel').scrollIntoView({ behavior:'smooth', block:'start' });
-  if (action === 'errors' || action === 'maintenance') { $('#eventSeverityFilter').value = action === 'errors' ? 'problem' : ''; $('#eventTypeFilter').value = action === 'maintenance' ? 'maintenance_due' : ''; loadEvents(); return $('#eventsPanel').scrollIntoView({ behavior:'smooth', block:'start' }); }
-  $('#statusFilter').value = ['active','draft'].includes(action) ? action : ''; $('#liveFilter').value = ['online','offline'].includes(action) ? action : ''; resetRegistryPage(); document.querySelector('.registry-panel').scrollIntoView({ behavior:'smooth', block:'start' });
+  if (action === 'events') { setDashboardView('operations'); return $('#eventsPanel').scrollIntoView({ behavior:'smooth', block:'start' }); }
+  if (action === 'service') { setDashboardView('operations'); return $('#serviceCasesList').scrollIntoView({ behavior:'smooth', block:'start' }); }
+  if (action === 'errors' || action === 'maintenance') { $('#eventSeverityFilter').value = action === 'errors' ? 'problem' : ''; $('#eventTypeFilter').value = action === 'maintenance' ? 'maintenance_due' : ''; setDashboardView('operations'); loadEvents(); return $('#eventsPanel').scrollIntoView({ behavior:'smooth', block:'start' }); }
+  $('#statusFilter').value = ['active','draft'].includes(action) ? action : ''; $('#liveFilter').value = ['online','offline'].includes(action) ? action : ''; setDashboardView('robots'); resetRegistryPage(); document.querySelector('.registry-panel').scrollIntoView({ behavior:'smooth', block:'start' });
 }
 
 function bindUi() {
+  $('#dashboardTabs').addEventListener('click', (event) => { const button = event.target.closest('[data-dashboard-tab]'); if (button) setDashboardView(button.dataset.dashboardTab); });
+  $('#dashboardTabs').addEventListener('keydown', (event) => { if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return; const tabs = [...document.querySelectorAll('[data-dashboard-tab]')]; const current = tabs.indexOf(document.activeElement); let next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length; event.preventDefault(); tabs[next].focus(); setDashboardView(tabs[next].dataset.dashboardTab); });
   let searchTimer; $('#searchInput').addEventListener('input', () => { clearTimeout(searchTimer); state.registry.page = 1; searchTimer = setTimeout(loadRobots, 250); }); ['statusFilter','liveFilter','sortRobots'].forEach((id) => $(`#${id}`).addEventListener('change', resetRegistryPage)); $('#pageSize').addEventListener('change', () => { state.registry.pageSize = Number($('#pageSize').value); resetRegistryPage(); }); $('#previousPage').addEventListener('click', () => { if (state.registry.page > 1) { state.registry.page -= 1; loadRobots(); } }); $('#nextPage').addEventListener('click', () => { if (state.registry.page < state.registry.pageCount) { state.registry.page += 1; loadRobots(); } });
   $('#refreshButton').addEventListener('click', async () => { const button = $('#refreshButton'); button.disabled = true; try { await refreshAll(); } finally { button.disabled = false; } }); $('#refreshEvents').addEventListener('click', loadEvents); $('#refreshAdapters').addEventListener('click', loadAdapters); $('#refreshServiceCases').addEventListener('click', loadServiceCases);
   $('#refreshAudit').addEventListener('click', loadAudit);
+  $('#refreshResources').addEventListener('click', () => loadAutoXingResources().catch((error) => toast(error.message, true)));
+  $('#refreshTasks').addEventListener('click', () => loadAutoXingTasks().catch((error) => toast(error.message, true)));
+  $('#taskRobotFilter').addEventListener('change', () => loadAutoXingTasks().catch((error) => toast(error.message, true)));
+  $('#refreshRobotAccounts').addEventListener('click', () => loadRobotAccounts().catch((error) => toast(error.message, true)));
   ['eventRobotFilter','eventSeverityFilter','eventTypeFilter','eventFromFilter','eventToFilter'].forEach((id) => $(`#${id}`).addEventListener('change', loadEvents)); $('#clearEventFilters').addEventListener('click', () => { ['eventRobotFilter','eventSeverityFilter','eventTypeFilter','eventFromFilter','eventToFilter'].forEach((id) => { $(`#${id}`).value = ''; }); loadEvents(); });
   document.querySelectorAll('[data-metric-action]').forEach((card) => { card.addEventListener('click', () => applyMetricAction(card.dataset.metricAction)); card.addEventListener('keydown', (event) => { if (['Enter',' '].includes(event.key)) { event.preventDefault(); applyMetricAction(card.dataset.metricAction); } }); });
   $('#syncAutoXing').addEventListener('click', () => syncAdapter('autoxing')); $('#syncCenoBots').addEventListener('click', () => syncAdapter('cenobots'));
   $('#exportTenant').addEventListener('click', () => download('/api/v1/exports/tenant.json', 'altegro-tenant-export.json').catch((error) => toast(error.message, true)));
+  $('#exportRobotsCsv').addEventListener('click', () => download('/api/v1/exports/robots.csv', 'altegro-robots.csv').catch((error) => toast(error.message, true)));
   $('#logoutButton').addEventListener('click', logout);
   $('#notificationsButton').addEventListener('click', async () => { try { await loadNotifications(); $('#notificationsDialog').showModal(); } catch (error) { toast(error.message, true); } });
+  $('#newCompatibilityButton').addEventListener('click', openCompatibilityDialog);
   $('#loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const error = $('#loginError'); const form = event.currentTarget; error.textContent = ''; setFormBusy(form, true); try { await login($('#loginEmail').value.trim(), $('#loginPassword').value); } catch (loginError) { error.textContent = loginError.message; } finally { setFormBusy(form, false); } });
   const dialog = $('#robotDialog'); const existingRobotSelect = $('#existingRobotId'); const serialInput = $('#serialNumber'); const modelSelect = $('#modelId'); const robotUsername = $('#robotUsername'); const robotPassword = $('#robotPassword'); const accountFields = $('#robotAccountFields'); const registerButton = $('#registerButton'); const serialHint = $('#serialNumberHint');
   const setNewRobotFields = (isNew) => { const manualCredentials = isNew && state.user.role !== 'robot_user'; serialHint.classList.remove('field-error'); serialInput.readOnly = !isNew; robotUsername.disabled = !manualCredentials; robotPassword.disabled = !manualCredentials; robotUsername.required = manualCredentials; robotPassword.required = manualCredentials; accountFields.classList.toggle('hidden', state.user.role === 'robot_user'); if (isNew) { serialHint.textContent = state.user.role === 'robot_user' ? 'The robot will be added to your current account.' : 'Enter a new unique serial number.'; registerButton.textContent = 'Register robot'; } else { serialHint.textContent = 'Existing synchronized robot selected.'; registerButton.textContent = 'Open robot'; } };
@@ -339,6 +400,10 @@ function bindUi() {
   $('#lifecycleForm').addEventListener('submit', async (event) => {
     if (event.submitter?.value === 'cancel') return; event.preventDefault(); const form = event.currentTarget; setFormBusy(form, true);
     try { const recordType = $('#lifecycleType').value; if (recordType === 'certificate' && !$('#lifecycleValidUntil').value) throw new Error('Certificate expiry date is required'); if (recordType === 'deployment' && !$('#lifecycleVersion').value.trim()) throw new Error('Deployment version is required'); const attachment = recordType === 'document' ? await readAttachment($('#lifecycleAttachment').files[0]) : null; await api(`/api/v1/robots/${$('#lifecycleDialog').dataset.robotId}/lifecycle-records`, { method:'POST', body:JSON.stringify({ recordType, title:$('#lifecycleTitle').value.trim(), description:$('#lifecycleDescription').value.trim(), version:$('#lifecycleVersion').value.trim() || undefined, status:$('#lifecycleStatus').value || undefined, issuer:$('#lifecycleIssuer').value.trim() || undefined, validUntil:$('#lifecycleValidUntil').value ? new Date($('#lifecycleValidUntil').value).toISOString() : undefined, attachment }) }); $('#lifecycleDialog').close(); toast(`${recordType} added to the Robot Passport`); await Promise.all([loadPassport(state.selectedRobotId), loadOperationsSummary()]); } catch (error) { toast(error.message, true); } finally { setFormBusy(form, false); }
+  });
+  $('#compatibilityForm').addEventListener('submit', async (event) => {
+    if (event.submitter?.value === 'cancel') return; event.preventDefault(); const form = event.currentTarget; setFormBusy(form, true);
+    try { await api('/api/v1/compatibility', { method:'POST', body:JSON.stringify({ modelId:$('#compatibilityModel').value, capability:$('#compatibilityCapability').value.trim(), versionConstraint:$('#compatibilityVersion').value.trim(), status:$('#compatibilityStatus').value, evidence:$('#compatibilityEvidence').value.trim() }) }); $('#compatibilityDialog').close(); toast('Compatibility record added'); await Promise.all([loadCompatibility(), state.selectedRobotId ? loadPassport(state.selectedRobotId) : Promise.resolve()]); } catch (error) { toast(error.message, true); } finally { setFormBusy(form, false); }
   });
 }
 

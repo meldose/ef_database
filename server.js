@@ -339,7 +339,7 @@ function storeAutoXingResources(resources = {}, resourceErrors = []) {
 
 function taskRobotExternalId(task) {
   const raw = task?.raw || {};
-  return raw.robotId || raw.robot_id || raw.robotSn || raw.robotSN || raw.robot?.robotId || raw.robot?.id || null;
+  return task?.externalRobotId || task?.robotId || raw.robotId || raw.robot_id || raw.robotSn || raw.robotSN || raw.robot?.robotId || raw.robot?.id || null;
 }
 
 function autoXingResourcesForRobot(robot) {
@@ -738,7 +738,8 @@ async function handle(req, res) {
     return send(res, 200, { data: { businesses: clone(state.autoxing.businesses), buildings: clone(state.autoxing.buildings), maps: clone([...state.autoxing.maps.values()]), syncedAt: state.autoxing.lastSyncAt, resourceErrors: clone(state.autoxing.resourceErrors) } });
   }
   if (req.method === 'GET' && path === '/api/v1/autoxing/tasks') {
-    let tasks = [...state.autoxing.tasks.values()];
+    const visibleExternalIds = new Set([...state.robots.values()].filter((robot) => visibleToActor(actor, robot)).map((robot) => robot.externalIdentities?.find((identity) => identity.system === 'autoxing')?.externalId).filter(Boolean).map(String));
+    let tasks = [...state.autoxing.tasks.values()].filter((task) => visibleExternalIds.has(String(taskRobotExternalId(task))));
     const robotId = url.searchParams.get('robotId');
     if (robotId) {
       const item = state.robots.get(robotId);
