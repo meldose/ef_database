@@ -39,7 +39,7 @@ async function loginWithPassword(email, password) {
     const frontendResponse = await fetch(`http://localhost:${port}/`);
     assert.equal(frontendResponse.status, 200);
     const frontendHtml = await frontendResponse.text();
-    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'resourceExplorer', 'taskHistoryList', 'robotAccountsList', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
+    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'robotAccountsList', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
     for (const view of ['overview', 'robots', 'operations', 'autoxing', 'workforce', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
 
     const oldPasswordLogin = await loginWithPassword('admin@demo.altegro.local', 'demo');

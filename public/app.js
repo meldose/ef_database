@@ -40,6 +40,7 @@ function showApp() {
   $('#newRobotButton').classList.toggle('hidden', auditor);
   $('#exportTenant').classList.toggle('hidden', robotUser);
   $('#exportRobotsCsv').classList.toggle('hidden', robotUser);
+  $('#serviceTechniciansButton').classList.toggle('hidden', robotUser);
   $('#resourceExplorerPanel').classList.toggle('hidden', robotUser);
   $('#taskHistoryPanel').classList.toggle('audit-panel', robotUser);
   $('#robotAccountsSection').classList.toggle('hidden', state.user.role !== 'platform_admin');
@@ -417,6 +418,7 @@ function bindUi() {
   $('#syncAutoXing').addEventListener('click', () => syncAdapter('autoxing')); $('#syncCenoBots').addEventListener('click', () => syncAdapter('cenobots'));
   $('#exportTenant').addEventListener('click', () => download('/api/v1/exports/tenant.json', 'altegro-tenant-export.json').catch((error) => toast(error.message, true)));
   $('#exportRobotsCsv').addEventListener('click', () => download('/api/v1/exports/robots.csv', 'altegro-robots.csv').catch((error) => toast(error.message, true)));
+  $('#serviceTechniciansButton').addEventListener('click', () => { setDashboardView('workforce'); $('#workforceSection').scrollIntoView({ behavior:'smooth', block:'start' }); });
   $('#logoutButton').addEventListener('click', logout);
   $('#notificationsButton').addEventListener('click', async () => { try { await loadNotifications(); $('#notificationsDialog').showModal(); } catch (error) { toast(error.message, true); } });
   $('#newCompatibilityButton').addEventListener('click', openCompatibilityDialog);
