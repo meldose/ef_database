@@ -5,7 +5,8 @@
   "description": "Dependency-free test server for the Altegro Phase 1 thin slice",
   "scripts": {
     "start": "node server.js",
-    "test": "node test-server.js"
+    "test": "node test-server.js",
+    "check": "node --check server.js && node --check public/app.js && node --check test-server.js"
   },
   "engines": {
     "node": ">=18"

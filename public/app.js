@@ -1,6 +1,6 @@
 'use strict';
 
-const state = { token: null, user: null, robots: [], robotOptions: [], serviceCases: [], compatibility: [], summary: null, selectedRobotId: null, registry: { page:1, pageSize:10, pageCount:1, count:0 }, sync: { provider:null, startedAt:0, timer:null } };
+const state = { token: null, user: null, robots: [], robotOptions: [], serviceCases: [], compatibility: [], notifications: [], audit: [], summary: null, selectedRobotId: null, registry: { page:1, pageSize:10, pageCount:1, count:0 }, sync: { provider:null, startedAt:0, timer:null } };
 const $ = (selector) => document.querySelector(selector);
 const api = async (path, options = {}) => {
   const response = await fetch(path, { ...options, headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -226,6 +226,14 @@ async function loadOperationsSummary() {
   $('#metricCertificatesDue').textContent = payload.data.passport.certificatesDue;
 }
 
+async function loadNotifications() {
+  const payload = await api('/api/v1/notifications'); state.notifications = payload.data;
+  $('#notificationCount').textContent = payload.count > 99 ? '99+' : String(payload.count);
+  const list = $('#notificationsList');
+  list.innerHTML = payload.data.length ? payload.data.map((item) => `<button type="button" class="notification-item ${escapeHtml(item.severity)}" ${item.robotId ? `data-notification-robot="${escapeHtml(item.robotId)}"` : ''}><span class="notification-dot" aria-hidden="true"></span><strong>${escapeHtml(item.title)}</strong><time datetime="${escapeHtml(item.occurredAt)}">${formatDate(item.occurredAt)}</time><p>${escapeHtml(item.message)}</p></button>`).join('') : '<div class="empty">No operational alerts. Your visible fleet is clear.</div>';
+  list.querySelectorAll('[data-notification-robot]').forEach((button) => button.addEventListener('click', async () => { $('#notificationsDialog').close(); await loadPassport(button.dataset.notificationRobot); $('#detailPanel').scrollIntoView({ behavior:'smooth', block:'start' }); }));
+}
+
 async function loadServiceCases() {
   const payload = await api('/api/v1/service-cases'); state.serviceCases = payload.data;
   const writable = !['robot_user', 'auditor'].includes(state.user.role); const nextStatus = { open:'in_progress', in_progress:'waiting', waiting:'resolved', resolved:'closed' };
@@ -236,6 +244,11 @@ async function loadServiceCases() {
 async function loadCompatibility() {
   const payload = await api('/api/v1/compatibility'); state.compatibility = payload.data;
   $('#compatibilityList').innerHTML = payload.data.map((item) => `<div class="record-row"><div><strong>${escapeHtml(item.modelId.replace('model-', '').replaceAll('-', ' '))}</strong><small>${escapeHtml(item.capability)} · ${escapeHtml(item.versionConstraint)}${item.evidence ? ` · ${escapeHtml(item.evidence)}` : ''}</small></div><span class="compatibility-${escapeHtml(item.status)}">${escapeHtml(item.status.replaceAll('_', ' '))}</span></div>`).join('') || '<div class="empty">No compatibility records.</div>';
+}
+
+async function loadAudit() {
+  const payload = await api('/api/v1/audit'); state.audit = payload.data;
+  $('#auditList').innerHTML = payload.data.length ? payload.data.slice(-12).reverse().map((item) => `<div class="record-row"><div><strong>${escapeHtml(item.action.replaceAll('.', ' '))}</strong><small>${escapeHtml(item.actorName)} · ${escapeHtml(item.objectType)} · ${escapeHtml(item.result)}</small></div><time class="event-time" datetime="${escapeHtml(item.occurredAt)}">${formatDate(item.occurredAt)}</time></div>`).join('') : '<div class="empty">No visible audit activity yet.</div>';
 }
 
 async function loadAdapters() {
@@ -264,7 +277,7 @@ async function syncAdapter(provider) {
     if (error.status !== 401) { setSyncStatus(`${provider} synchronization failed. ${error.message}`, 'error', provider); toast(`Sync failed: ${error.message}`, true); await loadAdapters().catch(() => {}); }
   } finally { clearInterval(state.sync.timer); state.sync.timer = null; state.sync.provider = null; setSyncButtons(false); }
 }
-async function refreshAll() { try { await Promise.all([loadRobotOptions(), loadRobots(), loadEvents(), loadAdapters(), loadOperationsSummary(), loadServiceCases(), loadCompatibility()]); } catch (error) { if (error.status !== 401) toast(error.message, true); } }
+async function refreshAll() { try { await Promise.all([loadRobotOptions(), loadRobots(), loadEvents(), loadAdapters(), loadOperationsSummary(), loadServiceCases(), loadCompatibility(), loadNotifications(), loadAudit()]); } catch (error) { if (error.status !== 401) toast(error.message, true); } }
 
 function setFormBusy(form, busy) {
   form.querySelectorAll('button[type="submit"], button:not([type])').forEach((button) => { if (button.value !== 'cancel') button.disabled = busy; });
@@ -288,11 +301,13 @@ function applyMetricAction(action) {
 function bindUi() {
   let searchTimer; $('#searchInput').addEventListener('input', () => { clearTimeout(searchTimer); state.registry.page = 1; searchTimer = setTimeout(loadRobots, 250); }); ['statusFilter','liveFilter','sortRobots'].forEach((id) => $(`#${id}`).addEventListener('change', resetRegistryPage)); $('#pageSize').addEventListener('change', () => { state.registry.pageSize = Number($('#pageSize').value); resetRegistryPage(); }); $('#previousPage').addEventListener('click', () => { if (state.registry.page > 1) { state.registry.page -= 1; loadRobots(); } }); $('#nextPage').addEventListener('click', () => { if (state.registry.page < state.registry.pageCount) { state.registry.page += 1; loadRobots(); } });
   $('#refreshButton').addEventListener('click', async () => { const button = $('#refreshButton'); button.disabled = true; try { await refreshAll(); } finally { button.disabled = false; } }); $('#refreshEvents').addEventListener('click', loadEvents); $('#refreshAdapters').addEventListener('click', loadAdapters); $('#refreshServiceCases').addEventListener('click', loadServiceCases);
+  $('#refreshAudit').addEventListener('click', loadAudit);
   ['eventRobotFilter','eventSeverityFilter','eventTypeFilter','eventFromFilter','eventToFilter'].forEach((id) => $(`#${id}`).addEventListener('change', loadEvents)); $('#clearEventFilters').addEventListener('click', () => { ['eventRobotFilter','eventSeverityFilter','eventTypeFilter','eventFromFilter','eventToFilter'].forEach((id) => { $(`#${id}`).value = ''; }); loadEvents(); });
   document.querySelectorAll('[data-metric-action]').forEach((card) => { card.addEventListener('click', () => applyMetricAction(card.dataset.metricAction)); card.addEventListener('keydown', (event) => { if (['Enter',' '].includes(event.key)) { event.preventDefault(); applyMetricAction(card.dataset.metricAction); } }); });
   $('#syncAutoXing').addEventListener('click', () => syncAdapter('autoxing')); $('#syncCenoBots').addEventListener('click', () => syncAdapter('cenobots'));
   $('#exportTenant').addEventListener('click', () => download('/api/v1/exports/tenant.json', 'altegro-tenant-export.json').catch((error) => toast(error.message, true)));
   $('#logoutButton').addEventListener('click', logout);
+  $('#notificationsButton').addEventListener('click', async () => { try { await loadNotifications(); $('#notificationsDialog').showModal(); } catch (error) { toast(error.message, true); } });
   $('#loginForm').addEventListener('submit', async (event) => { event.preventDefault(); const error = $('#loginError'); const form = event.currentTarget; error.textContent = ''; setFormBusy(form, true); try { await login($('#loginEmail').value.trim(), $('#loginPassword').value); } catch (loginError) { error.textContent = loginError.message; } finally { setFormBusy(form, false); } });
   const dialog = $('#robotDialog'); const existingRobotSelect = $('#existingRobotId'); const serialInput = $('#serialNumber'); const modelSelect = $('#modelId'); const robotUsername = $('#robotUsername'); const robotPassword = $('#robotPassword'); const accountFields = $('#robotAccountFields'); const registerButton = $('#registerButton'); const serialHint = $('#serialNumberHint');
   const setNewRobotFields = (isNew) => { const manualCredentials = isNew && state.user.role !== 'robot_user'; serialHint.classList.remove('field-error'); serialInput.readOnly = !isNew; robotUsername.disabled = !manualCredentials; robotPassword.disabled = !manualCredentials; robotUsername.required = manualCredentials; robotPassword.required = manualCredentials; accountFields.classList.toggle('hidden', state.user.role === 'robot_user'); if (isNew) { serialHint.textContent = state.user.role === 'robot_user' ? 'The robot will be added to your current account.' : 'Enter a new unique serial number.'; registerButton.textContent = 'Register robot'; } else { serialHint.textContent = 'Existing synchronized robot selected.'; registerButton.textContent = 'Open robot'; } };

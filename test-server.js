@@ -1,7 +1,14 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { server, state } = require('./server');
+const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const testDataFile = path.join('/tmp', `altegro-test-state-${process.pid}.json`);
+fs.rmSync(testDataFile, { force: true });
+process.env.ALTEGRO_DATA_FILE = testDataFile;
+process.env.ALTEGRO_PERSISTENCE = 'true';
+const { server, state, DATA_FILE } = require('./server');
 
 const port = 3107;
 let defaultToken = 'demo-platform-admin';
@@ -19,7 +26,7 @@ async function requestAs(token, path, options = {}) {
 
 async function loginWithPassword(email, password) {
   const response = await fetch(`http://localhost:${port}/api/v1/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
-  return { status: response.status, body: await response.json() };
+  return { status: response.status, body: await response.json(), headers: response.headers };
 }
 
 (async () => {
@@ -37,6 +44,12 @@ async function loginWithPassword(email, password) {
     assert.equal(loginResult.status, 200);
     assert.equal(loginBody.user.role, 'platform_admin');
     assert.notEqual(loginBody.token, 'demo-platform-admin');
+    assert.match(loginResult.headers.get('set-cookie'), /HttpOnly/);
+    assert.match(loginResult.headers.get('set-cookie'), /SameSite=Strict/);
+    const browserCookie = loginResult.headers.get('set-cookie').split(';')[0];
+    const cookieSessionResponse = await fetch(`http://localhost:${port}/api/v1/auth/session`, { headers: { cookie: browserCookie } });
+    assert.equal(cookieSessionResponse.status, 200);
+    assert.equal((await cookieSessionResponse.json()).user.role, 'platform_admin');
     defaultToken = loginBody.token;
     result = await request('/api/v1/auth/session');
     assert.equal(result.status, 200);
@@ -147,8 +160,10 @@ async function loginWithPassword(email, password) {
     assert.ok(dynamicAccount);
     assert.equal(dynamicAccount.created, false);
     assert.match(dynamicAccount.email, /@demo\.altegro\.local$/);
+    assert.equal(dynamicAccount.password, undefined);
+    assert.equal(dynamicAccount.credentialStatus, 'password-set');
 
-    loginResult = await loginWithPassword(dynamicAccount.email, dynamicAccount.password);
+    loginResult = await loginWithPassword(dynamicAccount.email, 'Robot-ax-pilot-016-demo');
     assert.equal(loginResult.status, 200);
     result = await requestAs(loginResult.body.token, '/api/v1/robots');
     assert.equal(result.status, 200);
@@ -201,6 +216,10 @@ async function loginWithPassword(email, password) {
     assert.equal(result.status, 200);
     assert.ok(result.body.data.passport.percentage >= 0);
     assert.ok(result.body.data.service.closed >= 1);
+    result = await request('/api/v1/notifications');
+    assert.equal(result.status, 200);
+    assert.ok(Array.isArray(result.body.data));
+    assert.equal(result.body.count, result.body.data.length);
 
     result = await request('/api/v1/compatibility');
     assert.equal(result.status, 200);
@@ -243,8 +262,18 @@ async function loginWithPassword(email, password) {
     assert.equal(result.status, 200);
     assert.ok(result.body.count > 0);
 
+    assert.equal(DATA_FILE, testDataFile);
+    const persisted = fs.readFileSync(testDataFile, 'utf8');
+    assert.match(persisted, /MANUAL-ROBOT-001/);
+    assert.match(persisted, /scrypt\$/);
+    assert.doesNotMatch(persisted, /Manual-robot-001/);
+    assert.doesNotMatch(persisted, /efrobotics/);
+    const restoredSerials = execFileSync(process.execPath, ['-e', "const { state } = require('./server'); process.stdout.write(JSON.stringify([...state.robots.values()].map((robot) => robot.serialNumber)));"], { cwd: __dirname, env: { ...process.env, ALTEGRO_DATA_FILE: testDataFile, ALTEGRO_PERSISTENCE: 'true' }, encoding: 'utf8' });
+    assert.ok(JSON.parse(restoredSerials).includes('MANUAL-ROBOT-001'));
+
     console.log('All Altegro prototype tests passed.');
   } finally {
     server.close();
+    fs.rmSync(testDataFile, { force: true });
   }
 })().catch((error) => { console.error(error); process.exitCode = 1; });

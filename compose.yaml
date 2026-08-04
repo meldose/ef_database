@@ -1,0 +1,17 @@
+services:
+  altegro:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      BIND_HOST: 0.0.0.0
+      ALTEGRO_PERSISTENCE: "true"
+      ALTEGRO_DATA_FILE: /app/data/altegro-state.json
+      AUTH_SESSION_TTL_SECONDS: "28800"
+      COOKIE_SECURE: "false"
+    volumes:
+      - altegro-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  altegro-data:

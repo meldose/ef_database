@@ -8,12 +8,16 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 
 const PORT = Number(process.env.PORT || 3000);
+const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
 const startedAt = new Date().toISOString();
 const MAX_EVENT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_ACCOUNT_PASSWORD = process.env.DEFAULT_ACCOUNT_PASSWORD || 'efrobotics';
 const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024;
 const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_FAILURES = 5;
+const PASSWORD_KEY_LENGTH = 64;
+const DATA_FILE = pathUtil.resolve(process.env.ALTEGRO_DATA_FILE || pathUtil.join(__dirname, 'data', 'altegro-state.json'));
+const persistenceEnabled = () => !['0', 'false', 'no'].includes(String(process.env.ALTEGRO_PERSISTENCE ?? 'true').toLowerCase());
 const loginFailures = new Map();
 const allowedAttachmentTypes = new Set(['application/pdf', 'application/json', 'text/plain', 'text/csv', 'image/png', 'image/jpeg', 'image/webp', 'application/octet-stream']);
 const allowedAttachmentExtensions = new Set(['.pdf', '.json', '.txt', '.csv', '.png', '.jpg', '.jpeg', '.webp']);
@@ -31,6 +35,7 @@ const autoXingPollIntervalMs = () => Math.max(0, Number(process.env.AUTOXING_POL
 const parseJsonEnv = (name, fallback = {}) => { try { return process.env[name] ? JSON.parse(process.env[name]) : fallback; } catch { return fallback; } };
 const autoXingMappingRequired = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_REQUIRE_MAPPING || '').toLowerCase());
 const authenticatedSessions = new Map();
+let persistenceTimer = null;
 
 const state = {
   tenants: new Map(),
@@ -74,13 +79,100 @@ const demoUsers = {
   'demo-robot-se52512706922ne': { id: 'user-robot-se52512706922ne', name: 'SE52512706922NE User', email: 'robot-se52512706922ne@demo.altegro.local', demoPassword: 'SE-robot-001-demo', role: 'robot_user', tenantId: 'tenant-demo', organizationId: 'org-demo', robotSystem: 'autoxing', robotSerialNumber: 'SE52512706922NE' }
 };
 
+function hashPassword(password, salt = crypto.randomBytes(16).toString('hex')) {
+  const digest = crypto.scryptSync(String(password), salt, PASSWORD_KEY_LENGTH).toString('hex');
+  return `scrypt$${salt}$${digest}`;
+}
+
+function verifyPassword(password, storedHash) {
+  const [scheme, salt, expectedHex] = String(storedHash || '').split('$');
+  if (scheme !== 'scrypt' || !salt || !expectedHex) return false;
+  const expected = Buffer.from(expectedHex, 'hex');
+  const actual = crypto.scryptSync(String(password), salt, expected.length);
+  return expected.length === actual.length && crypto.timingSafeEqual(expected, actual);
+}
+
+function initializeCredentialHashes() {
+  for (const user of Object.values(demoUsers)) {
+    const plainPassword = user.demoPassword || DEFAULT_ACCOUNT_PASSWORD;
+    if (!user.passwordHash) user.passwordHash = hashPassword(plainPassword);
+    delete user.demoPassword;
+  }
+}
+
+function mapEntries(map) {
+  return [...map.entries()];
+}
+
+function persistedSnapshot() {
+  return {
+    schemaVersion: 1,
+    savedAt: timestamp(),
+    users: clone(demoUsers),
+    sessions: mapEntries(authenticatedSessions).filter(([, session]) => session.expiresAt > Date.now()),
+    state: {
+      tenants: mapEntries(state.tenants), organizations: mapEntries(state.organizations), sites: mapEntries(state.sites), models: mapEntries(state.models), robots: mapEntries(state.robots),
+      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), documents: state.documents, certificates: state.certificates,
+      deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox,
+      autoxing: { ...state.autoxing, pois: mapEntries(state.autoxing.pois), areas: mapEntries(state.autoxing.areas), maps: mapEntries(state.autoxing.maps), tasks: mapEntries(state.autoxing.tasks) },
+      adapterRuntime: mapEntries(state.adapters).map(([provider, adapter]) => [provider, { lastSyncAt: adapter.lastSyncAt || null, lastSyncStatus: adapter.lastSyncStatus || 'never', lastError: adapter.lastError || null }])
+    }
+  };
+}
+
+function persistState() {
+  if (!persistenceEnabled()) return false;
+  fs.mkdirSync(pathUtil.dirname(DATA_FILE), { recursive: true });
+  const temporaryFile = `${DATA_FILE}.${process.pid}.tmp`;
+  fs.writeFileSync(temporaryFile, `${JSON.stringify(persistedSnapshot(), null, 2)}\n`, { mode: 0o600 });
+  fs.renameSync(temporaryFile, DATA_FILE);
+  return true;
+}
+
+function schedulePersist() {
+  if (!persistenceEnabled() || persistenceTimer) return;
+  persistenceTimer = setTimeout(() => {
+    persistenceTimer = null;
+    try { persistState(); } catch (error) { console.error(`Could not persist Altegro state: ${error.message}`); }
+  }, 50);
+  persistenceTimer.unref?.();
+}
+
+function replaceMap(target, entries) {
+  if (!Array.isArray(entries)) return;
+  target.clear();
+  for (const [key, value] of entries) target.set(key, value);
+}
+
+function loadPersistedState() {
+  if (!persistenceEnabled() || !fs.existsSync(DATA_FILE)) return false;
+  try {
+    const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    if (saved.schemaVersion !== 1 || !saved.state) throw new Error('unsupported data schema');
+    for (const [token, user] of Object.entries(saved.users || {})) demoUsers[token] = user;
+    initializeCredentialHashes();
+    replaceMap(authenticatedSessions, (saved.sessions || []).filter(([, session]) => session.expiresAt > Date.now()));
+    for (const name of ['tenants', 'organizations', 'sites', 'models', 'robots', 'passportEntries', 'serviceCases']) replaceMap(state[name], saved.state[name]);
+    for (const name of ['documents', 'certificates', 'deployments', 'compatibilityRecords', 'events', 'audit', 'outbox']) if (Array.isArray(saved.state[name])) state[name] = saved.state[name];
+    const autoXing = saved.state.autoxing || {};
+    state.autoxing.businesses = autoXing.businesses || []; state.autoxing.buildings = autoXing.buildings || []; state.autoxing.lastSyncAt = autoXing.lastSyncAt || null; state.autoxing.resourceErrors = autoXing.resourceErrors || [];
+    for (const name of ['pois', 'areas', 'maps', 'tasks']) replaceMap(state.autoxing[name], autoXing[name]);
+    for (const [provider, runtime] of saved.state.adapterRuntime || []) Object.assign(state.adapters.get(provider) || {}, runtime);
+    return true;
+  } catch (error) {
+    console.error(`Could not load ${DATA_FILE}; starting from the seeded state: ${error.message}`);
+    return false;
+  }
+}
+
 function publicUser(user) {
   return { id: user.id, name: user.name, email: user.email, role: user.role, tenantId: user.tenantId, scope: actorRobotSerials(user).length ? { type: 'robot', system: user.robotSystem, externalId: user.robotExternalId || null, serialNumber: actorRobotSerials(user)[0], serialNumbers: actorRobotSerials(user) } : { type: 'tenant' } };
 }
 
 function authenticatedSession(token, user) {
   const sessionToken = crypto.randomBytes(32).toString('base64url');
-  authenticatedSessions.set(sessionToken, { userToken: token, expiresAt: Date.now() + Math.max(60000, Number(process.env.AUTH_SESSION_TTL_SECONDS || 28800) * 1000) });
+  authenticatedSessions.set(crypto.createHash('sha256').update(sessionToken).digest('hex'), { userToken: token, expiresAt: Date.now() + Math.max(60000, Number(process.env.AUTH_SESSION_TTL_SECONDS || 28800) * 1000) });
+  schedulePersist();
   return { token: sessionToken, user: publicUser(user) };
 }
 
@@ -121,6 +213,7 @@ function seed() {
 
 function recordAudit(actor, action, objectType, objectId, result = 'success', details = {}) {
   state.audit.push({ id: ids(), actorId: actor.id, actorName: actor.name, action, objectType, objectId, result, details, occurredAt: timestamp() });
+  schedulePersist();
 }
 
 function appendOutbox(eventType, aggregateType, aggregateId, payload = {}) {
@@ -144,14 +237,15 @@ function robotAccountSlug(value) {
 
 function createRobotUser(robot, { email, password, system = 'manual', externalId = null } = {}) {
   const existingRobotUser = Object.entries(demoUsers).find(([, user]) => user.role === 'robot_user' && user.robotSystem === system && user.robotSerialNumber === robot.serialNumber);
-  if (existingRobotUser) return { token: existingRobotUser[0], email: existingRobotUser[1].email, password: existingRobotUser[1].demoPassword, serialNumber: robot.serialNumber, robotId: robot.id, created: false };
+  if (existingRobotUser) return { token: existingRobotUser[0], email: existingRobotUser[1].email, password: null, serialNumber: robot.serialNumber, robotId: robot.id, created: false };
   if (Object.values(demoUsers).some((user) => user.email.toLowerCase() === email.toLowerCase())) throw httpError(409, 'That username/email is already in use');
   const slug = robotAccountSlug(robot.serialNumber);
   let token = `demo-robot-${slug}`;
   let suffix = 2;
   while (demoUsers[token]) token = `demo-robot-${slug}-${suffix++}`;
-  const user = { id: `user-${token}`, name: `${robot.serialNumber} User`, email, demoPassword: password, role: 'robot_user', tenantId: robot.tenantId, organizationId: robot.organizationId, robotSystem: system, robotExternalId: externalId, robotSerialNumber: robot.serialNumber };
+  const user = { id: `user-${token}`, name: `${robot.serialNumber} User`, email, passwordHash: hashPassword(password), role: 'robot_user', tenantId: robot.tenantId, organizationId: robot.organizationId, robotSystem: system, robotExternalId: externalId, robotSerialNumber: robot.serialNumber };
   demoUsers[token] = user;
+  schedulePersist();
   return { token, email: user.email, password, serialNumber: robot.serialNumber, robotId: robot.id, created: true };
 }
 
@@ -164,7 +258,7 @@ function ensureRobotUser(robot) {
 
 function ensureAllRobotUsers() {
   [...state.robots.values()].map(ensureRobotUser).filter(Boolean);
-  return Object.entries(demoUsers).filter(([, user]) => user.role === 'robot_user').map(([token, user]) => { const serialNumbers = actorRobotSerials(user); return { token, email: user.email, password: user.demoPassword, serialNumber: serialNumbers[0] || null, serialNumbers, robotId: [...state.robots.values()].find((robot) => robot.serialNumber === serialNumbers[0])?.id || null, created: false }; });
+  return Object.entries(demoUsers).filter(([, user]) => user.role === 'robot_user').map(([token, user]) => { const serialNumbers = actorRobotSerials(user); return { token, email: user.email, password: null, serialNumber: serialNumbers[0] || null, serialNumbers, robotId: [...state.robots.values()].find((robot) => robot.serialNumber === serialNumbers[0])?.id || null, created: false }; });
 }
 
 function upsertEvent(robotId, event, actor = { id: 'system', name: 'System' }) {
@@ -356,11 +450,13 @@ function calculateCompleteness(robot, entries) {
 
 function getActor(req) {
   const header = req.headers.authorization || '';
-  const token = header.startsWith('Bearer ') ? header.slice(7) : null;
+  const cookieToken = String(req.headers.cookie || '').split(';').map((part) => part.trim()).find((part) => part.startsWith('altegro_session='))?.slice('altegro_session='.length);
+  const token = header.startsWith('Bearer ') ? header.slice(7) : cookieToken ? decodeURIComponent(cookieToken) : null;
   if (!token) return null;
-  const session = authenticatedSessions.get(token);
+  const sessionKey = crypto.createHash('sha256').update(token).digest('hex');
+  const session = authenticatedSessions.get(sessionKey);
   if (!session) return null;
-  if (session.expiresAt <= Date.now()) { authenticatedSessions.delete(token); return null; }
+  if (session.expiresAt <= Date.now()) { authenticatedSessions.delete(sessionKey); schedulePersist(); return null; }
   return demoUsers[session.userToken] || null;
 }
 
@@ -435,6 +531,27 @@ function operationsSummary(actor) {
   };
 }
 
+function operationalNotifications(actor) {
+  const robotIds = visibleRobotIds(actor);
+  const robots = [...state.robots.values()].filter((robot) => robotIds.has(robot.id));
+  const notifications = [];
+  for (const robot of robots.filter((item) => item.online === false)) notifications.push({ id: `offline:${robot.id}`, type: 'robot_offline', severity: 'warning', title: `${robot.serialNumber} is offline`, message: 'The most recent synchronization reports this robot as offline.', robotId: robot.id, occurredAt: robot.updatedAt || startedAt });
+  for (const event of state.events.filter((item) => robotIds.has(item.robotId) && ['error', 'critical'].includes(item.severity)).sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt)).slice(0, 10)) {
+    const robot = state.robots.get(event.robotId);
+    notifications.push({ id: `event:${event.eventId}`, type: 'technical_event', severity: event.severity, title: event.title || event.eventType, message: `${robot?.serialNumber || 'Robot'} · ${event.description || event.eventType}`, robotId: event.robotId, occurredAt: event.occurredAt });
+  }
+  const dueBefore = Date.now() + 30 * 86400000;
+  for (const certificate of state.certificates.filter((item) => robotIds.has(item.robotId) && item.validUntil && Date.parse(item.validUntil) <= dueBefore && item.status !== 'revoked')) {
+    const robot = state.robots.get(certificate.robotId);
+    notifications.push({ id: `certificate:${certificate.id}`, type: 'certificate_due', severity: Date.parse(certificate.validUntil) < Date.now() ? 'critical' : 'warning', title: certificate.title, message: `${robot?.serialNumber || 'Robot'} · certificate ${Date.parse(certificate.validUntil) < Date.now() ? 'expired' : 'expires soon'}.`, robotId: certificate.robotId, occurredAt: certificate.validUntil });
+  }
+  for (const serviceCase of serviceCasesForActor(actor).filter((item) => !['resolved', 'closed'].includes(item.status)).slice(0, 10)) notifications.push({ id: `service:${serviceCase.id}`, type: 'service_case', severity: serviceCase.severity || 'warning', title: serviceCase.title, message: `Service case ${serviceCase.externalId} is ${serviceCase.status.replaceAll('_', ' ')}.`, robotId: serviceCase.robotId, occurredAt: serviceCase.updatedAt });
+  if (!['robot_user', 'auditor'].includes(actor.role)) for (const adapter of state.adapters.values()) if (adapter.lastSyncStatus === 'error') notifications.push({ id: `adapter:${adapter.provider}`, type: 'integration_error', severity: 'error', title: `${adapter.provider} synchronization failed`, message: 'Retry synchronization or inspect the protected server log.', robotId: null, occurredAt: adapter.lastSyncAt || startedAt });
+  const rank = { critical: 0, error: 1, warning: 2, info: 3 };
+  notifications.sort((a, b) => (rank[a.severity] ?? 4) - (rank[b.severity] ?? 4) || Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
+  return notifications.slice(0, 30);
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = ''; let bytes = 0; let tooLarge = false;
@@ -500,10 +617,15 @@ function securityHeaders(contentType, extra = {}) {
   return { 'content-type': contentType, 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'", 'referrer-policy': 'no-referrer', 'permissions-policy': 'camera=(), microphone=(), geolocation=()', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'cross-origin-resource-policy': 'same-origin', ...extra };
 }
 
-function send(res, status, payload) {
+function send(res, status, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload);
-  res.writeHead(status, securityHeaders('application/json; charset=utf-8', { 'content-length': Buffer.byteLength(body) }));
+  res.writeHead(status, securityHeaders('application/json; charset=utf-8', { 'content-length': Buffer.byteLength(body), ...extraHeaders }));
   res.end(body);
+}
+
+function sessionCookie(token, maxAgeSeconds = Math.max(60, Number(process.env.AUTH_SESSION_TTL_SECONDS || 28800))) {
+  const secure = ['1', 'true', 'yes'].includes(String(process.env.COOKIE_SECURE || '').toLowerCase()) ? '; Secure' : '';
+  return `altegro_session=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAgeSeconds}${secure}`;
 }
 
 function sendDownload(res, contentType, filename, body) {
@@ -551,15 +673,17 @@ async function handle(req, res) {
     const email = String(login.email || '').trim().toLowerCase();
     enforceLoginRateLimit(req, email);
     const match = Object.entries(demoUsers).find(([, user]) => user.email.toLowerCase() === email);
-    if (!match || String(login.password || '') !== (match[1].demoPassword || DEFAULT_ACCOUNT_PASSWORD)) { recordLoginFailure(req, email); throw httpError(401, 'Invalid email or password'); }
+    if (!match || !verifyPassword(String(login.password || ''), match[1].passwordHash)) { recordLoginFailure(req, email); throw httpError(401, 'Invalid email or password'); }
     const [token, user] = match;
     clearLoginFailures(req, email);
-    return send(res, 200, authenticatedSession(token, user));
+    const session = authenticatedSession(token, user);
+    return send(res, 200, session, { 'set-cookie': sessionCookie(session.token) });
   }
   if (req.method === 'POST' && path === '/api/v1/auth/logout') {
-    const header = req.headers.authorization || ''; const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-    if (token) authenticatedSessions.delete(token);
-    return send(res, 200, { loggedOut: true });
+    const header = req.headers.authorization || ''; const cookieToken = String(req.headers.cookie || '').split(';').map((part) => part.trim()).find((part) => part.startsWith('altegro_session='))?.slice('altegro_session='.length); const token = header.startsWith('Bearer ') ? header.slice(7) : cookieToken ? decodeURIComponent(cookieToken) : null;
+    if (token) authenticatedSessions.delete(crypto.createHash('sha256').update(token).digest('hex'));
+    schedulePersist();
+    return send(res, 200, { loggedOut: true }, { 'set-cookie': sessionCookie('', 0) });
   }
   if (req.method === 'GET' && path === '/api/v1/auth/session') {
     const actor = requireActor(req);
@@ -571,6 +695,7 @@ async function handle(req, res) {
   const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
 
   if (req.method === 'GET' && path === '/api/v1/operations/summary') return send(res, 200, { data: operationsSummary(actor) });
+  if (req.method === 'GET' && path === '/api/v1/notifications') { const data = operationalNotifications(actor); return send(res, 200, { data, count: data.length, generatedAt: timestamp() }); }
   if (req.method === 'GET' && path === '/api/v1/compatibility') return send(res, 200, { data: state.compatibilityRecords.filter((item) => item.tenantId === actor.tenantId), count: state.compatibilityRecords.filter((item) => item.tenantId === actor.tenantId).length });
   if (req.method === 'POST' && path === '/api/v1/compatibility') {
     if (!['platform_admin', 'data_admin'].includes(actor.role)) throw httpError(403, 'Compatibility administration permission required');
@@ -584,7 +709,7 @@ async function handle(req, res) {
   if (req.method === 'GET' && path === '/api/v1/service-cases') return send(res, 200, { data: serviceCasesForActor(actor), count: serviceCasesForActor(actor).length });
   if (req.method === 'GET' && path === '/api/v1/outbox') {
     if (!['platform_admin', 'data_admin'].includes(actor.role)) throw httpError(403, 'Outbox administration permission required');
-    return send(res, 200, { data: state.outbox, count: state.outbox.length, warning: 'Prototype in-memory outbox; PostgreSQL transactionality is still required.' });
+    return send(res, 200, { data: state.outbox, count: state.outbox.length, warning: 'Locally durable prototype Outbox; PostgreSQL transactionality and a publisher worker are still required.' });
   }
   if (req.method === 'GET' && path === '/api/v1/exports/robots.csv') {
     if (!canExport(actor)) throw httpError(403, 'Export permission required');
@@ -604,8 +729,8 @@ async function handle(req, res) {
   if (req.method === 'GET' && path === '/api/v1/tenants') return send(res, 200, { data: [...state.tenants.values()].filter((tenant) => tenant.id === actor.tenantId) });
   if (req.method === 'GET' && path === '/api/v1/robot-accounts') {
     if (actor.role !== 'platform_admin') throw httpError(403, 'Platform administrator permission required');
-    const accounts = ensureAllRobotUsers().map(({ token, email, password, serialNumber, robotId, created }) => ({ token, email, password, serialNumber, robotId, created }));
-    return send(res, 200, { warning: 'Prototype credentials only. Do not use in production.', data: accounts, count: accounts.length });
+    const accounts = ensureAllRobotUsers().map(({ token, email, serialNumber, robotId, created }) => ({ token, email, serialNumber, robotId, created, credentialStatus: 'password-set' }));
+    return send(res, 200, { warning: 'Passwords are hashed and cannot be retrieved. Reset a password if access is lost.', data: accounts, count: accounts.length });
   }
   if (req.method === 'GET' && path === '/api/v1/adapters') return send(res, 200, { data: ['robot_user', 'auditor'].includes(actor.role) ? [] : [...state.adapters.values()].map(({ sync, lastError, ...adapter }) => ({ ...adapter, lastError: lastError ? 'Synchronization failed. Retry the operation or check the protected server log.' : null })) });
   if (req.method === 'GET' && path === '/api/v1/adapters/autoxing/resources') {
@@ -708,7 +833,7 @@ async function handle(req, res) {
     const password = body.password ? String(body.password) : null;
     if ((username && !password) || (!username && password)) throw httpError(400, 'Username and password must be provided together');
     if (username && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(username)) throw httpError(400, 'Username must be a valid email address');
-    if (password && password.length < 8) throw httpError(400, 'Password must be at least 8 characters');
+    if (password && password.length < 12) throw httpError(400, 'Password must be at least 12 characters');
     if (actor.role !== 'robot_user' && (!username || !password)) throw httpError(400, 'Username and password are required for this registration');
     if ([...state.robots.values()].some((item) => item.tenantId === actor.tenantId && item.serialNumber.toLowerCase() === serialNumber.toLowerCase())) throw httpError(409, 'A robot with that serial number already exists');
     const externalIdentities = Array.isArray(body.externalIdentities) ? body.externalIdentities.filter((identity) => identity?.system && identity?.externalId).map((identity) => ({ system:String(identity.system).slice(0, 80), externalId:String(identity.externalId).slice(0, 200) })) : [];
@@ -835,12 +960,20 @@ async function handle(req, res) {
 }
 
 seed();
-const server = http.createServer((req, res) => handle(req, res).catch((error) => {
-  const status = Number(error.status) || 500; const correlationId = ids();
-  if (status >= 500) console.error(`[${correlationId}] ${req.method} ${req.url}:`, error);
-  const code = status === 401 ? 'UNAUTHENTICATED' : status === 403 ? 'FORBIDDEN' : status === 409 ? 'CONFLICT' : status === 429 ? 'RATE_LIMITED' : status >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_FAILED';
-  send(res, status, { error: { code, message: status >= 500 ? 'The operation could not be completed. Retry or contact support with the correlation ID.' : error.message, details: status < 500 ? error.details : undefined, correlationId } });
-}));
+initializeCredentialHashes();
+const restoredFromDisk = loadPersistedState();
+if (persistenceEnabled() && !restoredFromDisk) persistState();
+const server = http.createServer(async (req, res) => {
+  try {
+    await handle(req, res);
+    if (req.method !== 'GET' && req.method !== 'HEAD') persistState();
+  } catch (error) {
+    const status = Number(error.status) || 500; const correlationId = ids();
+    if (status >= 500) console.error(`[${correlationId}] ${req.method} ${req.url}:`, error);
+    const code = status === 401 ? 'UNAUTHENTICATED' : status === 403 ? 'FORBIDDEN' : status === 409 ? 'CONFLICT' : status === 429 ? 'RATE_LIMITED' : status >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_FAILED';
+    send(res, status, { error: { code, message: status >= 500 ? 'The operation could not be completed. Retry or contact support with the correlation ID.' : error.message, details: status < 500 ? error.details : undefined, correlationId } });
+  }
+});
 
 let autoXingPollTimer = null;
 let autoXingPollRunning = false;
@@ -851,12 +984,16 @@ function startAutoXingPolling() {
     if (autoXingPollRunning) return;
     autoXingPollRunning = true;
     try { await syncAutoXingLive(pollActor); } catch (error) { const adapter = state.adapters.get('autoxing'); if (adapter) { adapter.lastSyncStatus = 'error'; adapter.lastError = error.message; } }
-    finally { autoXingPollRunning = false; }
+    finally { autoXingPollRunning = false; try { persistState(); } catch (error) { console.error(`Could not persist AutoXing synchronization: ${error.message}`); } }
   }, autoXingPollIntervalMs());
+  autoXingPollTimer.unref?.();
 }
 
 if (require.main === module) {
-  server.listen(PORT, '127.0.0.1', () => { startAutoXingPolling(); console.log(`Altegro prototype listening on http://127.0.0.1:${PORT}`); });
+  server.listen(PORT, BIND_HOST, () => { startAutoXingPolling(); console.log(`Altegro prototype listening on http://${BIND_HOST}:${PORT}`); });
+  const shutdown = (signal) => { console.log(`${signal} received; saving state and shutting down.`); try { persistState(); } catch (error) { console.error(`Final persistence failed: ${error.message}`); } server.close(() => process.exit(0)); };
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-module.exports = { server, state };
+module.exports = { server, state, persistState, DATA_FILE };

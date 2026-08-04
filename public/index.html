@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
+    <a class="skip-link" href="#mainContent">Skip to operations content</a>
     <section id="loginScreen" class="login-screen">
       <div class="login-card">
         <div class="login-brand"><span class="brand-mark">A</span><div><strong>altegro</strong><small>robot operations platform</small></div></div>
@@ -30,13 +31,14 @@
       </a>
       <div class="topbar-actions">
         <span class="env-badge"><i></i> Prototype · Phase 1</span>
+        <button class="notification-button" id="notificationsButton" type="button" aria-label="Open operational notifications">Alerts <span id="notificationCount">0</span></button>
         <span id="loggedInUser" class="logged-in-user"></span>
         <button class="logout-button" id="logoutButton">Log out</button>
         <button class="icon-button" id="refreshButton" title="Refresh data" aria-label="Refresh data">↻</button>
       </div>
     </header>
 
-    <main class="shell">
+    <main class="shell" id="mainContent" tabindex="-1">
       <section class="hero">
         <div>
           <p class="eyebrow">Operations center / Demo Customer Tenant</p>
@@ -84,6 +86,7 @@
           </div>
           <div class="table-wrap">
             <table>
+              <caption class="sr-only">Robot registry</caption>
               <thead><tr><th>Robot</th><th>Model</th><th>Location</th><th>Status</th><th>Live data</th><th></th></tr></thead>
               <tbody id="robotTable"><tr><td colspan="6" class="empty">Loading registry…</td></tr></tbody>
             </table>
@@ -122,6 +125,12 @@
         <article class="panel">
           <div class="panel-header"><div><p class="eyebrow">Compatibility gate</p><h2>Model compatibility</h2></div><span class="lock-label">Commands blocked</span></div>
           <div id="compatibilityList" class="record-list"><div class="empty">Loading compatibility records…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid">
+        <article class="panel audit-panel">
+          <div class="panel-header"><div><p class="eyebrow">Accountability</p><h2>Recent audit activity</h2></div><button class="text-button" id="refreshAudit">Refresh</button></div>
+          <div id="auditList" class="record-list"><div class="empty">Loading audit history…</div></div>
         </article>
       </section>
     </main>
@@ -169,7 +178,7 @@
         <label>Existing synchronized robot <span class="field-hint">optional · select one to open it</span><select id="existingRobotId"><option value="">＋ New robot</option></select></label>
         <label>Model<select id="modelId" required><option value="model-autoxing-a1">AutoXing A1 · Cleaning</option><option value="model-cenobots-c1">CenoBots C1 · Cleaning</option><option value="model-mock-m3">Mock OEM M3 · Transport</option></select></label>
         <label>Serial number<input id="serialNumber" required placeholder="AX-PILOT-016" /><span id="serialNumberHint" class="field-hint">Enter a new unique serial number.</span></label>
-        <div id="robotAccountFields" class="form-grid"><label>Username / email<input id="robotUsername" type="email" required autocomplete="off" placeholder="operator@example.com" /></label><label>Password<input id="robotPassword" type="password" required minlength="8" autocomplete="new-password" placeholder="At least 8 characters" /></label></div>
+        <div id="robotAccountFields" class="form-grid"><label>Username / email<input id="robotUsername" type="email" required autocomplete="off" placeholder="operator@example.com" /></label><label>Password<input id="robotPassword" type="password" required minlength="12" autocomplete="new-password" placeholder="At least 12 characters" /></label></div>
         <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" id="registerButton" value="default">Register robot</button></div>
       </form>
     </dialog>
@@ -178,6 +187,14 @@
         <div class="dialog-header"><div><p class="eyebrow">Robot account created</p><h2>Save these credentials</h2></div><button class="close-button" value="cancel" aria-label="Close">×</button></div>
         <p class="dialog-copy">Use this username and password to log in and view only the newly registered robot.</p>
         <pre id="createdAccountCredentials" class="credential-display"></pre>
+        <div class="dialog-actions"><button class="button primary" value="default">Done</button></div>
+      </form>
+    </dialog>
+    <dialog id="notificationsDialog" class="notifications-dialog" aria-labelledby="notificationsTitle">
+      <form method="dialog">
+        <div class="dialog-header"><div><p class="eyebrow">Operations center</p><h2 id="notificationsTitle">Notifications</h2></div><button class="close-button" value="cancel" aria-label="Close notifications">×</button></div>
+        <p class="dialog-copy">Current offline robots, technical errors, service work, certificates, and integration failures.</p>
+        <div id="notificationsList" class="notifications-list"><div class="empty">Loading notifications…</div></div>
         <div class="dialog-actions"><button class="button primary" value="default">Done</button></div>
       </form>
     </dialog>

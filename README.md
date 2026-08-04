@@ -5,7 +5,7 @@ This is a dependency-free Node.js prototype for testing the first Altegro thin s
 - `Altegro_Projektbriefing_Entwickler.md`
 - `Altegro_Technisches_Lastenheft_Phase_1.md`
 
-It demonstrates the domain boundaries and API flow, not production security or persistence.
+It demonstrates the domain boundaries and API flow with file-backed local persistence and hardened prototype authentication. It is still not a substitute for PostgreSQL, OIDC, or a managed production platform.
 
 ## Run
 
@@ -32,7 +32,7 @@ The role is assigned by the backend after login; it is no longer selected from t
 
 ## Authentication sessions
 
-Login uses the account email and password only. A random server-side session token is created after a successful login and retained in the current browser tab across page refreshes. Logout revokes it. Sessions expire after eight hours by default; set `AUTH_SESSION_TTL_SECONDS` to change that duration.
+Login uses the account email and password only. Passwords are stored as salted scrypt hashes, never as recoverable plaintext. A random server-side session token is created after a successful login; only its SHA-256 digest is stored. Browsers also receive an `HttpOnly`, `SameSite=Strict` session cookie. Logout revokes the session. Sessions expire after eight hours by default; set `AUTH_SESSION_TTL_SECONDS` to change that duration. Set `COOKIE_SECURE=true` when the site is served through HTTPS.
 
 Robot-scoped prototype accounts use separate credentials and can only see their assigned robot:
 
@@ -40,9 +40,19 @@ Robot-scoped prototype accounts use separate credentials and can only see their 
 - `robot-cb-001@demo.altegro.local` / `CB-robot-001-demo` — `CB-DEMO-001`
 - `robot-se52512706922ne@demo.altegro.local` / `SE-robot-001-demo` — `SE52512706922NE`
 
-Robot accounts are read-only. The third account will show data after the AutoXing sync has registered a robot with serial `SE52512706922NE`. These are local prototype credentials only; they are stored in server source code and must be replaced by OIDC/SSO and database-backed memberships before deployment.
+Robot accounts are read-only. The third account will show data after the AutoXing sync has registered a robot with serial `SE52512706922NE`. These are local prototype credentials only. At runtime they are converted to password hashes; real deployments should replace them with OIDC/SSO and database-backed memberships.
 
-Every additional robot returned by an adapter synchronization automatically receives a new robot-scoped prototype account. Platform, data, or support administrators can view the generated credentials in the **Robot accounts** section of the Integration plane, or through `GET /api/v1/robot-accounts`.
+Every additional robot returned by an adapter synchronization automatically receives a new robot-scoped prototype account. Passwords are shown only once when an administrator manually creates an account; the account-list API never returns stored passwords.
+
+## Local persistence
+
+Runtime state is atomically saved to `data/altegro-state.json` by default. This includes the Robot Registry, Passport records, events, service cases, audit history, Outbox, users with password hashes, unexpired hashed sessions, and synchronized AutoXing resources. The file is excluded from Git and created with owner-only permissions.
+
+Use `ALTEGRO_DATA_FILE` to choose another location, or `ALTEGRO_PERSISTENCE=false` for an intentionally ephemeral run. Back up the data file while the service is stopped. PostgreSQL and Object Storage remain the recommended production targets.
+
+## Notifications
+
+The dashboard alert button summarizes visible offline robots, error and critical events, expiring certificates, open service cases, and failed integrations. `GET /api/v1/notifications` exposes the same tenant- and role-scoped view.
 
 Run the smoke tests in a second command:
 
@@ -182,7 +192,22 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - Login throttling, upload allow-listing, request-size limits, safe public errors, and baseline HTTP security headers
 - Keyboard-accessible metric filters and responsive mobile layouts
 - Stable JSON error responses
+- Atomic file-backed persistence with restart recovery
+- Salted scrypt password hashes and hashed server-side session tokens
+- HttpOnly SameSite session cookies with optional HTTPS-only mode
+- Role-scoped operational notifications
+- Container build, health check, persistent volume, and graceful shutdown
+
+## Container deployment
+
+For a local container deployment:
+
+```bash
+docker compose up --build
+```
+
+The Compose configuration mounts a named volume for `/app/data`. For an internet-facing deployment, terminate TLS at a reverse proxy, set `COOKIE_SECURE=true`, inject secrets through the deployment platform, restrict network access, and replace the prototype identity system and JSON store.
 
 ## Intentionally not production-ready
 
-The prototype uses in-memory state and demo bearer tokens. Its Outbox is illustrative and not transactionally durable. Attachments are kept in memory rather than Object Storage. It does not yet implement PostgreSQL, OIDC, real Secret Management, Object Storage, OpenAPI generation, signed Webhooks, rate limiting, or migrations. AutoXing can run through the configured wrapper; CenoBots remains a mock until its new client is connected to the server. Those are the next implementation steps for the production-oriented Phase 1 build.
+The prototype uses a local JSON state file rather than a transactional database. Its Outbox is durable for local restarts but is not transactionally published. Attachments are stored inside the JSON file rather than Object Storage. It does not yet implement PostgreSQL, OIDC, managed Secret Management, Object Storage, OpenAPI generation, signed Webhooks, distributed rate limiting, or migrations. AutoXing can run through the configured wrapper; CenoBots remains a mock until its new client is connected to the server. Those require external infrastructure and provider configuration for the production-oriented Phase 1 build.
