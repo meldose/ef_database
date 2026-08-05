@@ -18,11 +18,19 @@ The PDF also documents schedules, audio, mission control, map changes, back poin
 
 ## Usage
 
-Copy `.env.example` to a protected environment file and provide the official CenoBots access key, secret key, and device open ID. Do not commit credentials.
+Configure the official CenoBots host, access key, and secret key in the repository's ignored `.env` file. The client loads that file automatically. Do not commit credentials.
 
 ```bash
-cp integrations/cenobots/.env.example integrations/cenobots/.env
-python3 integrations/cenobots/client.py status
+python3 integrations/cenobots/client.py open-ids
+python3 integrations/cenobots/client.py snapshot
 ```
 
-This client is not yet connected to the Node server. The next integration step is to map CenoBots responses into the canonical Robot, Passport, and Event models, then add the adapter behind the existing CenoBots sync route.
+For only the device-list endpoint, run the dedicated helper:
+
+```bash
+python3 integrations/cenobots/list_devices.py
+```
+
+It calls `GET /app/openapi/v1/device/deviceOpenIds`, prints the available `deviceOpenId` and license-plate values as JSON, and never prints the configured API credentials.
+
+When `CENOBOTS_LIVE=true`, the Node server uses this client behind the existing **Sync CenoBots** button. The live sync imports device identity, status, battery, position, maintenance, and system-error data into canonical Robots, Passports, and Events. Control operations remain disabled.

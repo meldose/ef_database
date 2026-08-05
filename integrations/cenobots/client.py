@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import time
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -86,8 +87,60 @@ class CenoBotsClient:
             request_data['endTimestamp'] = end_timestamp
         return self._request('POST', '/app/openapi/v1/mission/list', body={'pageIndex': page_index, 'pageLength': page_length, 'requestData': request_data})
 
+    @staticmethod
+    def response_data(response: dict, operation: str):
+        if response.get('success') is not True or response.get('code') not in (0, 200):
+            raise CenoBotsError(f"{operation} failed ({response.get('code')}): {response.get('info') or 'unknown provider error'}")
+        return response.get('data')
+
+    def snapshot(self):
+        devices = self.response_data(self.device_open_ids(), 'Device list') or []
+        configured_ids = [value.strip() for value in (os.environ.get('CENOBOTS_ROBOT_OPEN_IDS') or os.environ.get('CENOBOTS_ROBOT_OPEN_ID') or '').split(',') if value.strip()]
+        listed_ids = {str(device.get('deviceOpenId') or '').strip() for device in devices}
+        devices.extend({'deviceOpenId': device_open_id, 'licensePlate': ''} for device_open_id in configured_ids if device_open_id not in listed_ids)
+        robots = []
+        warnings = []
+        for device in devices:
+            device_open_id = str(device.get('deviceOpenId') or '').strip()
+            if not device_open_id:
+                warnings.append({'operation': 'device-list', 'message': 'CenoBots returned a device without deviceOpenId'})
+                continue
+            robot = {'deviceOpenId': device_open_id, 'licensePlate': device.get('licensePlate') or ''}
+            for field, operation in (
+                ('status', self.device_status),
+                ('info', self.robot_info),
+                ('maintenance', self.maintenance_detail),
+                ('errors', self.system_errors),
+            ):
+                try:
+                    robot[field] = self.response_data(operation(device_open_id), field.title())
+                except CenoBotsError as error:
+                    robot[field] = None
+                    warnings.append({'deviceOpenId': device_open_id, 'operation': field, 'message': str(error)})
+            if robot.get('status') is None and robot.get('info') is None:
+                warnings.append({'deviceOpenId': device_open_id, 'operation': 'snapshot', 'message': 'Device is not accessible to this API account'})
+                continue
+            robots.append(robot)
+        return {'ok': True, 'provider': 'cenobots', 'version': 'open-api-v1.0.16', 'robots': robots, 'count': len(robots), 'warnings': warnings}
+
+
+def load_env_file():
+    env_path = Path(os.environ.get('CENOBOTS_ENV_FILE') or Path(__file__).resolve().parents[2] / '.env')
+    if not env_path.is_file():
+        return
+    for raw_line in env_path.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
 
 def from_environment() -> CenoBotsClient:
+    load_env_file()
     values = {key: os.environ.get(key, '') for key in ('CENOBOTS_HOST', 'CENOBOTS_ACCESS_KEY', 'CENOBOTS_SECRET_KEY')}
     missing = [key for key, value in values.items() if not value]
     if missing:
@@ -100,7 +153,9 @@ if __name__ == '__main__':
     device_open_id = sys.argv[2] if len(sys.argv) > 2 else os.environ.get('CENOBOTS_ROBOT_OPEN_ID', '')
     try:
         client = from_environment()
-        if command == 'open-ids':
+        if command == 'snapshot':
+            result = client.snapshot()
+        elif command == 'open-ids':
             result = client.device_open_ids()
         elif not device_open_id:
             raise CenoBotsError('Provide a device open ID or set CENOBOTS_ROBOT_OPEN_ID')
