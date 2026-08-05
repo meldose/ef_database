@@ -7,6 +7,19 @@ const pathUtil = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 
+function loadLocalEnv(filePath = process.env.ALTEGRO_ENV_FILE || pathUtil.join(__dirname, '.env')) {
+  if (!fs.existsSync(filePath)) return;
+  for (const rawLine of fs.readFileSync(filePath, 'utf8').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith('#') || !line.includes('=')) continue;
+    const separator = line.indexOf('='); const key = line.slice(0, separator).trim(); let value = line.slice(separator + 1).trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1);
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) && process.env[key] === undefined) process.env[key] = value;
+  }
+}
+
+loadLocalEnv();
+
 const PORT = Number(process.env.PORT || 3000);
 const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
 const startedAt = new Date().toISOString();
@@ -28,12 +41,14 @@ const clone = (value) => JSON.parse(JSON.stringify(value));
 const publicDir = pathUtil.join(__dirname, 'public');
 const execFileAsync = promisify(execFile);
 const AUTOXING_BRIDGE = pathUtil.join(__dirname, 'integrations', 'autoxing_bridge.py');
+const CENOBOTS_CLIENT = pathUtil.join(__dirname, 'integrations', 'cenobots', 'client.py');
 const AUTOXING_REPO = process.env.AUTOXING_REPO_PATH || pathUtil.resolve(__dirname, '..', 'autoxing');
 const AUTOXING_LIB = process.env.AUTOXING_LIB_PATH || pathUtil.join(AUTOXING_REPO, 'lib');
 const autoXingLiveEnabled = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_LIVE || '').toLowerCase());
 const autoXingPollIntervalMs = () => Math.max(0, Number(process.env.AUTOXING_POLL_INTERVAL_MS || 300000));
 const parseJsonEnv = (name, fallback = {}) => { try { return process.env[name] ? JSON.parse(process.env[name]) : fallback; } catch { return fallback; } };
 const autoXingMappingRequired = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_REQUIRE_MAPPING || '').toLowerCase());
+const cenoBotsLiveEnabled = () => ['1', 'true', 'yes'].includes(String(process.env.CENOBOTS_LIVE || '').toLowerCase());
 const authenticatedSessions = new Map();
 let persistenceTimer = null;
 
@@ -224,8 +239,8 @@ function seed() {
     sync: () => ({ externalId: 'AX-1001', modelId: 'model-autoxing-a1', serialNumber: 'AX-DEMO-001', status: 'active', battery: 87, eventType: 'online' })
   });
   state.adapters.set('cenobots', {
-    provider: 'cenobots', version: 'mock-1.0.0', status: 'mock-only',
-    capabilities: { read: ['identity', 'status', 'battery', 'service_history'], event: ['maintenance'], command: [] },
+    provider: 'cenobots', version: cenoBotsLiveEnabled() ? 'open-api-v1.0.16' : 'mock-1.0.0', status: cenoBotsLiveEnabled() ? 'live-api-enabled' : 'mock-only', integration: 'integrations/cenobots/client.py',
+    capabilities: { read: ['identity', 'status', 'battery', 'position', 'service_history', 'system_errors'], event: ['online', 'offline', 'maintenance', 'error'], command: [] },
     sync: () => ({ externalId: 'CB-1001', modelId: 'model-cenobots-c1', serialNumber: 'CB-DEMO-001', status: 'active', battery: 64, eventType: 'maintenance' })
   });
   state.adapters.set('mock-oem', {
@@ -348,6 +363,22 @@ async function runAutoXingBridge(command = 'snapshot') {
   throw httpError(503, `AutoXing wrapper unavailable: ${lastError.diagnostic || lastError.message}`, { provider: 'autoxing' });
 }
 
+async function runCenoBotsBridge(command = 'snapshot') {
+  try {
+    const result = await execFileAsync(process.env.PYTHON_BIN || 'python3', [CENOBOTS_CLIENT, command], { cwd: __dirname, env:process.env, timeout:Math.max(20000, Number(process.env.CENOBOTS_BRIDGE_TIMEOUT_MS || 120000)), maxBuffer:32 * 1024 * 1024 });
+    let payload;
+    try { payload = JSON.parse(result.stdout.trim()); }
+    catch (error) { throw httpError(503, `CenoBots client returned invalid JSON: ${error.message}`, { provider:'cenobots' }); }
+    if (!payload.ok) throw httpError(503, payload.error || 'CenoBots synchronization failed', { provider:'cenobots' });
+    return payload;
+  } catch (error) {
+    if (error.status) throw error;
+    let providerMessage = '';
+    try { providerMessage = JSON.parse(String(error.stdout || '').trim()).error || ''; } catch {}
+    throw httpError(503, `CenoBots API unavailable: ${providerMessage || error.message}`, { provider:'cenobots' });
+  }
+}
+
 function meaningful(value) {
   return value !== null && value !== undefined && value !== '' && !(Array.isArray(value) && value.length === 0) && !(typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 0);
 }
@@ -440,6 +471,44 @@ async function syncAutoXingLive(actor) {
   storeAutoXingResources(bridge.resources, bridge.resourceErrors);
   if (adapter) { adapter.lastSyncAt = timestamp(); adapter.lastSyncStatus = 'success'; adapter.lastError = bridge.resourceErrors?.length ? `${bridge.resourceErrors.length} resource warnings` : null; }
   return { provider: 'autoxing', adapterVersion: 'wrapper-backed', source: bridge.wrapper, robots: synced, count: synced.length, resources: { businesses: state.autoxing.businesses.length, buildings: state.autoxing.buildings.length, poiRobotScopes: state.autoxing.pois.size, areaRobotScopes: state.autoxing.areas.size, maps: state.autoxing.maps.size, tasks: state.autoxing.tasks.size, warnings: state.autoxing.resourceErrors.length }, resourceErrors: clone(state.autoxing.resourceErrors), commandCapabilitiesEnabled: false };
+}
+
+async function syncCenoBotsLive(actor) {
+  const adapter = state.adapters.get('cenobots');
+  if (adapter) { adapter.lastSyncStatus = 'running'; adapter.lastError = null; }
+  const bridge = await runCenoBotsBridge('snapshot');
+  const synced = [];
+  for (const externalRobot of bridge.robots || []) {
+    const externalId = String(externalRobot.deviceOpenId || '').trim();
+    if (!externalId) continue;
+    const providerStatus = externalRobot.status || {}; const providerInfo = externalRobot.info || {};
+    const serialNumber = String(providerInfo.serialNumber || externalRobot.licensePlate || providerStatus.licensePlate || `CB-${externalId}`).trim().slice(0, 120);
+    const canonicalStatus = providerInfo.activated === false ? 'draft' : 'active';
+    let robot = [...state.robots.values()].find((item) => item.externalIdentities.some((identity) => identity.system === 'cenobots' && identity.externalId === externalId));
+    if (!robot) {
+      robot = { id:ids(), tenantId:actor.tenantId, organizationId:process.env.CENOBOTS_DEFAULT_ORGANIZATION_ID || 'org-demo', operatorOrganizationId:process.env.CENOBOTS_DEFAULT_OPERATOR_ORGANIZATION_ID || 'org-service', siteId:process.env.CENOBOTS_DEFAULT_SITE_ID || 'site-berlin', modelId:'model-cenobots-c1', serialNumber, status:canonicalStatus, externalIdentities:[{ system:'cenobots', externalId }], createdAt:timestamp(), updatedAt:timestamp() };
+      state.robots.set(robot.id, robot);
+      appendPassportEntry(robot.id, { type:'registration', source:'cenobots', data:{ externalId, serialNumber, licensePlate:externalRobot.licensePlate || providerStatus.licensePlate || null } }, actor);
+    }
+    Object.assign(robot, { serialNumber, status:canonicalStatus, online:providerStatus.online, battery:providerStatus.soc, charging:providerStatus.charging, position:providerStatus.pose || null, emergencyStop:providerStatus.isEmergency, providerTask:providerStatus.missionTaskDetail || null, providerMapId:providerStatus.currentMapId || null, providerMapName:providerStatus.currentMapName || null, providerVersion:providerInfo.softwareVersion || null, providerBuildingName:providerInfo.buildingName || null, maintenance:externalRobot.maintenance || null, errors:externalRobot.errors || [], lastProviderError:null, updatedAt:timestamp() });
+    ensureRobotUser(robot);
+    appendPassportEntry(robot.id, { type:'configuration_snapshot', source:'cenobots', data:{ online:robot.online, battery:robot.battery, charging:robot.charging, position:robot.position, softwareVersion:robot.providerVersion, mission:robot.providerTask, maintenance:robot.maintenance, errors:robot.errors } }, actor);
+    const connectionEvent = robot.online === false ? 'offline' : 'online';
+    upsertEvent(robot.id, { eventType:connectionEvent, sourceSystem:'cenobots', sourceEventId:`${externalId}:${connectionEvent}:${robot.battery ?? 'unknown'}`, title:`CenoBots robot ${connectionEvent}`, description:`Read-only CenoBots synchronization for ${serialNumber}.`, severity:robot.online === false ? 'warning' : 'info', payload:{ online:robot.online, battery:robot.battery, charging:robot.charging } }, actor);
+    const errors = Array.isArray(robot.errors) ? robot.errors : robot.errors?.data || [];
+    if (errors.length) {
+      const errorDigest = crypto.createHash('sha256').update(JSON.stringify(errors)).digest('hex').slice(0, 16);
+      upsertEvent(robot.id, { eventType:'error', sourceSystem:'cenobots', sourceEventId:`${externalId}:errors:${errorDigest}`, title:'CenoBots system errors', description:`CenoBots reported ${errors.length} system error${errors.length === 1 ? '' : 's'}.`, severity:'error', payload:{ errors } }, actor);
+    }
+    const maintenanceItems = externalRobot.maintenance?.maintenanceItems || [];
+    if (maintenanceItems.some((item) => Number(item.overDueHours || 0) > 0)) {
+      const maintenanceDigest = crypto.createHash('sha256').update(JSON.stringify(maintenanceItems)).digest('hex').slice(0, 16);
+      upsertEvent(robot.id, { eventType:'maintenance_due', sourceSystem:'cenobots', sourceEventId:`${externalId}:maintenance:${maintenanceDigest}`, title:'CenoBots maintenance due', description:'One or more CenoBots maintenance items are overdue.', severity:'warning', payload:{ maintenanceItems } }, actor);
+    }
+    synced.push(getPassport(robot.id));
+  }
+  if (adapter) { adapter.lastSyncAt = timestamp(); adapter.lastSyncStatus = 'success'; adapter.lastError = null; }
+  return { provider:'cenobots', adapterVersion:'open-api-v1.0.16', source:'CenoBots Open API', robots:synced, count:synced.length, resourceErrors:clone(bridge.warnings || []), commandCapabilitiesEnabled:false };
 }
 
 function getPassport(robotId) {
@@ -942,6 +1011,14 @@ async function handle(req, res) {
         const result = await syncAutoXingLive(actor); recordAudit(actor, 'adapter.sync.live', 'adapter', sync.id, 'success', { count: result.count }); return send(res, 200, { data: result });
       } catch (error) {
         const adapter = state.adapters.get('autoxing'); if (adapter) { adapter.lastSyncStatus = 'error'; adapter.lastError = error.message; }
+        throw error;
+      }
+    }
+    if (sync.id === 'cenobots' && cenoBotsLiveEnabled()) {
+      try {
+        const result = await syncCenoBotsLive(actor); recordAudit(actor, 'adapter.sync.live', 'adapter', sync.id, 'success', { count:result.count, warnings:result.resourceErrors.length }); return send(res, 200, { data:result });
+      } catch (error) {
+        const adapter = state.adapters.get('cenobots'); if (adapter) { adapter.lastSyncStatus = 'error'; adapter.lastError = error.message; }
         throw error;
       }
     }

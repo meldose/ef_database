@@ -95,7 +95,7 @@ class CenoBotsClient:
 
     def snapshot(self):
         devices = self.response_data(self.device_open_ids(), 'Device list') or []
-        configured_ids = [value.strip() for value in (os.environ.get('CENOBOTS_ROBOT_OPEN_IDS') or os.environ.get('CENOBOTS_ROBOT_OPEN_ID') or '').split(',') if value.strip()]
+        configured_ids = [value.strip() for value in (os.environ.get('CENOBOTS_ROBOT_OPEN_IDS=9Y8C0RZPP2') or os.environ.get('CENOBOTS_ROBOT_OPEN_ID') or '').split(',') if value.strip()]
         listed_ids = {str(device.get('deviceOpenId') or '').strip() for device in devices}
         devices.extend({'deviceOpenId': device_open_id, 'licensePlate': ''} for device_open_id in configured_ids if device_open_id not in listed_ids)
         robots = []

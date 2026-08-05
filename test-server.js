@@ -8,6 +8,7 @@ const testDataFile = path.join('/tmp', `altegro-test-state-${process.pid}.json`)
 fs.rmSync(testDataFile, { force: true });
 process.env.ALTEGRO_DATA_FILE = testDataFile;
 process.env.ALTEGRO_PERSISTENCE = 'true';
+process.env.CENOBOTS_LIVE = 'false';
 const { server, state, DATA_FILE } = require('./server');
 
 const port = 3107;

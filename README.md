@@ -160,6 +160,12 @@ Optional model mapping is supported with `AUTOXING_MODEL_MAP`. When live mode is
 
 The Python environment must have the wrapper dependencies installed. If credentials or dependencies are missing, the live sync returns a clear `503` error; it does not silently create fake live data.
 
+## CenoBots Open API integration
+
+The CenoBots adapter supports read-only live synchronization through Open API v1.0.16. Put the region host and credentials in the ignored root `.env`, set `CENOBOTS_LIVE=true`, and start the server normally. The server loads `.env` automatically.
+
+Use the **Sync CenoBots** button or call `POST /api/v1/adapters/cenobots/sync`. The adapter discovers permitted device open IDs and imports robot information, online state, battery, position, mission status, maintenance details, and system errors. It never exposes mission or robot-control operations.
+
 Append an immutable Passport entry:
 
 ```bash
@@ -234,4 +240,4 @@ The Compose configuration mounts a named volume for `/app/data`. For an internet
 
 ## Intentionally not production-ready
 
-The prototype uses a local JSON state file rather than a transactional database. Its Outbox is durable for local restarts but is not transactionally published. Attachments are stored inside the JSON file rather than Object Storage. It does not yet implement PostgreSQL, OIDC, managed Secret Management, Object Storage, OpenAPI generation, signed Webhooks, distributed rate limiting, or migrations. AutoXing can run through the configured wrapper; CenoBots remains a mock until its new client is connected to the server. Those require external infrastructure and provider configuration for the production-oriented Phase 1 build.
+The prototype uses a local JSON state file rather than a transactional database. Its Outbox is durable for local restarts but is not transactionally published. Attachments are stored inside the JSON file rather than Object Storage. It does not yet implement PostgreSQL, OIDC, managed Secret Management, Object Storage, OpenAPI generation, signed Webhooks, distributed rate limiting, or migrations. AutoXing and CenoBots can run through their configured read-only bridges, but production deployment still requires managed credentials, provider authorization, monitoring, and external infrastructure.
