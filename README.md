@@ -122,6 +122,8 @@ export AUTOXING_REPO_PATH=/mnt/c/Users/meldo/Downloads/autoxing
 export AUTOXING_ENV_FILE=/mnt/c/Users/meldo/Downloads/autoxing/.env
 export PYTHON_BIN=/mnt/c/Users/meldo/Downloads/autoxing/.venv/bin/python
 export AUTOXING_POLL_INTERVAL_MS=300000
+export AUTOXING_TASK_SYNC=true
+export AUTOXING_TASK_DETAIL_LIMIT=25
 # The robot snapshot is reliable by default. Optional POI/area/map/task
 # endpoints are disabled by default because some provider responses are slow
 # or do not use the wrapper's expected `data` shape.
@@ -146,8 +148,13 @@ Read-only resource endpoints after synchronization:
 ```text
 GET /api/v1/robots/:id/autoxing
 GET /api/v1/autoxing/tasks
+GET /api/v1/autoxing/operations
 GET /api/v1/adapters/autoxing/resources
 ```
+
+The AutoXing tab automatically refreshes locally cached fleet telemetry every 30 seconds. The server performs provider synchronization at `AUTOXING_POLL_INTERVAL_MS`. The operations endpoint supplies live fleet cards, task KPIs, actionable error guidance, synchronization history, and seven-day trends. `AUTOXING_TASK_SYNC=true` collects task history even when the slower POI, area, and map resource synchronization is disabled.
+
+For production, mount credentials as protected files and set `APPID_FILE`, `APPSECRET_FILE`, and `APPCODE_FILE` instead of placing secret values in `.env`. The same pattern is available for `CENOBOTS_ACCESS_KEY_FILE` and `CENOBOTS_SECRET_KEY_FILE`. Docker secrets, Kubernetes Secrets mounted as volumes, and systemd credentials can all use this interface. The API and browser expose only the configuration mode, never credential values or secret paths.
 
 For real customer/site assignment, configure a JSON business mapping before the pilot. The keys can be an AutoXing business ID or business name:
 

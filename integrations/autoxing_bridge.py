@@ -38,6 +38,16 @@ def load_simple_env(path: Path) -> dict[str, str]:
     return values
 
 
+def secret_value(name: str) -> str:
+    value = os.environ.get(name, "")
+    if value:
+        return value
+    file_path = os.environ.get(f"{name}_FILE", "")
+    if not file_path:
+        return ""
+    return Path(file_path).read_text(encoding="utf-8").strip()
+
+
 def json_value(value):
     if value is None:
         return None
@@ -141,6 +151,36 @@ def encode_base_map(image, max_bytes):
         return None, str(error)
 
 
+def collect_tasks(module):
+    tasks = []
+    errors = []
+    try:
+        task_frame = module.get_tasks() if hasattr(module, "get_tasks") else []
+        task_rows = frame_records(task_frame)
+        if not isinstance(task_rows, list):
+            task_rows = []
+        detail_limit = max(0, int(os.environ.get("AUTOXING_TASK_DETAIL_LIMIT", "25")))
+        for index, raw_task in enumerate(task_rows):
+            if not isinstance(raw_task, dict):
+                continue
+            item = {"taskId": task_id(raw_task), "raw": raw_task, "details": None, "status": None, "errors": []}
+            if item["taskId"] and index < detail_limit:
+                try:
+                    if hasattr(module, "get_task_details"):
+                        item["details"] = frame_records(module.get_task_details(str(item["taskId"])))
+                except Exception as error:
+                    item["errors"].append({"resource": "task_details", "message": str(error)})
+                try:
+                    if hasattr(module, "get_task_status"):
+                        item["status"] = frame_records(module.get_task_status(str(item["taskId"])))
+                except Exception as error:
+                    item["errors"].append({"resource": "task_status", "message": str(error)})
+            tasks.append(item)
+    except Exception as error:
+        errors.append({"resource": "tasks", "message": str(error)})
+    return tasks, errors
+
+
 def collect_resources(module, rows):
     """Fetch read-only AutoXing resources without invoking Robot.get_state()."""
     resources = {"businesses": [], "buildings": [], "pois": [], "areas": [], "maps": [], "tasks": []}
@@ -217,30 +257,8 @@ def collect_resources(module, rows):
             item["baseMap"] = {"available": True, "omitted": True, "reason": "base-map image sync disabled; set AUTOXING_INCLUDE_BASE_MAP=true to include it"}
         resources["maps"].append(item)
 
-    try:
-        task_frame = module.get_tasks() if hasattr(module, "get_tasks") else []
-        task_rows = frame_records(task_frame)
-        if not isinstance(task_rows, list):
-            task_rows = []
-        detail_limit = max(0, int(os.environ.get("AUTOXING_TASK_DETAIL_LIMIT", "25")))
-        for index, raw_task in enumerate(task_rows):
-            if not isinstance(raw_task, dict):
-                continue
-            item = {"taskId": task_id(raw_task), "raw": raw_task, "details": None, "status": None, "errors": []}
-            if item["taskId"] and index < detail_limit:
-                try:
-                    if hasattr(module, "get_task_details"):
-                        item["details"] = frame_records(module.get_task_details(str(item["taskId"])))
-                except Exception as error:
-                    item["errors"].append({"resource": "task_details", "message": str(error)})
-                try:
-                    if hasattr(module, "get_task_status"):
-                        item["status"] = frame_records(module.get_task_status(str(item["taskId"])))
-                except Exception as error:
-                    item["errors"].append({"resource": "task_status", "message": str(error)})
-            resources["tasks"].append(item)
-    except Exception as error:
-        errors.append({"resource": "tasks", "message": str(error)})
+    resources["tasks"], task_errors = collect_tasks(module)
+    errors.extend(task_errors)
     return resources, errors
 
 
@@ -255,7 +273,7 @@ def import_wrapper():
     file_values = load_simple_env(env_file)
     credentials = {}
     for key in ("APPID", "APPSECRET", "APPCODE"):
-        value = os.environ.get(key) or file_values.get(key)
+        value = secret_value(key) or file_values.get(key)
         if value:
             credentials[key] = value
     missing = [key for key in ("APPID", "APPSECRET", "APPCODE") if not credentials.get(key)]
@@ -341,6 +359,11 @@ def main() -> None:
                     payload["resources"] = {"businesses": [], "buildings": [], "pois": [], "areas": [], "maps": [], "tasks": []}
                     payload["resourceErrors"] = []
                     payload["resourcesDisabled"] = True
+                    task_sync = str(os.environ.get("AUTOXING_TASK_SYNC", "true")).lower() in {"1", "true", "yes"}
+                    if task_sync:
+                        with contextlib.redirect_stdout(quiet_vendor_output), contextlib.redirect_stderr(quiet_vendor_output):
+                            payload["resources"]["tasks"], task_errors = collect_tasks(module)
+                        payload["resourceErrors"].extend(task_errors)
                 else:
                     resource_rows = rows
                     resource_limit = max(0, int(os.environ.get("AUTOXING_SNAPSHOT_ROBOT_LIMIT", "0")))

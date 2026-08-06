@@ -40,7 +40,7 @@ async function loginWithPassword(email, password) {
     const frontendResponse = await fetch(`http://localhost:${port}/`);
     assert.equal(frontendResponse.status, 200);
     const frontendHtml = await frontendResponse.text();
-    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'robotAccountsList', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
+    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'autoXingLiveFleet', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingAlerts', 'autoXingTrends', 'robotAccountsList', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
     for (const view of ['overview', 'robots', 'operations', 'autoxing', 'workforce', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
 
     const oldPasswordLogin = await loginWithPassword('admin@demo.altegro.local', 'demo');
@@ -133,11 +133,21 @@ async function loginWithPassword(email, password) {
     result = await requestAs(robotAxSessionToken, '/api/v1/workforce/matrix');
     assert.equal(result.status, 403);
 
-    state.autoxing.tasks.set('task-ax-scope', { taskId: 'task-ax-scope', raw: { robotId: 'AX-1001' } });
+    state.autoxing.tasks.set('task-ax-scope', { taskId: 'task-ax-scope', raw: { robotId: 'AX-1001', status:'completed', durationSeconds:600, cleanedArea:120, updatedAt:'2026-07-27T14:00:00.000Z' } });
     state.autoxing.tasks.set('task-cb-scope', { taskId: 'task-cb-scope', raw: { robotId: 'CB-1001' } });
     result = await requestAs(robotAxSessionToken, '/api/v1/autoxing/tasks');
     assert.equal(result.status, 200);
     assert.deepEqual(result.body.data.map((task) => task.taskId), ['task-ax-scope']);
+    state.robots.get(robotId).online = false; state.robots.get(robotId).battery = 15;
+    result = await requestAs(robotAxSessionToken, '/api/v1/autoxing/operations');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.fleet.length, 1);
+    assert.equal(result.body.data.taskAnalytics.total, 1);
+    assert.equal(result.body.data.taskAnalytics.completed, 1);
+    assert.ok(result.body.data.alerts.some((alert) => alert.robotId === robotId && alert.recommendedAction));
+    assert.equal(result.body.data.trends.length, 7);
+    assert.ok(Array.isArray(result.body.data.diagnostics.syncHistory));
+    state.robots.get(robotId).online = true; state.robots.get(robotId).battery = 87;
 
     result = await requestAs(robotAxSessionToken, `/api/v1/robots/${robotId}/events`, { method: 'POST', body: JSON.stringify({ title: 'Should be blocked', description: 'Robot accounts cannot create events.', eventType: 'note', sourceSystem: 'manual-test', severity: 'info', occurredAt: '2026-07-27T14:00:00.000Z' }) });
     assert.equal(result.status, 403);

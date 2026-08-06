@@ -1,6 +1,6 @@
 'use strict';
 
-const state = { token: null, user: null, robots: [], robotOptions: [], serviceCases: [], compatibility: [], notifications: [], audit: [], autoXingResources: null, autoXingTasks: [], robotAccounts: [], workforce: null, summary: null, selectedRobotId: null, registry: { page:1, pageSize:10, pageCount:1, count:0 }, sync: { provider:null, startedAt:0, timer:null } };
+const state = { token: null, user: null, robots: [], robotOptions: [], serviceCases: [], compatibility: [], notifications: [], audit: [], autoXingResources: null, autoXingTasks: [], autoXingOperations: null, robotAccounts: [], workforce: null, summary: null, selectedRobotId: null, registry: { page:1, pageSize:10, pageCount:1, count:0 }, sync: { provider:null, startedAt:0, timer:null }, autoRefresh:{ timer:null, intervalMs:30000, lastAt:null } };
 const $ = (selector) => document.querySelector(selector);
 const api = async (path, options = {}) => {
   const response = await fetch(path, { ...options, headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -29,7 +29,7 @@ function showLogin() {
 }
 
 function expireSession(message = 'Your session expired. Please sign in again.') {
-  sessionStorage.removeItem('altegroSession'); state.token = null; state.user = null; state.robots = []; state.selectedRobotId = null; showLogin(); $('#loginError').textContent = message;
+  sessionStorage.removeItem('altegroSession'); clearInterval(state.autoRefresh.timer); state.autoRefresh.timer = null; state.token = null; state.user = null; state.robots = []; state.selectedRobotId = null; showLogin(); $('#loginError').textContent = message;
 }
 
 function showApp() {
@@ -105,7 +105,7 @@ async function login(email, password) {
 async function completeLogin(payload) {
   state.token = payload.token; state.user = payload.user;
   sessionStorage.setItem('altegroSession', JSON.stringify({ token:state.token, user:state.user }));
-  showApp(); await refreshAll();
+  showApp(); await refreshAll(); startAutoRefresh();
 }
 
 async function restoreSession() {
@@ -115,7 +115,7 @@ async function restoreSession() {
     const response = await fetch('/api/v1/auth/session', { headers:{ Authorization:`Bearer ${saved.token}` } });
     if (!response.ok) throw new Error('Saved session is no longer valid');
     const payload = await response.json();
-    state.token = saved.token; state.user = payload.user; showApp(); await refreshAll();
+    state.token = saved.token; state.user = payload.user; showApp(); await refreshAll(); startAutoRefresh();
     return true;
   } catch {
     sessionStorage.removeItem('altegroSession'); state.token = null; state.user = null;
@@ -307,6 +307,41 @@ async function loadAutoXingTasks() {
   $('#taskHistoryList').innerHTML = payload.data.length ? payload.data.slice(0, 20).map((task) => { const robotExternalId = task.externalRobotId || task.robotId || task.raw?.robotId || task.raw?.robot_id || 'Unassigned'; const taskId = task.taskId || task.id || 'Unknown task'; const statusValue = task.status || task.taskStatus || task.raw?.status || 'unknown'; const status = typeof statusValue === 'object' ? JSON.stringify(statusValue).slice(0, 120) : String(statusValue); const occurredAt = task.updatedAt || task.createdAt || task.raw?.updatedAt || task.raw?.createdAt || payload.syncedAt; return `<div class="record-row"><div><strong>${escapeHtml(taskId)}</strong><small>${escapeHtml(robotExternalId)} · ${escapeHtml(status)}</small></div><time class="event-time" datetime="${escapeHtml(occurredAt || '')}">${formatDate(occurredAt)}</time></div>`; }).join('') : '<div class="empty">No AutoXing tasks are available for this selection.</div>';
 }
 
+function compactProviderValue(value, fallback = '—') {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'object') return JSON.stringify(value).slice(0, 90);
+  return String(value);
+}
+
+function renderAutoXingOperations() {
+  const operations = state.autoXingOperations; if (!operations) return;
+  const fleet = operations.fleet || []; const analytics = operations.taskAnalytics || {}; const diagnostics = operations.diagnostics || {}; const alerts = operations.alerts || []; const trends = operations.trends || [];
+  $('#autoXingLiveFleet').innerHTML = fleet.length ? fleet.map((robot) => { const battery = Number(robot.battery); const batteryValue = Number.isFinite(battery) ? Math.max(0,Math.min(100,battery)) : null; const task = compactProviderValue(robot.currentTask,'No active task'); const position = robot.position && [robot.position.x,robot.position.y].some((value) => value != null) ? `${robot.position.x ?? '—'}, ${robot.position.y ?? '—'}` : '—'; return `<button class="autoxing-live-card" type="button" data-autoxing-robot="${escapeHtml(robot.id)}"><div class="live-card-head"><div><strong>${escapeHtml(robot.serialNumber)}</strong><small>${escapeHtml(robot.externalId)}</small></div><span class="live-state ${robot.online === true ? 'online' : robot.online === false ? 'offline' : ''}">${robot.online === true ? 'Online' : robot.online === false ? 'Offline' : 'Unknown'}</span></div><div class="battery-row"><span>Battery</span><strong>${batteryValue == null ? '—' : `${batteryValue}%`}</strong></div><div class="battery-track"><span style="width:${batteryValue ?? 0}%"></span></div><dl class="live-card-details"><div><dt>Charging</dt><dd>${robot.charging === true ? 'Yes' : robot.charging === false ? 'No' : '—'}</dd></div><div><dt>Position</dt><dd>${escapeHtml(position)}</dd></div><div><dt>Speed</dt><dd>${robot.speed == null ? '—' : escapeHtml(robot.speed)}</dd></div><div><dt>Version</dt><dd>${escapeHtml(robot.providerVersion || '—')}</dd></div></dl><div class="live-task"><span>Current task</span><strong>${escapeHtml(task)}</strong></div><div class="live-card-foot"><span>${escapeHtml(robot.businessName || robot.siteId || 'Unmapped')}</span><span class="${robot.alertCount ? 'danger-text' : 'safe-text'}">${robot.alertCount ? `${robot.alertCount} alert${robot.alertCount === 1 ? '' : 's'}` : 'No alerts'}</span></div></button>`; }).join('') : '<div class="empty">No visible AutoXing robots. Run synchronization or review tenant access.</div>';
+  $('#autoXingLiveFleet').querySelectorAll('[data-autoxing-robot]').forEach((button) => button.addEventListener('click', async () => { setDashboardView('robots'); await loadPassport(button.dataset.autoxingRobot); $('#detailPanel').scrollIntoView({ behavior:'smooth',block:'start' }); }));
+  const metric = (value,suffix='') => value == null ? '—' : `${value}${suffix}`;
+  $('#autoXingTaskAnalytics').innerHTML = `<div class="autoxing-analytics-grid"><div class="resource-metric"><strong>${metric(analytics.total)}</strong><span>Total tasks</span></div><div class="resource-metric"><strong>${metric(analytics.completed)}</strong><span>Completed</span></div><div class="resource-metric"><strong>${metric(analytics.failed)}</strong><span>Failed</span></div><div class="resource-metric"><strong>${metric(analytics.running)}</strong><span>Running</span></div><div class="resource-metric"><strong>${metric(analytics.successRate,'%')}</strong><span>Success rate</span></div><div class="resource-metric"><strong>${metric(analytics.averageDurationMinutes,' min')}</strong><span>Average duration</span></div><div class="resource-metric"><strong>${metric(analytics.cleanedArea,' m²')}</strong><span>Cleaned area</span></div></div>${analytics.total ? '' : '<div class="provider-empty serial">Task collection is enabled independently of POI/map sync. Run AutoXing synchronization to load task history.</div>'}`;
+  const duration = diagnostics.lastSyncDurationMs == null ? '—' : diagnostics.lastSyncDurationMs < 1000 ? `${diagnostics.lastSyncDurationMs} ms` : `${(diagnostics.lastSyncDurationMs/1000).toFixed(1)} s`; const poll = diagnostics.pollingIntervalMs ? `${Math.round(diagnostics.pollingIntervalMs/60000)} min` : 'Disabled'; const history = (diagnostics.syncHistory || []).slice().reverse().slice(0,6);
+  $('#autoXingDiagnostics').innerHTML = `<div class="diagnostic-grid"><div><span>Connector</span><strong>${diagnostics.liveEnabled ? 'Live wrapper' : 'Mock fallback'}</strong></div><div><span>Last result</span><strong class="${diagnostics.lastSyncStatus === 'success' ? 'safe-text' : diagnostics.lastSyncStatus === 'error' ? 'danger-text' : ''}">${escapeHtml(diagnostics.lastSyncStatus || 'Never')}</strong></div><div><span>Last duration</span><strong>${escapeHtml(duration)}</strong></div><div><span>Robots updated</span><strong>${diagnostics.lastSyncCount ?? '—'}</strong></div><div><span>Warnings</span><strong>${diagnostics.lastSyncWarnings || 0}</strong></div><div><span>Provider polling</span><strong>${escapeHtml(poll)}</strong></div><div><span>Next poll</span><strong>${formatDate(diagnostics.nextPollAt)}</strong></div><div><span>Secret source</span><strong>${escapeHtml((diagnostics.secretMode || 'unknown').replaceAll('-',' '))}</strong></div></div>${diagnostics.lastError ? `<div class="resource-warning">${escapeHtml(diagnostics.lastError)}</div>` : ''}<div class="sync-history">${history.map((item) => `<div><span class="status status-${item.status === 'success' ? 'active' : 'draft'}">${escapeHtml(item.status)}</span><span>${escapeHtml(item.trigger)} · ${item.count} robots · ${item.warnings} warnings</span><time>${formatDate(item.completedAt)}</time></div>`).join('') || '<div class="provider-empty serial">No synchronization history recorded yet.</div>'}</div>`;
+  $('#autoXingAlertCount').textContent = alerts.length;
+  $('#autoXingAlerts').innerHTML = alerts.length ? alerts.slice(0,20).map((alert) => `<article class="action-alert alert-${escapeHtml(alert.severity)}"><div><strong>${escapeHtml(alert.title)}</strong><small>${escapeHtml(alert.serialNumber)} · ${escapeHtml(alert.message)}</small></div><p><span>Recommended action</span>${escapeHtml(alert.recommendedAction)}</p></article>`).join('') : '<div class="empty"><span class="safe-text">No actionable AutoXing alerts.</span></div>';
+  const maxEvents = Math.max(1,...trends.map((day) => day.onlineEvents + day.offlineEvents + day.errorEvents + day.taskEvents));
+  $('#autoXingTrends').innerHTML = trends.length ? `<div class="trend-legend"><span><i class="trend-online"></i>Online</span><span><i class="trend-offline"></i>Offline</span><span><i class="trend-error"></i>Errors</span><span><i class="trend-task"></i>Tasks</span></div><div class="trend-grid">${trends.map((day) => { const total = day.onlineEvents + day.offlineEvents + day.errorEvents + day.taskEvents; return `<div class="trend-day"><div class="trend-bars" aria-label="${escapeHtml(day.date)}: ${total} events"><span class="trend-online" style="height:${Math.max(2,day.onlineEvents/maxEvents*100)}%"></span><span class="trend-offline" style="height:${Math.max(2,day.offlineEvents/maxEvents*100)}%"></span><span class="trend-error" style="height:${Math.max(2,day.errorEvents/maxEvents*100)}%"></span><span class="trend-task" style="height:${Math.max(2,day.taskEvents/maxEvents*100)}%"></span></div><strong>${new Date(`${day.date}T00:00:00Z`).toLocaleDateString([],{ weekday:'short' })}</strong><small>${day.averageBattery == null ? 'Battery —' : `Battery ${day.averageBattery}%`} · ${total} events</small></div>`; }).join('')}</div>` : '<div class="empty">No seven-day AutoXing history is available.</div>';
+  state.autoRefresh.lastAt = new Date(); $('#autoRefreshStatus').textContent = `Automatic refresh every ${state.autoRefresh.intervalMs/1000}s · updated ${state.autoRefresh.lastAt.toLocaleTimeString([], { hour:'2-digit',minute:'2-digit',second:'2-digit' })}`;
+}
+
+async function loadAutoXingOperations() {
+  const payload = await api('/api/v1/autoxing/operations'); state.autoXingOperations = payload.data; renderAutoXingOperations();
+}
+
+function startAutoRefresh() {
+  clearInterval(state.autoRefresh.timer);
+  state.autoRefresh.timer = setInterval(async () => {
+    if (!state.token || document.hidden || state.sync.provider) return;
+    try { await Promise.all([loadAutoXingOperations(),loadRobots(),loadOperationsSummary(),loadAdapters()]); }
+    catch (error) { if (error.status !== 401) $('#autoRefreshStatus').textContent = `Automatic refresh paused · ${error.message}`; }
+  },state.autoRefresh.intervalMs);
+}
+
 async function loadRobotAccounts() {
   if (state.user.role !== 'platform_admin') return;
   const payload = await api('/api/v1/robot-accounts'); state.robotAccounts = payload.data;
@@ -379,7 +414,7 @@ async function syncAdapter(provider) {
     if (error.status !== 401) { setSyncStatus(`${provider} synchronization failed. ${error.message}`, 'error', provider); toast(`Sync failed: ${error.message}`, true); await loadAdapters().catch(() => {}); }
   } finally { clearInterval(state.sync.timer); state.sync.timer = null; state.sync.provider = null; setSyncButtons(false); }
 }
-async function refreshAll() { try { await Promise.all([loadRobotOptions(), loadRobots(), loadEvents(), loadAdapters(), loadOperationsSummary(), loadServiceCases(), loadCompatibility(), loadNotifications(), loadAudit(), loadAutoXingResources(), loadAutoXingTasks(), loadRobotAccounts(), loadWorkforceMatrix()]); } catch (error) { if (error.status !== 401) toast(error.message, true); } }
+async function refreshAll() { try { await Promise.all([loadRobotOptions(), loadRobots(), loadEvents(), loadAdapters(), loadOperationsSummary(), loadServiceCases(), loadCompatibility(), loadNotifications(), loadAudit(), loadAutoXingResources(), loadAutoXingTasks(), loadAutoXingOperations(), loadRobotAccounts(), loadWorkforceMatrix()]); } catch (error) { if (error.status !== 401) toast(error.message, true); } }
 
 function setFormBusy(form, busy) {
   form.querySelectorAll('button[type="submit"], button:not([type])').forEach((button) => { if (button.value !== 'cancel') button.disabled = busy; });
@@ -407,6 +442,7 @@ function bindUi() {
   $('#refreshButton').addEventListener('click', async () => { const button = $('#refreshButton'); button.disabled = true; try { await refreshAll(); } finally { button.disabled = false; } }); $('#refreshEvents').addEventListener('click', loadEvents); $('#refreshAdapters').addEventListener('click', loadAdapters); $('#refreshServiceCases').addEventListener('click', loadServiceCases);
   $('#refreshAudit').addEventListener('click', loadAudit);
   $('#refreshResources').addEventListener('click', () => loadAutoXingResources().catch((error) => toast(error.message, true)));
+  $('#refreshAutoXingOperations').addEventListener('click', () => loadAutoXingOperations().catch((error) => toast(error.message, true)));
   $('#refreshTasks').addEventListener('click', () => loadAutoXingTasks().catch((error) => toast(error.message, true)));
   $('#taskRobotFilter').addEventListener('change', () => loadAutoXingTasks().catch((error) => toast(error.message, true)));
   $('#refreshRobotAccounts').addEventListener('click', () => loadRobotAccounts().catch((error) => toast(error.message, true)));

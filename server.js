@@ -49,6 +49,19 @@ const autoXingPollIntervalMs = () => Math.max(0, Number(process.env.AUTOXING_POL
 const parseJsonEnv = (name, fallback = {}) => { try { return process.env[name] ? JSON.parse(process.env[name]) : fallback; } catch { return fallback; } };
 const autoXingMappingRequired = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_REQUIRE_MAPPING || '').toLowerCase());
 const cenoBotsLiveEnabled = () => ['1', 'true', 'yes'].includes(String(process.env.CENOBOTS_LIVE || '').toLowerCase());
+function secretEnvValue(name) {
+  if (process.env[name]) return process.env[name];
+  const filePath = process.env[`${name}_FILE`];
+  if (!filePath) return '';
+  try { return fs.readFileSync(pathUtil.resolve(filePath), 'utf8').trim(); }
+  catch (error) { throw new Error(`Could not read managed secret ${name}: ${error.message}`); }
+}
+function secretConfigurationMode() {
+  if (['APPID', 'APPSECRET', 'APPCODE'].some((name) => process.env[`${name}_FILE`])) return 'managed-secret-files';
+  if (process.env.AUTOXING_ENV_FILE) return 'protected-env-file';
+  if (['APPID', 'APPSECRET', 'APPCODE'].every((name) => process.env[name])) return 'environment-variables';
+  return autoXingLiveEnabled() ? 'wrapper-managed' : 'not-required-in-mock-mode';
+}
 const authenticatedSessions = new Map();
 let persistenceTimer = null;
 
@@ -133,7 +146,7 @@ function persistedSnapshot() {
       passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), documents: state.documents, certificates: state.certificates,
       deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox,
       autoxing: { ...state.autoxing, pois: mapEntries(state.autoxing.pois), areas: mapEntries(state.autoxing.areas), maps: mapEntries(state.autoxing.maps), tasks: mapEntries(state.autoxing.tasks) },
-      adapterRuntime: mapEntries(state.adapters).map(([provider, adapter]) => [provider, { lastSyncAt: adapter.lastSyncAt || null, lastSyncStatus: adapter.lastSyncStatus || 'never', lastError: adapter.lastError || null }])
+      adapterRuntime: mapEntries(state.adapters).map(([provider, adapter]) => [provider, { lastSyncAt: adapter.lastSyncAt || null, lastSyncStatus: adapter.lastSyncStatus || 'never', lastError: adapter.lastError || null, lastSyncDurationMs:adapter.lastSyncDurationMs || null, lastSyncCount:adapter.lastSyncCount ?? null, lastSyncWarnings:adapter.lastSyncWarnings || 0, syncHistory:clone(adapter.syncHistory || []) }])
     }
   };
 }
@@ -175,7 +188,7 @@ function loadPersistedState() {
     const autoXing = saved.state.autoxing || {};
     state.autoxing.businesses = autoXing.businesses || []; state.autoxing.buildings = autoXing.buildings || []; state.autoxing.lastSyncAt = autoXing.lastSyncAt || null; state.autoxing.resourceErrors = autoXing.resourceErrors || [];
     for (const name of ['pois', 'areas', 'maps', 'tasks']) replaceMap(state.autoxing[name], autoXing[name]);
-    for (const [provider, runtime] of saved.state.adapterRuntime || []) Object.assign(state.adapters.get(provider) || {}, runtime);
+    for (const [provider, runtime] of saved.state.adapterRuntime || []) { const adapter = state.adapters.get(provider); if (!adapter) continue; Object.assign(adapter,runtime); if (!Array.isArray(runtime.syncHistory)) adapter.syncHistory = []; }
     return true;
   } catch (error) {
     console.error(`Could not load ${DATA_FILE}; starting from the seeded state: ${error.message}`);
@@ -234,7 +247,7 @@ function seed() {
   );
 
   state.adapters.set('autoxing', {
-    provider: 'autoxing', version: 'wrapper-backed', status: autoXingLiveEnabled() ? 'live-wrapper-enabled' : 'mock-fallback', integration: 'autoxing/lib/api_lib.py', lastSyncAt: null, lastSyncStatus: 'never', lastError: null, pollingIntervalMs: autoXingPollIntervalMs(),
+    provider: 'autoxing', version: 'wrapper-backed', status: autoXingLiveEnabled() ? 'live-wrapper-enabled' : 'mock-fallback', integration: 'autoxing/lib/api_lib.py', lastSyncAt: null, lastSyncStatus: 'never', lastError: null, lastSyncDurationMs:null, lastSyncCount:null, lastSyncWarnings:0, syncHistory:[], pollingIntervalMs: autoXingPollIntervalMs(),
     capabilities: { read: ['identity', 'status', 'battery', 'position', 'emergency_stop', 'obstruction', 'detailed_errors', 'pois', 'areas', 'maps', 'task_history', 'task_status'], event: ['alert', 'status', 'task_status'], command: [] },
     sync: () => ({ externalId: 'AX-1001', modelId: 'model-autoxing-a1', serialNumber: 'AX-DEMO-001', status: 'active', battery: 87, eventType: 'online' })
   });
@@ -312,9 +325,17 @@ function upsertEvent(robotId, event, actor = { id: 'system', name: 'System' }) {
   return fullEvent;
 }
 
+function recordAdapterSync(adapter, { status, startedAt, count = 0, warnings = 0, error = null, trigger = 'manual' }) {
+  if (!adapter) return;
+  const completedAt = timestamp(); const durationMs = Math.max(0, Date.now() - startedAt);
+  adapter.lastSyncAt = completedAt; adapter.lastSyncStatus = status; adapter.lastError = error; adapter.lastSyncDurationMs = durationMs; adapter.lastSyncCount = count; adapter.lastSyncWarnings = warnings;
+  adapter.syncHistory = [...(adapter.syncHistory || []), { id:ids(), status, startedAt:new Date(startedAt).toISOString(), completedAt, durationMs, count, warnings, trigger }].slice(-20);
+}
+
 function syncAdapter(provider, actorId = 'system') {
   const adapter = state.adapters.get(provider);
   if (!adapter) throw httpError(404, `Unknown adapter: ${provider}`);
+  const syncStartedAt = Date.now();
   const payload = adapter.sync();
   let robot = [...state.robots.values()].find((item) => item.externalIdentities.some((identity) => identity.system === provider && identity.externalId === payload.externalId));
   const actor = typeof actorId === 'string' && demoUsers[actorId] ? demoUsers[actorId] : { id: actorId, name: 'System' };
@@ -332,11 +353,13 @@ function syncAdapter(provider, actorId = 'system') {
   ensureRobotUser(robot);
   appendPassportEntry(robot.id, { type: 'configuration_snapshot', source: provider, data: { battery: payload.battery, status: payload.status } }, actor);
   upsertEvent(robot.id, { eventType: payload.eventType, sourceSystem: provider, sourceEventId: `${payload.externalId}:${payload.eventType}:${payload.battery}`, payload: { battery: payload.battery, status: payload.status } }, actor);
+  recordAdapterSync(adapter, { status:'success', startedAt:syncStartedAt, count:1, trigger:actorId === 'seed' ? 'seed' : 'manual' });
   return { provider, adapterVersion: adapter.version, robot: getPassport(robot.id), commandCapabilitiesEnabled: false };
 }
 
 async function runAutoXingBridge(command = 'snapshot') {
   const env = { ...process.env, AUTOXING_REPO_PATH: AUTOXING_REPO, AUTOXING_LIB_PATH: AUTOXING_LIB };
+  for (const name of ['APPID', 'APPSECRET', 'APPCODE']) { const value = secretEnvValue(name); if (value) env[name] = value; }
   let lastError;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
@@ -365,7 +388,9 @@ async function runAutoXingBridge(command = 'snapshot') {
 
 async function runCenoBotsBridge(command = 'snapshot') {
   try {
-    const result = await execFileAsync(process.env.PYTHON_BIN || 'python3', [CENOBOTS_CLIENT, command], { cwd: __dirname, env:process.env, timeout:Math.max(20000, Number(process.env.CENOBOTS_BRIDGE_TIMEOUT_MS || 120000)), maxBuffer:32 * 1024 * 1024 });
+    const env = { ...process.env };
+    for (const name of ['CENOBOTS_ACCESS_KEY', 'CENOBOTS_SECRET_KEY']) { const value = secretEnvValue(name); if (value) env[name] = value; }
+    const result = await execFileAsync(process.env.PYTHON_BIN || 'python3', [CENOBOTS_CLIENT, command], { cwd: __dirname, env, timeout:Math.max(20000, Number(process.env.CENOBOTS_BRIDGE_TIMEOUT_MS || 120000)), maxBuffer:32 * 1024 * 1024 });
     let payload;
     try { payload = JSON.parse(result.stdout.trim()); }
     catch (error) { throw httpError(503, `CenoBots client returned invalid JSON: ${error.message}`, { provider:'cenobots' }); }
@@ -419,8 +444,80 @@ function autoXingResourcesForRobot(robot) {
   };
 }
 
+function providerField(record, names) {
+  const wanted = new Set(names.map((name) => name.toLowerCase())); const queue = [{ value:record, depth:0 }]; let visited = 0;
+  while (queue.length && visited < 250) {
+    const { value, depth } = queue.shift(); visited += 1;
+    if (!value || typeof value !== 'object') continue;
+    for (const [key, item] of Object.entries(value)) {
+      if (wanted.has(key.toLowerCase()) && meaningful(item)) return item;
+      if (depth < 3 && item && typeof item === 'object') queue.push({ value:item, depth:depth + 1 });
+    }
+  }
+  return null;
+}
+
+function autoXingTaskSummary(tasks) {
+  const normalized = tasks.map((task) => {
+    const statusValue = providerField(task, ['taskStatus','status','state','result']) || 'unknown';
+    const status = typeof statusValue === 'object' ? JSON.stringify(statusValue) : String(statusValue);
+    const statusKey = status.toLowerCase();
+    const occurredAt = providerField(task, ['endTime','endedAt','updatedAt','startTime','startedAt','createdAt','timestamp']);
+    const durationMinutesValue = Number(providerField(task, ['durationMinutes','workingTimeMinutes','totalWorkingTime']));
+    const durationSecondsValue = Number(providerField(task, ['durationSeconds','duration','workingTime','totalTime']));
+    const durationMinutes = Number.isFinite(durationMinutesValue) && durationMinutesValue >= 0 ? durationMinutesValue : Number.isFinite(durationSecondsValue) && durationSecondsValue >= 0 ? durationSecondsValue / 60 : null;
+    const cleanedAreaValue = Number(providerField(task, ['cleanedArea','cleanedAreaSize','totalCleanedArea','coverageArea']));
+    return { taskId:task.taskId || providerField(task,['taskId','id']) || 'unknown', robotExternalId:taskRobotExternalId(task), status, occurredAt:occurredAt && !Number.isNaN(Date.parse(occurredAt)) ? new Date(occurredAt).toISOString() : null, durationMinutes, cleanedArea:Number.isFinite(cleanedAreaValue) ? cleanedAreaValue : null, completed:/complete|completed|success|done|finish/.test(statusKey), failed:/fail|error|abort|cancel/.test(statusKey), running:/running|active|progress|executing|pending/.test(statusKey) };
+  });
+  const completed = normalized.filter((task) => task.completed).length; const failed = normalized.filter((task) => task.failed).length; const durations = normalized.map((task) => task.durationMinutes).filter(Number.isFinite); const areas = normalized.map((task) => task.cleanedArea).filter(Number.isFinite);
+  return { total:normalized.length, completed, failed, running:normalized.filter((task) => task.running).length, successRate:completed + failed ? Math.round(completed / (completed + failed) * 100) : null, averageDurationMinutes:durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null, cleanedArea:areas.length ? Math.round(areas.reduce((sum, value) => sum + value, 0)) : null, tasks:normalized };
+}
+
+function autoXingRecommendedAction(text) {
+  const value = String(text || '').toLowerCase();
+  if (/emergency|e-stop|estop/.test(value)) return 'Inspect the robot and surrounding area. Release the emergency stop only after the physical hazard is cleared.';
+  if (/obstruction|blocked|collision/.test(value)) return 'Inspect the travel path, remove the obstruction, and verify sensors before resuming operation.';
+  if (/battery|charge|dock/.test(value)) return 'Check battery level, charging contacts, dock power, and alignment. Escalate if charging does not recover.';
+  if (/map|locali[sz]|position/.test(value)) return 'Verify the active map and robot location, then inspect localization sensors and map changes.';
+  if (/lidar|sensor|camera/.test(value)) return 'Clean and inspect the affected sensor, confirm it is unobstructed, and arrange qualified service if the alert remains.';
+  if (/offline|network|connect/.test(value)) return 'Check robot power, Wi-Fi coverage, and provider connectivity. Confirm the last online time before dispatching service.';
+  return 'Review the provider error details, inspect the robot safely, and assign a qualified technician if the condition persists.';
+}
+
+function autoXingRobotAlerts(robot) {
+  const alerts = []; const add = (key, severity, title, message) => alerts.push({ id:`${robot.id}:${key}`, robotId:robot.id, serialNumber:robot.serialNumber, severity, title, message, recommendedAction:autoXingRecommendedAction(`${title} ${message}`), occurredAt:robot.updatedAt });
+  if (robot.online === false) add('offline','warning','Robot offline','AutoXing reports that the robot is offline.');
+  if (robot.emergencyStop === true) add('emergency-stop','critical','Emergency stop active','The emergency-stop signal is active.');
+  if (robot.obstruction === true) add('obstruction','warning','Obstruction detected','The robot reports an obstruction in its operating path.');
+  if (Number.isFinite(Number(robot.battery)) && Number(robot.battery) <= 20) add('low-battery','warning','Low battery',`Battery is ${Number(robot.battery)}%.`);
+  if (robot.lastProviderError) add('provider-state','error','Live status unavailable',String(robot.lastProviderError).slice(0,500));
+  if (meaningful(robot.errors)) add('provider-errors','error','Provider errors reported',typeof robot.errors === 'string' ? robot.errors.slice(0,500) : JSON.stringify(robot.errors).slice(0,500));
+  return alerts;
+}
+
+function autoXingOperations(actor) {
+  const robots = [...state.robots.values()].filter((robot) => visibleToActor(actor, robot) && robot.externalIdentities?.some((identity) => identity.system === 'autoxing'));
+  const externalIds = new Set(robots.map((robot) => robot.externalIdentities.find((identity) => identity.system === 'autoxing').externalId).map(String));
+  const tasks = [...state.autoxing.tasks.values()].filter((task) => externalIds.has(String(taskRobotExternalId(task)))); const taskSummary = autoXingTaskSummary(tasks);
+  const robotIds = new Set(robots.map((robot) => robot.id)); const events = state.events.filter((event) => robotIds.has(event.robotId) && event.sourceSystem === 'autoxing');
+  const trends = [];
+  for (let offset = 6; offset >= 0; offset -= 1) {
+    const day = new Date(); day.setUTCHours(0,0,0,0); day.setUTCDate(day.getUTCDate() - offset); const next = new Date(day); next.setUTCDate(next.getUTCDate() + 1);
+    const dayEvents = events.filter((event) => { const time = Date.parse(event.occurredAt); return time >= day.getTime() && time < next.getTime(); });
+    const dayTasks = taskSummary.tasks.filter((task) => { const time = Date.parse(task.occurredAt); return Number.isFinite(time) && time >= day.getTime() && time < next.getTime(); });
+    const batterySamples = dayEvents.map((event) => Number(event.payload?.battery)).filter(Number.isFinite);
+    trends.push({ date:day.toISOString().slice(0,10), onlineEvents:dayEvents.filter((event) => event.eventType === 'online').length, offlineEvents:dayEvents.filter((event) => event.eventType === 'offline').length, errorEvents:dayEvents.filter((event) => ['error','critical'].includes(event.severity)).length, taskEvents:dayTasks.length, completedTasks:dayTasks.filter((task) => task.completed).length, averageBattery:batterySamples.length ? Math.round(batterySamples.reduce((sum, value) => sum + value, 0) / batterySamples.length) : null });
+  }
+  const severityRank = { critical:0, error:1, warning:2, info:3 }; const alerts = robots.flatMap(autoXingRobotAlerts);
+  for (const [index, warning] of (state.autoxing.resourceErrors || []).entries()) alerts.push({ id:`resource:${index}`, robotId:null, serialNumber:warning.externalRobotId || 'Fleet resource', severity:'warning', title:`${warning.resource || 'AutoXing resource'} synchronization warning`, message:String(warning.message || warning.error || 'Provider resource could not be read').slice(0,500), recommendedAction:'Retry synchronization. If the warning remains, check the provider endpoint permission and protected server log.', occurredAt:state.autoxing.lastSyncAt });
+  alerts.sort((a,b) => (severityRank[a.severity] ?? 4) - (severityRank[b.severity] ?? 4));
+  const adapter = state.adapters.get('autoxing') || {};
+  return { fleet:robots.map((robot) => ({ id:robot.id, serialNumber:robot.serialNumber, externalId:robot.externalIdentities.find((identity) => identity.system === 'autoxing').externalId, online:robot.online, battery:robot.battery, charging:robot.charging, position:robot.position, speed:robot.speed, emergencyStop:robot.emergencyStop, obstruction:robot.obstruction, currentTask:robot.providerTask, providerVersion:robot.providerVersion, businessName:robot.providerBusinessName, siteId:robot.siteId, mappingStatus:robot.mappingStatus, updatedAt:robot.updatedAt, alertCount:autoXingRobotAlerts(robot).length })), taskAnalytics:{ ...taskSummary, tasks:undefined }, alerts, trends, diagnostics:{ liveEnabled:autoXingLiveEnabled(), status:adapter.status, lastSyncAt:adapter.lastSyncAt, lastSyncStatus:adapter.lastSyncStatus, lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null, lastSyncDurationMs:adapter.lastSyncDurationMs, lastSyncCount:adapter.lastSyncCount, lastSyncWarnings:adapter.lastSyncWarnings || 0, pollingIntervalMs:autoXingPollIntervalMs(), nextPollAt:adapter.lastSyncAt && autoXingPollIntervalMs() ? new Date(Date.parse(adapter.lastSyncAt) + autoXingPollIntervalMs()).toISOString() : null, secretMode:secretConfigurationMode(), syncHistory:clone(adapter.syncHistory || []) }, generatedAt:timestamp() };
+}
+
 async function syncAutoXingLive(actor) {
   const adapter = state.adapters.get('autoxing');
+  const syncStartedAt = Date.now();
   if (adapter) { adapter.lastSyncStatus = 'running'; adapter.lastError = null; }
   const bridge = await runAutoXingBridge('snapshot');
   const businessMap = parseJsonEnv('AUTOXING_BUSINESS_MAP');
@@ -462,19 +559,20 @@ async function syncAutoXingLive(actor) {
     const eventType = externalRobot.online === false ? 'offline' : 'online';
     upsertEvent(robot.id, { eventType, sourceSystem: 'autoxing', sourceEventId: `${externalId}:${eventType}:${externalRobot.battery ?? 'unknown'}`, title: `AutoXing robot ${eventType}`, description: `Read-only synchronization from the AutoXing Python wrapper for ${externalRobot.serialNumber}.`, severity: externalRobot.online === false ? 'warning' : 'info', payload: externalRobot }, actor);
     if (externalRobot.task) upsertEvent(robot.id, { eventType: 'mission_status', sourceSystem: 'autoxing', sourceEventId: `${externalId}:task:${JSON.stringify(externalRobot.task)}`, title: 'AutoXing mission status', description: 'Mission status received from the AutoXing wrapper.', severity: 'info', payload: { task: externalRobot.task } }, actor);
-    if (externalRobot.errors && JSON.stringify(externalRobot.errors) !== '[]' && JSON.stringify(externalRobot.errors) !== '{}') upsertEvent(robot.id, { eventType: 'error', sourceSystem: 'autoxing', sourceEventId: `${externalId}:errors:${JSON.stringify(externalRobot.errors)}`, title: 'AutoXing alert or error', description: 'An alert or error was received from AutoXing.', severity: 'error', payload: { errors: externalRobot.errors } }, actor);
+    if (externalRobot.errors && JSON.stringify(externalRobot.errors) !== '[]' && JSON.stringify(externalRobot.errors) !== '{}') { const errorText = JSON.stringify(externalRobot.errors); const errorDigest = crypto.createHash('sha256').update(errorText).digest('hex').slice(0,16); const recommendedAction = autoXingRecommendedAction(errorText); upsertEvent(robot.id, { eventType:'error', sourceSystem:'autoxing', sourceEventId:`${externalId}:errors:${errorDigest}`, title:'AutoXing alert or error', description:`An alert or error was received from AutoXing. Recommended action: ${recommendedAction}`, severity:'error', payload:{ errors:externalRobot.errors, recommendedAction } }, actor); }
     if (externalRobot.emergencyStop === true) upsertEvent(robot.id, { eventType: 'emergency_stop', sourceSystem: 'autoxing', sourceEventId: `${externalId}:emergency-stop:true`, title: 'AutoXing emergency stop active', description: 'The emergency-stop state is active according to AutoXing.', severity: 'critical', payload: { emergencyStop: true, statusDetails: externalRobot.statusDetails } }, actor);
     if (externalRobot.obstruction === true) upsertEvent(robot.id, { eventType: 'obstruction', sourceSystem: 'autoxing', sourceEventId: `${externalId}:obstruction:true`, title: 'AutoXing obstruction detected', description: 'The robot reports an obstruction according to AutoXing.', severity: 'warning', payload: { obstruction: true, statusDetails: externalRobot.statusDetails } }, actor);
     if (externalRobot.stateError) upsertEvent(robot.id, { eventType: 'error', sourceSystem: 'autoxing', sourceEventId: `${externalId}:state-error:${externalRobot.stateError}`, title: 'AutoXing status read failed', description: externalRobot.stateError, severity: 'warning', payload: { stateError: externalRobot.stateError } }, actor);
     synced.push(getPassport(robot.id));
   }
   storeAutoXingResources(bridge.resources, bridge.resourceErrors);
-  if (adapter) { adapter.lastSyncAt = timestamp(); adapter.lastSyncStatus = 'success'; adapter.lastError = bridge.resourceErrors?.length ? `${bridge.resourceErrors.length} resource warnings` : null; }
+  recordAdapterSync(adapter, { status:'success', startedAt:syncStartedAt, count:synced.length, warnings:bridge.resourceErrors?.length || 0, trigger:String(actor.id || '').includes('poller') ? 'poll' : 'manual' });
   return { provider: 'autoxing', adapterVersion: 'wrapper-backed', source: bridge.wrapper, robots: synced, count: synced.length, resources: { businesses: state.autoxing.businesses.length, buildings: state.autoxing.buildings.length, poiRobotScopes: state.autoxing.pois.size, areaRobotScopes: state.autoxing.areas.size, maps: state.autoxing.maps.size, tasks: state.autoxing.tasks.size, warnings: state.autoxing.resourceErrors.length }, resourceErrors: clone(state.autoxing.resourceErrors), commandCapabilitiesEnabled: false };
 }
 
 async function syncCenoBotsLive(actor) {
   const adapter = state.adapters.get('cenobots');
+  const syncStartedAt = Date.now();
   if (adapter) { adapter.lastSyncStatus = 'running'; adapter.lastError = null; }
   const bridge = await runCenoBotsBridge('snapshot');
   const synced = [];
@@ -507,7 +605,7 @@ async function syncCenoBotsLive(actor) {
     }
     synced.push(getPassport(robot.id));
   }
-  if (adapter) { adapter.lastSyncAt = timestamp(); adapter.lastSyncStatus = 'success'; adapter.lastError = null; }
+  recordAdapterSync(adapter, { status:'success', startedAt:syncStartedAt, count:synced.length, warnings:bridge.warnings?.length || 0, trigger:'manual' });
   return { provider:'cenobots', adapterVersion:'open-api-v1.0.16', source:'CenoBots Open API', robots:synced, count:synced.length, resourceErrors:clone(bridge.warnings || []), commandCapabilitiesEnabled:false };
 }
 
@@ -926,6 +1024,7 @@ async function handle(req, res) {
     return send(res, 200, { warning: 'Passwords are hashed and cannot be retrieved. Reset a password if access is lost.', data: accounts, count: accounts.length });
   }
   if (req.method === 'GET' && path === '/api/v1/adapters') return send(res, 200, { data: ['robot_user', 'auditor'].includes(actor.role) ? [] : [...state.adapters.values()].map(({ sync, lastError, ...adapter }) => ({ ...adapter, lastError: lastError ? 'Synchronization failed. Retry the operation or check the protected server log.' : null })) });
+  if (req.method === 'GET' && path === '/api/v1/autoxing/operations') return send(res, 200, { data:autoXingOperations(actor) });
   if (req.method === 'GET' && path === '/api/v1/adapters/autoxing/resources') {
     if (actor.role === 'robot_user') return send(res, 200, { data: { businesses: [], buildings: [], maps: [], syncedAt: state.autoxing.lastSyncAt, resourceErrors: [] } });
     return send(res, 200, { data: { businesses: clone(state.autoxing.businesses), buildings: clone(state.autoxing.buildings), maps: clone([...state.autoxing.maps.values()]), syncedAt: state.autoxing.lastSyncAt, resourceErrors: clone(state.autoxing.resourceErrors) } });
@@ -1007,18 +1106,20 @@ async function handle(req, res) {
   if (sync && req.method === 'POST') {
     if (!canWrite(actor)) throw httpError(403, 'Write permission required');
     if (sync.id === 'autoxing' && autoXingLiveEnabled()) {
+      const syncStartedAt = Date.now();
       try {
         const result = await syncAutoXingLive(actor); recordAudit(actor, 'adapter.sync.live', 'adapter', sync.id, 'success', { count: result.count }); return send(res, 200, { data: result });
       } catch (error) {
-        const adapter = state.adapters.get('autoxing'); if (adapter) { adapter.lastSyncStatus = 'error'; adapter.lastError = error.message; }
+        recordAdapterSync(state.adapters.get('autoxing'), { status:'error', startedAt:syncStartedAt, error:error.message, trigger:'manual' });
         throw error;
       }
     }
     if (sync.id === 'cenobots' && cenoBotsLiveEnabled()) {
+      const syncStartedAt = Date.now();
       try {
         const result = await syncCenoBotsLive(actor); recordAudit(actor, 'adapter.sync.live', 'adapter', sync.id, 'success', { count:result.count, warnings:result.resourceErrors.length }); return send(res, 200, { data:result });
       } catch (error) {
-        const adapter = state.adapters.get('cenobots'); if (adapter) { adapter.lastSyncStatus = 'error'; adapter.lastError = error.message; }
+        recordAdapterSync(state.adapters.get('cenobots'), { status:'error', startedAt:syncStartedAt, error:error.message, trigger:'manual' });
         throw error;
       }
     }
@@ -1186,7 +1287,8 @@ function startAutoXingPolling() {
   autoXingPollTimer = setInterval(async () => {
     if (autoXingPollRunning) return;
     autoXingPollRunning = true;
-    try { await syncAutoXingLive(pollActor); } catch (error) { const adapter = state.adapters.get('autoxing'); if (adapter) { adapter.lastSyncStatus = 'error'; adapter.lastError = error.message; } }
+    const syncStartedAt = Date.now();
+    try { await syncAutoXingLive(pollActor); } catch (error) { recordAdapterSync(state.adapters.get('autoxing'), { status:'error', startedAt:syncStartedAt, error:error.message, trigger:'poll' }); }
     finally { autoXingPollRunning = false; try { persistState(); } catch (error) { console.error(`Could not persist AutoXing synchronization: ${error.message}`); } }
   }, autoXingPollIntervalMs());
   autoXingPollTimer.unref?.();

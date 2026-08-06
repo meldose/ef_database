@@ -128,14 +128,42 @@
         </article>
       </section>
       <section class="lower-grid" id="autoxingWorkspace" data-dashboard-view="autoxing">
-        <article class="panel" id="resourceExplorerPanel">
-          <div class="panel-header"><div><p class="eyebrow">AutoXing fleet resources</p><h2>Resource explorer</h2></div><button class="text-button" id="refreshResources">Refresh</button></div>
-          <div id="resourceExplorer" class="record-list"><div class="empty">Loading businesses, buildings, and maps…</div></div>
+        <article class="panel audit-panel" id="autoXingLivePanel">
+          <div class="panel-header"><div><p class="eyebrow">Live read-only telemetry</p><h2>AutoXing live fleet</h2></div><div class="panel-header-actions"><span class="auto-refresh-status" id="autoRefreshStatus">Automatic refresh starting…</span><button class="text-button" id="refreshAutoXingOperations" type="button">Refresh</button></div></div>
+          <div id="autoXingLiveFleet" class="autoxing-live-grid"><div class="empty">Loading AutoXing fleet status…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid" data-dashboard-view="autoxing">
+        <article class="panel" id="taskAnalyticsPanel">
+          <div class="panel-header"><div><p class="eyebrow">Performance summary</p><h2>Task analytics</h2></div></div>
+          <div id="autoXingTaskAnalytics" class="record-list"><div class="empty">Loading task analytics…</div></div>
         </article>
         <article class="panel" id="taskHistoryPanel">
           <div class="panel-header"><div><p class="eyebrow">Read-only operations</p><h2>AutoXing task history</h2></div><button class="text-button" id="refreshTasks">Refresh</button></div>
           <div class="task-toolbar"><label for="taskRobotFilter">Robot</label><select id="taskRobotFilter"><option value="">All visible AutoXing robots</option></select></div>
           <div id="taskHistoryList" class="record-list"><div class="empty">Loading task history…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid" data-dashboard-view="autoxing">
+        <article class="panel" id="autoXingDiagnosticsPanel">
+          <div class="panel-header"><div><p class="eyebrow">Connector health</p><h2>Sync diagnostics</h2></div></div>
+          <div id="autoXingDiagnostics" class="record-list"><div class="empty">Loading synchronization diagnostics…</div></div>
+        </article>
+        <article class="panel" id="autoXingAlertsPanel">
+          <div class="panel-header"><div><p class="eyebrow">Actionable operations</p><h2>Robot alerts</h2></div><span class="count-pill" id="autoXingAlertCount">0</span></div>
+          <div id="autoXingAlerts" class="record-list"><div class="empty">Loading actionable alerts…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid" data-dashboard-view="autoxing">
+        <article class="panel audit-panel" id="autoXingTrendsPanel">
+          <div class="panel-header"><div><p class="eyebrow">Seven-day operational history</p><h2>Fleet trends</h2></div></div>
+          <div id="autoXingTrends" class="autoxing-trends"><div class="empty">Loading historical trends…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid" data-dashboard-view="autoxing">
+        <article class="panel audit-panel" id="resourceExplorerPanel">
+          <div class="panel-header"><div><p class="eyebrow">AutoXing fleet resources</p><h2>Resource explorer</h2></div><button class="text-button" id="refreshResources">Refresh</button></div>
+          <div id="resourceExplorer" class="record-list"><div class="empty">Loading businesses, buildings, and maps…</div></div>
         </article>
       </section>
       <section class="lower-grid">
