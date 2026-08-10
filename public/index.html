@@ -130,7 +130,9 @@
       <section class="lower-grid" id="autoxingWorkspace" data-dashboard-view="autoxing">
         <article class="panel audit-panel" id="autoXingLivePanel">
           <div class="panel-header"><div><p class="eyebrow">Live read-only telemetry</p><h2>AutoXing live fleet</h2></div><div class="panel-header-actions"><span class="auto-refresh-status" id="autoRefreshStatus">Automatic refresh starting…</span><button class="text-button" id="refreshAutoXingOperations" type="button">Refresh</button></div></div>
+          <div class="fleet-filter-toolbar"><label>Search<input id="autoXingFleetSearch" type="search" placeholder="Serial, external ID or site" /></label><label>Status<select id="autoXingFleetStatus"><option value="all">All statuses</option><option value="online">Online</option><option value="offline">Offline</option><option value="unknown">Unknown</option></select></label><label>Battery<select id="autoXingFleetBattery"><option value="all">All levels</option><option value="low">Low · ≤20%</option><option value="medium">Medium · 21–60%</option><option value="high">High · &gt;60%</option></select></label><label>Alerts<select id="autoXingFleetAlerts"><option value="all">All robots</option><option value="alerts">With alerts</option><option value="clear">No alerts</option></select></label></div>
           <div id="autoXingLiveFleet" class="autoxing-live-grid"><div class="empty">Loading AutoXing fleet status…</div></div>
+          <div class="fleet-card-pagination"><span id="autoXingFleetPageSummary">0 robots</span><div><button class="text-button" id="autoXingFleetPrevious" type="button">Previous</button><span id="autoXingFleetPage">Page 1</span><button class="text-button" id="autoXingFleetNext" type="button">Next</button></div></div>
         </article>
       </section>
       <section class="lower-grid" data-dashboard-view="autoxing">
@@ -149,9 +151,29 @@
           <div class="panel-header"><div><p class="eyebrow">Connector health</p><h2>Sync diagnostics</h2></div></div>
           <div id="autoXingDiagnostics" class="record-list"><div class="empty">Loading synchronization diagnostics…</div></div>
         </article>
+        <article class="panel" id="autoXingMonitoringPanel">
+          <div class="panel-header"><div><p class="eyebrow">Application observability</p><h2>System monitoring</h2></div><button class="text-button" id="refreshMonitoring" type="button">Refresh</button></div>
+          <div id="autoXingMonitoring" class="record-list"><div class="empty">Loading server health…</div></div>
+        </article>
         <article class="panel" id="autoXingAlertsPanel">
           <div class="panel-header"><div><p class="eyebrow">Actionable operations</p><h2>Robot alerts</h2></div><span class="count-pill" id="autoXingAlertCount">0</span></div>
           <div id="autoXingAlerts" class="record-list"><div class="empty">Loading actionable alerts…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid" data-dashboard-view="autoxing">
+        <article class="panel" id="autoXingMaintenancePanel">
+          <div class="panel-header"><div><p class="eyebrow">Preventive service</p><h2>Maintenance schedules</h2></div><div class="panel-header-actions"><button class="button primary mini" id="newMaintenanceSchedule" type="button">＋ Schedule</button><button class="text-button" id="refreshMaintenanceSchedules" type="button">Refresh</button></div></div>
+          <div id="autoXingMaintenanceSummary" class="record-list"><div class="empty">Loading maintenance schedules…</div></div>
+        </article>
+        <article class="panel" id="autoXingDiagnosticPanel">
+          <div class="panel-header"><div><p class="eyebrow">Read-only support bundle</p><h2>Remote diagnostic report</h2></div></div>
+          <div class="diagnostic-download"><label>AutoXing robot<select id="diagnosticRobotSelect"><option value="">Select a robot</option></select></label><p>Downloads current telemetry, alerts, task summary, events, maintenance, assignments, integration health, and provider resources as JSON.</p><button class="button secondary" id="downloadDiagnosticReport" type="button">Download report</button></div>
+        </article>
+      </section>
+      <section class="lower-grid" data-dashboard-view="autoxing">
+        <article class="panel audit-panel" id="autoXingEscalationPanel">
+          <div class="panel-header"><div><p class="eyebrow">Automated response</p><h2>Alert escalation rules</h2></div><div class="panel-header-actions"><button class="text-button" id="evaluateEscalations" type="button">Evaluate now</button><button class="button primary mini" id="newEscalationRule" type="button">＋ Add rule</button></div></div>
+          <div id="autoXingEscalationRules" class="record-list"><div class="empty">Loading escalation rules…</div></div>
         </article>
       </section>
       <section class="lower-grid" data-dashboard-view="autoxing">
@@ -180,6 +202,12 @@
         <article class="panel audit-panel">
           <div class="panel-header"><div><p class="eyebrow">Platform administration</p><h2>Robot accounts</h2></div><button class="text-button" id="refreshRobotAccounts">Refresh</button></div>
           <div id="robotAccountsList" class="record-list"><div class="empty">Loading robot accounts…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid" id="emailNotificationsSection" data-dashboard-view="admin">
+        <article class="panel audit-panel">
+          <div class="panel-header"><div><p class="eyebrow">Operational communications</p><h2>Email alert notifications</h2></div><div class="panel-header-actions"><button class="text-button" id="testEmailNotification" type="button">Send test email</button><button class="text-button" id="refreshEmailNotifications" type="button">Refresh</button></div></div>
+          <div id="emailNotificationStatus" class="record-list"><div class="empty">Loading email notification status…</div></div>
         </article>
       </section>
       <section class="lower-grid" id="workforceSection" data-dashboard-view="workforce">
@@ -292,6 +320,18 @@
         <div id="notificationsList" class="notifications-list"><div class="empty">Loading notifications…</div></div>
         <div class="dialog-actions"><button class="button primary" value="default">Done</button></div>
       </form>
+    </dialog>
+    <dialog id="taskDetailDialog" class="detail-dialog" aria-labelledby="taskDetailTitle">
+      <form method="dialog"><div class="dialog-header"><div><p class="eyebrow">AutoXing task</p><h2 id="taskDetailTitle">Task details</h2></div><button class="close-button" value="cancel" aria-label="Close task details">×</button></div><div id="taskDetailContent"><div class="empty">Loading task details…</div></div><div class="dialog-actions"><button class="button primary" value="default">Done</button></div></form>
+    </dialog>
+    <dialog id="alertWorkflowDialog" class="detail-dialog" aria-labelledby="alertWorkflowTitle">
+      <form method="dialog" id="alertWorkflowForm"><div class="dialog-header"><div><p class="eyebrow">Operational workflow</p><h2 id="alertWorkflowTitle">Manage alert</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close alert workflow">×</button></div><p class="dialog-copy" id="alertWorkflowDescription"></p><label>Status<select id="alertWorkflowStatus"><option value="acknowledged">Acknowledged</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="open">Open</option></select></label><label>Qualified technician<select id="alertWorkflowTechnician"><option value="">Not assigned</option></select></label><label>Work note<textarea id="alertWorkflowNote" rows="4" maxlength="2000" placeholder="Containment, inspection or handover notes"></textarea></label><label class="checkbox-label"><input id="alertCreateServiceCase" type="checkbox" /> Create and link a service case</label><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Save workflow</button></div></form>
+    </dialog>
+    <dialog id="maintenanceScheduleDialog" aria-labelledby="maintenanceScheduleTitle">
+      <form method="dialog" id="maintenanceScheduleForm"><div class="dialog-header"><div><p class="eyebrow">Preventive service</p><h2 id="maintenanceScheduleTitle">Schedule maintenance</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close maintenance schedule">×</button></div><label>AutoXing robot<select id="maintenanceRobot" required></select></label><label>Maintenance title<input id="maintenanceTitle" required maxlength="160" placeholder="Quarterly sensor inspection" /></label><div class="form-grid"><label>Next service<input id="maintenanceNextDue" type="datetime-local" required /></label><label>Repeat every days<input id="maintenanceInterval" type="number" min="1" max="730" value="90" required /></label></div><div class="form-grid"><label>Priority<select id="maintenancePriority"><option value="normal">Normal</option><option value="high">High</option><option value="critical">Critical</option><option value="low">Low</option></select></label><label>Qualified technician<select id="maintenanceTechnician"><option value="">Assign later</option></select></label></div><label>Description<textarea id="maintenanceDescription" rows="4" maxlength="2000" placeholder="Inspection checklist and preparation notes"></textarea></label><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Create schedule</button></div></form>
+    </dialog>
+    <dialog id="escalationRuleDialog" aria-labelledby="escalationRuleTitle">
+      <form method="dialog" id="escalationRuleForm"><div class="dialog-header"><div><p class="eyebrow">Automated response</p><h2 id="escalationRuleTitle">Add escalation rule</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close escalation rule">×</button></div><label>Rule name<input id="escalationRuleName" required maxlength="160" placeholder="Critical alert response" /></label><div class="form-grid"><label>Alert type<select id="escalationAlertType"><option value="any">Any alert</option><option value="offline">Robot offline</option><option value="low-battery">Low battery</option><option value="emergency-stop">Emergency stop</option><option value="obstruction">Obstruction</option><option value="provider-errors">Provider errors</option><option value="maintenance_due">Maintenance due</option><option value="integration_warning">Integration warning</option></select></label><label>Minimum severity<select id="escalationSeverity"><option value="error">Error</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="info">Info</option></select></label></div><div class="form-grid"><label>Escalate after minutes<input id="escalationAfterMinutes" type="number" min="0" max="43200" value="15" required /></label><label>Action<select id="escalationAction"><option value="email_and_service_case">Email + service case</option><option value="email">Email only</option><option value="service_case">Service case only</option></select></label></div><label>Preferred technician<select id="escalationTechnician"><option value="">Assign qualified technician later</option></select></label><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Create rule</button></div></form>
     </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
     <script src="/app.js"></script>

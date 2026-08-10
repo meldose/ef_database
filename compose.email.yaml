@@ -1,0 +1,21 @@
+services:
+  altegro:
+    environment:
+      EMAIL_ALERTS_ENABLED: "true"
+      EMAIL_ALERT_TRANSPORT: smtp
+      EMAIL_ALERT_FROM: "${EMAIL_ALERT_FROM:?Set EMAIL_ALERT_FROM}"
+      EMAIL_ALERT_RECIPIENTS: "${EMAIL_ALERT_RECIPIENTS:?Set EMAIL_ALERT_RECIPIENTS}"
+      EMAIL_ALERT_MIN_SEVERITY: "${EMAIL_ALERT_MIN_SEVERITY:-error}"
+      EMAIL_ALERT_COOLDOWN_MINUTES: "${EMAIL_ALERT_COOLDOWN_MINUTES:-60}"
+      EMAIL_SMTP_HOST: "${EMAIL_SMTP_HOST:?Set EMAIL_SMTP_HOST}"
+      EMAIL_SMTP_PORT: "${EMAIL_SMTP_PORT:-465}"
+      EMAIL_SMTP_SECURE: "${EMAIL_SMTP_SECURE:-true}"
+      EMAIL_SMTP_USERNAME: "${EMAIL_SMTP_USERNAME:?Set EMAIL_SMTP_USERNAME}"
+      EMAIL_SMTP_PASSWORD_FILE: /run/secrets/altegro_smtp_password
+      ALTEGRO_PUBLIC_URL: "${ALTEGRO_PUBLIC_URL:-http://localhost:3000}"
+    secrets:
+      - altegro_smtp_password
+
+secrets:
+  altegro_smtp_password:
+    external: true

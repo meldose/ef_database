@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const net = require('node:net');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const testDataFile = path.join('/tmp', `altegro-test-state-${process.pid}.json`);
@@ -9,6 +10,11 @@ fs.rmSync(testDataFile, { force: true });
 process.env.ALTEGRO_DATA_FILE = testDataFile;
 process.env.ALTEGRO_PERSISTENCE = 'true';
 process.env.CENOBOTS_LIVE = 'false';
+process.env.EMAIL_ALERTS_ENABLED = 'true';
+process.env.EMAIL_ALERT_TRANSPORT = 'capture';
+process.env.EMAIL_ALERT_FROM = 'altegro-alerts@example.test';
+process.env.EMAIL_ALERT_RECIPIENTS = 'operations@example.test,service@example.test';
+process.env.EMAIL_ALERT_MIN_SEVERITY = 'error';
 const { server, state, DATA_FILE } = require('./server');
 
 const port = 3107;
@@ -30,6 +36,12 @@ async function loginWithPassword(email, password) {
   return { status: response.status, body: await response.json(), headers: response.headers };
 }
 
+async function startFakeSmtpServer() {
+  const messages=[]; const smtp=net.createServer((socket) => { let buffer=''; let dataMode=false; let message=[]; socket.setEncoding('utf8'); socket.write('220 smtp.test ESMTP\r\n'); socket.on('data',(chunk) => { buffer += chunk; let index; while ((index=buffer.indexOf('\n')) >= 0) { const line=buffer.slice(0,index+1).trimEnd(); buffer=buffer.slice(index+1); if (dataMode) { if (line === '.') { messages.push(message.join('\n')); message=[]; dataMode=false; socket.write('250 queued\r\n'); } else message.push(line); continue; } if (line.startsWith('EHLO')) socket.write('250-smtp.test\r\n250 OK\r\n'); else if (line.startsWith('MAIL FROM:') || line.startsWith('RCPT TO:')) socket.write('250 OK\r\n'); else if (line === 'DATA') { dataMode=true; socket.write('354 End data with <CR><LF>.<CR><LF>\r\n'); } else if (line === 'QUIT') { socket.write('221 Bye\r\n'); socket.end(); } else socket.write('500 Unsupported command\r\n'); } }); });
+  await new Promise((resolve,reject) => { smtp.once('error',reject); smtp.listen(0,'127.0.0.1',resolve); });
+  return { server:smtp,port:smtp.address().port,messages };
+}
+
 (async () => {
   try {
     let result = await request('/health', { headers: {} });
@@ -37,10 +49,16 @@ async function loginWithPassword(email, password) {
     assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(result.headers.get('x-frame-options'), 'DENY');
     assert.match(result.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+    const readyResponse = await fetch(`http://localhost:${port}/ready`);
+    assert.equal(readyResponse.status,200);
+    assert.equal((await readyResponse.json()).ready,true);
+    const metricsResponse = await fetch(`http://localhost:${port}/metrics`);
+    assert.equal(metricsResponse.status,200);
+    assert.match(await metricsResponse.text(),/altegro_http_requests_total/);
     const frontendResponse = await fetch(`http://localhost:${port}/`);
     assert.equal(frontendResponse.status, 200);
     const frontendHtml = await frontendResponse.text();
-    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'autoXingLiveFleet', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingAlerts', 'autoXingTrends', 'robotAccountsList', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
+    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
     for (const view of ['overview', 'robots', 'operations', 'autoxing', 'workforce', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
 
     const oldPasswordLogin = await loginWithPassword('admin@demo.altegro.local', 'demo');
@@ -60,6 +78,18 @@ async function loginWithPassword(email, password) {
     result = await request('/api/v1/auth/session');
     assert.equal(result.status, 200);
     assert.equal(result.body.user.role, 'platform_admin');
+    result = await request('/api/v1/email-notifications');
+    assert.equal(result.status,200);
+    assert.equal(result.body.data.configuration.enabled,true);
+    assert.equal(result.body.data.configuration.transport,'capture');
+    assert.equal(result.body.data.configuration.recipientCount,2);
+    result = await request('/api/v1/email-notifications/test',{ method:'POST',body:'{}' });
+    assert.equal(result.status,200);
+    assert.equal(result.body.data.status,'sent');
+    assert.equal(result.body.data.recipientCount,2);
+    const fakeSmtp=await startFakeSmtpServer(); process.env.EMAIL_ALERT_TRANSPORT='smtp'; process.env.EMAIL_SMTP_HOST='127.0.0.1'; process.env.EMAIL_SMTP_PORT=String(fakeSmtp.port); process.env.EMAIL_SMTP_SECURE='false'; delete process.env.EMAIL_SMTP_USERNAME; delete process.env.EMAIL_SMTP_PASSWORD; delete process.env.EMAIL_SMTP_PASSWORD_FILE;
+    result=await request('/api/v1/email-notifications/test',{ method:'POST',body:'{}' });
+    assert.equal(result.status,200); assert.equal(result.body.data.status,'sent'); assert.equal(fakeSmtp.messages.length,1); assert.match(fakeSmtp.messages[0],/Test requested by Demo Platform Admin/); await new Promise((resolve) => fakeSmtp.server.close(resolve)); process.env.EMAIL_ALERT_TRANSPORT='capture';
     result = await requestAs('demo-platform-admin', '/api/v1/robots');
     assert.equal(result.status, 401);
     result = await request('/api/v1/demo/tokens');
@@ -72,6 +102,10 @@ async function loginWithPassword(email, password) {
     assert.equal(result.body.facets.total, 2);
     const robotId = result.body.data[0].id;
     const cenobotsRobotId = result.body.data[1].id;
+
+    result=await request('/api/v1/autoxing/maintenance-schedules',{ method:'POST',body:JSON.stringify({ robotId,title:'Quarterly AutoXing inspection',description:'Inspect sensors and safety systems.',nextDueAt:'2026-07-01T09:00:00.000Z',intervalDays:90,priority:'high',assignedTechnicianId:'technician-lena' }) });
+    assert.equal(result.status,201); assert.equal(result.body.data.dueState,'overdue'); assert.equal(result.body.data.technicianName,'Midhun Eldose'); const maintenanceScheduleId=result.body.data.id;
+    result=await request('/api/v1/autoxing/maintenance-schedules'); assert.equal(result.status,200); assert.ok(result.body.data.some((item) => item.id === maintenanceScheduleId));
 
     result = await request(`/api/v1/workforce/matrix?robotId=${robotId}`);
     assert.equal(result.status, 200);
@@ -130,14 +164,25 @@ async function loginWithPassword(email, password) {
     result = await requestAs(robotAxSessionToken, '/api/v1/events');
     assert.equal(result.status, 200);
     assert.ok(result.body.data.every((event) => event.robotId === robotId));
+    result = await requestAs(robotAxSessionToken,'/api/v1/email-notifications');
+    assert.equal(result.status,403);
     result = await requestAs(robotAxSessionToken, '/api/v1/workforce/matrix');
     assert.equal(result.status, 403);
+    result=await requestAs(robotAxSessionToken,'/api/v1/autoxing/maintenance-schedules'); assert.equal(result.status,200); assert.equal(result.body.count,1);
+    result=await requestAs(robotAxSessionToken,'/api/v1/autoxing/maintenance-schedules',{ method:'POST',body:JSON.stringify({}) }); assert.equal(result.status,403);
+    result=await requestAs(robotAxSessionToken,'/api/v1/autoxing/escalation-rules'); assert.equal(result.status,403);
 
     state.autoxing.tasks.set('task-ax-scope', { taskId: 'task-ax-scope', raw: { robotId: 'AX-1001', status:'completed', durationSeconds:600, cleanedArea:120, updatedAt:'2026-07-27T14:00:00.000Z' } });
     state.autoxing.tasks.set('task-cb-scope', { taskId: 'task-cb-scope', raw: { robotId: 'CB-1001' } });
     result = await requestAs(robotAxSessionToken, '/api/v1/autoxing/tasks');
     assert.equal(result.status, 200);
     assert.deepEqual(result.body.data.map((task) => task.taskId), ['task-ax-scope']);
+    result = await requestAs(robotAxSessionToken, '/api/v1/autoxing/tasks/task-ax-scope');
+    assert.equal(result.status,200);
+    assert.equal(result.body.data.normalized.completed,true);
+    assert.equal(result.body.data.robot.id,robotId);
+    result = await requestAs(robotAxSessionToken, '/api/v1/autoxing/tasks/task-cb-scope');
+    assert.equal(result.status,404);
     state.robots.get(robotId).online = false; state.robots.get(robotId).battery = 15;
     result = await requestAs(robotAxSessionToken, '/api/v1/autoxing/operations');
     assert.equal(result.status, 200);
@@ -145,9 +190,37 @@ async function loginWithPassword(email, password) {
     assert.equal(result.body.data.taskAnalytics.total, 1);
     assert.equal(result.body.data.taskAnalytics.completed, 1);
     assert.ok(result.body.data.alerts.some((alert) => alert.robotId === robotId && alert.recommendedAction));
+    assert.ok(result.body.data.alerts.some((alert) => alert.id === `maintenance:${maintenanceScheduleId}` && alert.type === 'maintenance_due'));
+    assert.equal(result.body.data.maintenance.overdue,1);
     assert.equal(result.body.data.trends.length, 7);
     assert.ok(Array.isArray(result.body.data.diagnostics.syncHistory));
+    assert.equal(result.body.data.alertWorkflow.canManage,false);
+    const workflowAlertId=result.body.data.alerts.find((alert) => alert.robotId === robotId).id;
+    result=await request('/api/v1/autoxing/escalation-rules',{ method:'POST',body:JSON.stringify({ name:'Offline robot escalation',minimumSeverity:'warning',alertType:'offline',afterMinutes:0,action:'email_and_service_case',technicianId:'technician-lena' }) });
+    assert.equal(result.status,201); const escalationRuleId=result.body.data.id;
+    result=await request('/api/v1/autoxing/escalations/evaluate',{ method:'POST',body:'{}' }); assert.equal(result.status,200); assert.ok(result.body.data.created.some((item) => item.ruleId === escalationRuleId && item.actions.includes('service_case') && item.actions.includes('email')));
+    assert.ok([...state.alertEscalations.values()].some((item) => item.ruleId === escalationRuleId));
+    result=await request('/api/v1/autoxing/escalation-rules'); assert.equal(result.status,200); assert.equal(result.body.data.find((item) => item.id === escalationRuleId).executionCount,1);
+    result=await requestAs(robotAxSessionToken,`/api/v1/autoxing/alerts/${encodeURIComponent(workflowAlertId)}`,{ method:'PATCH',body:JSON.stringify({ status:'acknowledged' }) });
+    assert.equal(result.status,403);
+    result=await request(`/api/v1/autoxing/alerts/${encodeURIComponent(workflowAlertId)}`,{ method:'PATCH',body:JSON.stringify({ status:'acknowledged',technicianId:'technician-lena',note:'Remote triage complete.',createServiceCase:true }) });
+    assert.equal(result.status,200);
+    assert.equal(result.body.data.workflow.status,'in_progress');
+    assert.ok(result.body.data.workflow.serviceCaseId);
+    assert.equal(state.alertWorkflows.get(workflowAlertId).technicianName,'Midhun Eldose');
+    result=await request('/api/v1/monitoring');
+    assert.equal(result.status,200);
+    assert.equal(result.body.data.readiness.ready,true);
+    assert.ok(result.body.data.requests.total > 0);
+    result=await requestAs(robotAxSessionToken,'/api/v1/monitoring');
+    assert.equal(result.body.data.fleet.robots,1);
+    assert.deepEqual(result.body.data.adapters,[]);
     state.robots.get(robotId).online = true; state.robots.get(robotId).battery = 87;
+
+    const diagnosticResponse=await fetch(`http://localhost:${port}/api/v1/autoxing/diagnostic-reports/${robotId}`,{ headers:{ authorization:`Bearer ${robotAxSessionToken}` } }); assert.equal(diagnosticResponse.status,200); assert.match(diagnosticResponse.headers.get('content-disposition'),/autoxing-diagnostic-AX-DEMO-001/); const diagnostic=await diagnosticResponse.json(); assert.equal(diagnostic.reportType,'autoxing_remote_diagnostic'); assert.equal(diagnostic.robot.id,robotId); assert.ok(Array.isArray(diagnostic.diagnostics.recentEvents)); assert.equal(diagnostic.diagnostics.maintenanceSchedules.length,1);
+    result=await request(`/api/v1/autoxing/maintenance-schedules/${maintenanceScheduleId}`,{ method:'PATCH',body:JSON.stringify({ complete:true,completionNote:'Inspection completed during automated test.' }) }); assert.equal(result.status,200); assert.ok(Date.parse(result.body.data.nextDueAt) > Date.now()); assert.ok(result.body.data.lastCompletedAt);
+    result=await request(`/api/v1/robots/${robotId}/passport`); assert.ok(result.body.data.entries.some((entry) => entry.type === 'maintenance_completion'));
+    result=await request(`/api/v1/autoxing/escalation-rules/${escalationRuleId}`,{ method:'PATCH',body:JSON.stringify({ active:false }) }); assert.equal(result.status,200); assert.equal(result.body.data.active,false);
 
     result = await requestAs(robotAxSessionToken, `/api/v1/robots/${robotId}/events`, { method: 'POST', body: JSON.stringify({ title: 'Should be blocked', description: 'Robot accounts cannot create events.', eventType: 'note', sourceSystem: 'manual-test', severity: 'info', occurredAt: '2026-07-27T14:00:00.000Z' }) });
     assert.equal(result.status, 403);
@@ -260,6 +333,11 @@ async function loginWithPassword(email, password) {
     result = await request('/api/v1/incidents', { method: 'POST', body: JSON.stringify({ robotId, title: 'Robot stopped during operation', description: 'Operator secured the affected area.', severity: 'error', assignedTo: 'Robot Care Berlin' }) });
     assert.equal(result.status, 201);
     assert.equal(result.body.data.serviceCase.status, 'open');
+    await new Promise((resolve) => setImmediate(resolve));
+    const incidentEmail=state.emailDeliveries.find((delivery) => delivery.type === 'technical_event' && delivery.title === 'Robot stopped during operation');
+    assert.ok(incidentEmail);
+    assert.equal(incidentEmail.status,'sent');
+    assert.equal(incidentEmail.robotSerialNumber,'AX-DEMO-001');
     const incidentServiceCaseId = result.body.data.serviceCase.id;
 
     result = await request(`/api/v1/service-cases/${incidentServiceCaseId}`, { method: 'PATCH', body: JSON.stringify({ status: 'closed', cause: 'Obstruction sensor contamination', action: 'Sensor cleaned and verified', parts: [] }) });
@@ -322,6 +400,10 @@ async function loginWithPassword(email, password) {
     const persisted = fs.readFileSync(testDataFile, 'utf8');
     assert.match(persisted, /MANUAL-ROBOT-001/);
     assert.match(persisted, /scrypt\$/);
+    assert.match(persisted, /Altegro email notification test/);
+    assert.match(persisted, /Robot stopped during operation/);
+    assert.match(persisted, /Quarterly AutoXing inspection/);
+    assert.match(persisted, /Offline robot escalation/);
     assert.doesNotMatch(persisted, /Manual-robot-001/);
     assert.doesNotMatch(persisted, /efrobotics/);
     const restoredSerials = execFileSync(process.execPath, ['-e', "const { state } = require('./server'); process.stdout.write(JSON.stringify([...state.robots.values()].map((robot) => robot.serialNumber)));"], { cwd: __dirname, env: { ...process.env, ALTEGRO_DATA_FILE: testDataFile, ALTEGRO_PERSISTENCE: 'true' }, encoding: 'utf8' });

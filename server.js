@@ -3,6 +3,9 @@
 const http = require('node:http');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const net = require('node:net');
+const tls = require('node:tls');
+const { once } = require('node:events');
 const pathUtil = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
@@ -23,6 +26,7 @@ loadLocalEnv();
 const PORT = Number(process.env.PORT || 3000);
 const BIND_HOST = process.env.BIND_HOST || '127.0.0.1';
 const startedAt = new Date().toISOString();
+const runtimeMetrics = { requestsTotal:0, activeRequests:0, errorsTotal:0, responseTimeMsTotal:0, responseTimeMsMax:0, byStatus:{} };
 const MAX_EVENT_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_ACCOUNT_PASSWORD = process.env.DEFAULT_ACCOUNT_PASSWORD || 'efrobotics';
 const MAX_JSON_BODY_BYTES = 5 * 1024 * 1024;
@@ -62,6 +66,108 @@ function secretConfigurationMode() {
   if (['APPID', 'APPSECRET', 'APPCODE'].every((name) => process.env[name])) return 'environment-variables';
   return autoXingLiveEnabled() ? 'wrapper-managed' : 'not-required-in-mock-mode';
 }
+const enabled = (value) => ['1', 'true', 'yes'].includes(String(value || '').toLowerCase());
+function managedSecretStatus() {
+  const providers = [
+    { name:'autoxing', enabled:autoXingLiveEnabled(), names:['APPID','APPSECRET','APPCODE'] },
+    { name:'cenobots', enabled:cenoBotsLiveEnabled(), names:['CENOBOTS_ACCESS_KEY','CENOBOTS_SECRET_KEY'] },
+    { name:'email', enabled:enabled(process.env.EMAIL_ALERTS_ENABLED) && Boolean(process.env.EMAIL_SMTP_USERNAME), names:['EMAIL_SMTP_PASSWORD'] }
+  ];
+  const requireManaged = enabled(process.env.ALTEGRO_REQUIRE_MANAGED_SECRETS) || process.env.NODE_ENV === 'production';
+  const details = providers.map((provider) => {
+    const direct = provider.names.filter((name) => Boolean(process.env[name]));
+    const files = provider.names.filter((name) => Boolean(process.env[`${name}_FILE`]));
+    const missing = provider.enabled ? provider.names.filter((name) => !process.env[name] && !process.env[`${name}_FILE`]) : [];
+    return { provider:provider.name, liveEnabled:provider.enabled, configured:!provider.enabled || missing.length === 0, managed:!provider.enabled || (files.length === provider.names.length && direct.length === 0), missingCount:missing.length, directValueCount:direct.length, secretFileCount:files.length };
+  });
+  const valid = details.every((item) => item.configured && (!requireManaged || item.managed));
+  return { valid, requireManaged, providers:details };
+}
+function assertProductionSecretConfiguration() {
+  const report = managedSecretStatus();
+  if (!report.valid) throw new Error('Production secret policy failed. Live providers must use complete managed secret-file configuration.');
+  const email=emailAlertConfiguration();
+  if (email.enabled && !email.configured) throw new Error(`Email alert configuration failed: ${email.configurationError}`);
+}
+
+function emailAddress(value) {
+  const address=String(value || '').trim();
+  return /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(address) ? address : null;
+}
+
+function emailAlertConfiguration() {
+  const isEnabled=enabled(process.env.EMAIL_ALERTS_ENABLED); const transport=String(process.env.EMAIL_ALERT_TRANSPORT || 'smtp').toLowerCase();
+  const recipients=String(process.env.EMAIL_ALERT_RECIPIENTS || '').split(',').map(emailAddress).filter(Boolean); const from=emailAddress(process.env.EMAIL_ALERT_FROM);
+  const host=String(process.env.EMAIL_SMTP_HOST || '').trim(); const port=Math.max(1,Math.min(65535,Number(process.env.EMAIL_SMTP_PORT || 465))); const secure=!['0','false','no'].includes(String(process.env.EMAIL_SMTP_SECURE ?? 'true').toLowerCase());
+  const username=String(process.env.EMAIL_SMTP_USERNAME || '').trim(); const passwordConfigured=Boolean(process.env.EMAIL_SMTP_PASSWORD || process.env.EMAIL_SMTP_PASSWORD_FILE); const minimumSeverity=['info','warning','error','critical'].includes(process.env.EMAIL_ALERT_MIN_SEVERITY) ? process.env.EMAIL_ALERT_MIN_SEVERITY : 'error';
+  let configurationError=null;
+  if (isEnabled && !['smtp','capture'].includes(transport)) configurationError='EMAIL_ALERT_TRANSPORT must be smtp or capture';
+  else if (isEnabled && transport === 'capture' && process.env.NODE_ENV === 'production') configurationError='capture transport is not allowed in production';
+  else if (isEnabled && !from) configurationError='EMAIL_ALERT_FROM must be a valid email address';
+  else if (isEnabled && !recipients.length) configurationError='EMAIL_ALERT_RECIPIENTS must contain at least one valid address';
+  else if (isEnabled && transport === 'smtp' && !host) configurationError='EMAIL_SMTP_HOST is required';
+  else if (isEnabled && username && !passwordConfigured) configurationError='EMAIL_SMTP_PASSWORD or EMAIL_SMTP_PASSWORD_FILE is required with EMAIL_SMTP_USERNAME';
+  else if (isEnabled && transport === 'smtp' && username && !secure && !enabled(process.env.EMAIL_SMTP_ALLOW_INSECURE_AUTH)) configurationError='SMTP authentication requires TLS unless EMAIL_SMTP_ALLOW_INSECURE_AUTH is explicitly enabled';
+  return { enabled:isEnabled,configured:!isEnabled || !configurationError,configurationError,transport,hostConfigured:Boolean(host),port,secure,authenticationConfigured:Boolean(username && passwordConfigured),fromConfigured:Boolean(from),recipientCount:recipients.length,minimumSeverity,cooldownMinutes:Math.max(1,Number(process.env.EMAIL_ALERT_COOLDOWN_MINUTES || 60)),recipients,from,username };
+}
+
+function smtpMessage(delivery,config) {
+  const subject=`[Altegro ${delivery.severity.toUpperCase()}] ${delivery.title}`.replace(/[\r\n]+/g,' ').slice(0,180); const encodedSubject=`=?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`;
+  const text=[delivery.title,'',delivery.message,delivery.robotSerialNumber ? `Robot: ${delivery.robotSerialNumber}` : null,`Severity: ${delivery.severity}`,`Occurred: ${delivery.occurredAt}`,process.env.ALTEGRO_PUBLIC_URL ? `Open Altegro: ${String(process.env.ALTEGRO_PUBLIC_URL).replace(/\/$/,'')}` : null,'',`Notification ID: ${delivery.notificationKey}`].filter((line) => line !== null).join('\r\n');
+  return `Date: ${new Date().toUTCString()}\r\nMessage-ID: <${delivery.id}@altegro.local>\r\nFrom: ${config.from}\r\nTo: ${delivery.recipients.join(', ')}\r\nSubject: ${encodedSubject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${text}`;
+}
+
+async function sendSmtpEmail(delivery,config) {
+  const socket=config.secure ? tls.connect({ host:config.host,port:config.port,servername:config.host,rejectUnauthorized:!['0','false','no'].includes(String(process.env.EMAIL_SMTP_TLS_REJECT_UNAUTHORIZED ?? 'true').toLowerCase()) }) : net.createConnection({ host:config.host,port:config.port });
+  socket.setEncoding('utf8'); socket.setTimeout(Math.max(5000,Number(process.env.EMAIL_SMTP_TIMEOUT_MS || 15000)),() => socket.destroy(new Error('SMTP connection timed out')));
+  let buffer=''; let responseLines=[]; const completed=[]; let waiter=null; let socketError=null;
+  const settle=(response) => { if (waiter) { const current=waiter; waiter=null; current.resolve(response); } else completed.push(response); };
+  socket.on('data',(chunk) => { buffer += chunk; let index; while ((index=buffer.indexOf('\n')) >= 0) { const line=buffer.slice(0,index+1).trimEnd(); buffer=buffer.slice(index+1); responseLines.push(line); if (/^\d{3} /.test(line)) { settle({ code:Number(line.slice(0,3)),text:responseLines.join('\n') }); responseLines=[]; } } });
+  socket.on('error',(error) => { socketError=error; if (waiter) { const current=waiter; waiter=null; current.reject(error); } });
+  await once(socket,config.secure ? 'secureConnect' : 'connect');
+  const response=() => { if (completed.length) return Promise.resolve(completed.shift()); if (socketError) return Promise.reject(socketError); return new Promise((resolve,reject) => { waiter={ resolve,reject }; }); };
+  const expect=async (codes,command=null) => { if (command !== null) socket.write(`${command}\r\n`); const reply=await response(); if (!codes.includes(reply.code)) throw new Error(`SMTP rejected the request with status ${reply.code}`); return reply; };
+  try {
+    await expect([220]); await expect([250],`EHLO ${String(process.env.EMAIL_SMTP_CLIENT_NAME || 'altegro.local').replace(/[^A-Za-z0-9.-]/g,'')}`);
+    if (config.username) { const password=secretEnvValue('EMAIL_SMTP_PASSWORD'); const auth=Buffer.from(`\0${config.username}\0${password}`).toString('base64'); await expect([235],`AUTH PLAIN ${auth}`); }
+    await expect([250],`MAIL FROM:<${config.from}>`); for (const recipient of delivery.recipients) await expect([250,251],`RCPT TO:<${recipient}>`); await expect([354],'DATA');
+    const message=smtpMessage(delivery,config).replace(/(^|\r\n)\./g,'$1..'); socket.write(`${message}\r\n.\r\n`); await expect([250]); socket.write('QUIT\r\n');
+  } finally { socket.end(); }
+}
+
+function createEmailDelivery(notification) {
+  const config=emailAlertConfiguration();
+  const delivery={ id:ids(),notificationKey:String(notification.notificationKey),type:notification.type || 'operational_alert',severity:notification.severity || 'error',title:String(notification.title || 'Altegro alert').slice(0,180),message:String(notification.message || '').slice(0,4000),robotId:notification.robotId || null,robotSerialNumber:notification.robotSerialNumber || null,recipients:[...config.recipients],status:'pending',attempts:0,lastError:null,createdAt:timestamp(),occurredAt:notification.occurredAt || timestamp(),sentAt:null,nextAttemptAt:null };
+  state.emailDeliveries.push(delivery); state.emailDeliveries=state.emailDeliveries.slice(-200); schedulePersist(); return delivery;
+}
+
+function queueEmailAlert(notification,{ force=false }={}) {
+  const config=emailAlertConfiguration(); if (!config.enabled || !config.configured) return null;
+  const severityRank={ info:0,warning:1,error:2,critical:3 }; if (!force && (severityRank[notification.severity] ?? 0) < severityRank[config.minimumSeverity]) return null;
+  const cutoff=Date.now()-config.cooldownMinutes*60000; const duplicate=state.emailDeliveries.find((item) => item.notificationKey === notification.notificationKey && Date.parse(item.createdAt) >= cutoff && ['pending','sending','sent'].includes(item.status)); if (duplicate) return duplicate;
+  const delivery=createEmailDelivery(notification); setImmediate(() => processEmailQueue()); return delivery;
+}
+
+let emailQueueRunning=false;
+async function deliverEmailNotification(delivery) {
+  const config=emailAlertConfiguration(); if (!config.enabled || !config.configured) throw new Error(config.configurationError || 'Email alerts are disabled');
+  delivery.status='sending'; delivery.attempts += 1; delivery.lastError=null;
+  try { if (config.transport === 'smtp') await sendSmtpEmail(delivery,config); delivery.status='sent'; delivery.sentAt=timestamp(); delivery.nextAttemptAt=null; }
+  catch(error) { delivery.status='failed'; delivery.lastError=String(error.message || error).slice(0,500); delivery.nextAttemptAt=new Date(Date.now()+Math.min(15,delivery.attempts*5)*60000).toISOString(); throw error; }
+  finally { schedulePersist(); }
+  return delivery;
+}
+
+async function processEmailQueue() {
+  if (emailQueueRunning || !emailAlertConfiguration().enabled) return; emailQueueRunning=true;
+  try { for (const delivery of state.emailDeliveries.filter((item) => ['pending','failed'].includes(item.status) && item.attempts < 3 && (!item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= Date.now())).slice(0,20)) { try { await deliverEmailNotification(delivery); } catch {} } }
+  finally { emailQueueRunning=false; }
+}
+
+function emailDeliverySummary() {
+  const config=emailAlertConfiguration(); const deliveries=state.emailDeliveries.slice().reverse().slice(0,30).map((item) => ({ id:item.id,type:item.type,severity:item.severity,title:item.title,robotId:item.robotId,robotSerialNumber:item.robotSerialNumber,recipientCount:item.recipients.length,status:item.status,attempts:item.attempts,lastError:item.lastError,createdAt:item.createdAt,sentAt:item.sentAt }));
+  return { configuration:{ enabled:config.enabled,configured:config.configured,configurationError:config.configurationError,transport:config.transport,hostConfigured:config.hostConfigured,port:config.port,secure:config.secure,authenticationConfigured:config.authenticationConfigured,fromConfigured:config.fromConfigured,recipientCount:config.recipientCount,minimumSeverity:config.minimumSeverity,cooldownMinutes:config.cooldownMinutes },counts:{ total:state.emailDeliveries.length,pending:state.emailDeliveries.filter((item) => item.status === 'pending').length,sent:state.emailDeliveries.filter((item) => item.status === 'sent').length,failed:state.emailDeliveries.filter((item) => item.status === 'failed').length },deliveries };
+}
 const authenticatedSessions = new Map();
 let persistenceTimer = null;
 
@@ -76,6 +182,11 @@ const state = {
   technicians: new Map(),
   modelRequirements: new Map(),
   robotAssignments: new Map(),
+  alertWorkflows: new Map(),
+  maintenanceSchedules: new Map(),
+  alertEscalationRules: new Map(),
+  alertEscalations: new Map(),
+  emailDeliveries: [],
   documents: [],
   certificates: [],
   deployments: [],
@@ -143,8 +254,8 @@ function persistedSnapshot() {
     sessions: mapEntries(authenticatedSessions).filter(([, session]) => session.expiresAt > Date.now()),
     state: {
       tenants: mapEntries(state.tenants), organizations: mapEntries(state.organizations), sites: mapEntries(state.sites), models: mapEntries(state.models), robots: mapEntries(state.robots),
-      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), documents: state.documents, certificates: state.certificates,
-      deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox,
+      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), maintenanceSchedules:mapEntries(state.maintenanceSchedules), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
+      deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox, emailDeliveries:state.emailDeliveries,
       autoxing: { ...state.autoxing, pois: mapEntries(state.autoxing.pois), areas: mapEntries(state.autoxing.areas), maps: mapEntries(state.autoxing.maps), tasks: mapEntries(state.autoxing.tasks) },
       adapterRuntime: mapEntries(state.adapters).map(([provider, adapter]) => [provider, { lastSyncAt: adapter.lastSyncAt || null, lastSyncStatus: adapter.lastSyncStatus || 'never', lastError: adapter.lastError || null, lastSyncDurationMs:adapter.lastSyncDurationMs || null, lastSyncCount:adapter.lastSyncCount ?? null, lastSyncWarnings:adapter.lastSyncWarnings || 0, syncHistory:clone(adapter.syncHistory || []) }])
     }
@@ -183,8 +294,8 @@ function loadPersistedState() {
     for (const [token, user] of Object.entries(saved.users || {})) demoUsers[token] = user;
     initializeCredentialHashes();
     replaceMap(authenticatedSessions, (saved.sessions || []).filter(([, session]) => session.expiresAt > Date.now()));
-    for (const name of ['tenants', 'organizations', 'sites', 'models', 'robots', 'passportEntries', 'serviceCases', 'technicians', 'modelRequirements', 'robotAssignments']) replaceMap(state[name], saved.state[name]);
-    for (const name of ['documents', 'certificates', 'deployments', 'compatibilityRecords', 'events', 'audit', 'outbox']) if (Array.isArray(saved.state[name])) state[name] = saved.state[name];
+    for (const name of ['tenants', 'organizations', 'sites', 'models', 'robots', 'passportEntries', 'serviceCases', 'technicians', 'modelRequirements', 'robotAssignments', 'alertWorkflows', 'maintenanceSchedules', 'alertEscalationRules', 'alertEscalations']) replaceMap(state[name], saved.state[name]);
+    for (const name of ['documents', 'certificates', 'deployments', 'compatibilityRecords', 'events', 'audit', 'outbox', 'emailDeliveries']) if (Array.isArray(saved.state[name])) state[name] = saved.state[name];
     const autoXing = saved.state.autoxing || {};
     state.autoxing.businesses = autoXing.businesses || []; state.autoxing.buildings = autoXing.buildings || []; state.autoxing.lastSyncAt = autoXing.lastSyncAt || null; state.autoxing.resourceErrors = autoXing.resourceErrors || [];
     for (const name of ['pois', 'areas', 'maps', 'tasks']) replaceMap(state.autoxing[name], autoXing[name]);
@@ -322,6 +433,7 @@ function upsertEvent(robotId, event, actor = { id: 'system', name: 'System' }) {
   const fullEvent = { eventId: ids(), eventType: event.eventType, schemaVersion: '1.0.0', tenantId: state.robots.get(robotId).tenantId, robotId, sourceSystem: event.sourceSystem, sourceEventId: event.sourceEventId, occurredAt: event.occurredAt || timestamp(), ingestedAt: timestamp(), severity: event.severity || 'info', title: event.title || event.eventType, description: event.description || '', attachment: event.attachment || null, payload: event.payload || {}, correlationId: ids() };
   state.events.push(fullEvent);
   appendPassportEntry(robotId, { type: 'technical_event', source: event.sourceSystem, data: fullEvent }, actor);
+  const robot=state.robots.get(robotId); queueEmailAlert({ notificationKey:`event:${fullEvent.eventId}`,type:'technical_event',severity:fullEvent.severity,title:fullEvent.title,message:fullEvent.description || fullEvent.eventType,robotId,robotSerialNumber:robot?.serialNumber,occurredAt:fullEvent.occurredAt });
   return fullEvent;
 }
 
@@ -330,6 +442,7 @@ function recordAdapterSync(adapter, { status, startedAt, count = 0, warnings = 0
   const completedAt = timestamp(); const durationMs = Math.max(0, Date.now() - startedAt);
   adapter.lastSyncAt = completedAt; adapter.lastSyncStatus = status; adapter.lastError = error; adapter.lastSyncDurationMs = durationMs; adapter.lastSyncCount = count; adapter.lastSyncWarnings = warnings;
   adapter.syncHistory = [...(adapter.syncHistory || []), { id:ids(), status, startedAt:new Date(startedAt).toISOString(), completedAt, durationMs, count, warnings, trigger }].slice(-20);
+  if (status === 'error') { const digest=crypto.createHash('sha256').update(String(error || 'unknown')).digest('hex').slice(0,16); queueEmailAlert({ notificationKey:`adapter:${adapter.provider}:${digest}`,type:'integration_error',severity:'error',title:`${adapter.provider} synchronization failed`,message:'The provider synchronization failed. Retry from Altegro and inspect the protected server log if the error remains.',occurredAt:completedAt }); }
 }
 
 function syncAdapter(provider, actorId = 'system') {
@@ -485,7 +598,7 @@ function autoXingRecommendedAction(text) {
 }
 
 function autoXingRobotAlerts(robot) {
-  const alerts = []; const add = (key, severity, title, message) => alerts.push({ id:`${robot.id}:${key}`, robotId:robot.id, serialNumber:robot.serialNumber, severity, title, message, recommendedAction:autoXingRecommendedAction(`${title} ${message}`), occurredAt:robot.updatedAt });
+  const alerts = []; const add = (key, severity, title, message) => alerts.push({ id:`${robot.id}:${key}`, type:key,tenantId:robot.tenantId,robotId:robot.id,serialNumber:robot.serialNumber,severity,title,message,recommendedAction:autoXingRecommendedAction(`${title} ${message}`),occurredAt:robot.updatedAt });
   if (robot.online === false) add('offline','warning','Robot offline','AutoXing reports that the robot is offline.');
   if (robot.emergencyStop === true) add('emergency-stop','critical','Emergency stop active','The emergency-stop signal is active.');
   if (robot.obstruction === true) add('obstruction','warning','Obstruction detected','The robot reports an obstruction in its operating path.');
@@ -493,6 +606,43 @@ function autoXingRobotAlerts(robot) {
   if (robot.lastProviderError) add('provider-state','error','Live status unavailable',String(robot.lastProviderError).slice(0,500));
   if (meaningful(robot.errors)) add('provider-errors','error','Provider errors reported',typeof robot.errors === 'string' ? robot.errors.slice(0,500) : JSON.stringify(robot.errors).slice(0,500));
   return alerts;
+}
+
+function maintenanceScheduleView(schedule) {
+  const robot=state.robots.get(schedule.robotId); const technician=schedule.assignedTechnicianId ? state.technicians.get(schedule.assignedTechnicianId) : null; const dueTime=Date.parse(schedule.nextDueAt); const daysUntil=Math.ceil((dueTime-Date.now())/86400000); const dueState=schedule.status !== 'active' ? schedule.status : daysUntil < 0 ? 'overdue' : daysUntil <= 7 ? 'due_soon' : 'scheduled';
+  return { ...clone(schedule),robotSerialNumber:robot?.serialNumber || 'Unknown robot',technicianName:technician?.name || null,dueState,daysUntilDue:Number.isFinite(daysUntil) ? daysUntil : null };
+}
+
+function autoXingMaintenanceAlerts(robots) {
+  const robotIds=new Set(robots.map((robot) => robot.id)); const alerts=[];
+  for (const schedule of state.maintenanceSchedules.values()) {
+    if (!robotIds.has(schedule.robotId) || schedule.status !== 'active') continue; const view=maintenanceScheduleView(schedule); if (!['overdue','due_soon'].includes(view.dueState)) continue; const robot=state.robots.get(schedule.robotId); const severity=view.dueState === 'overdue' ? 'error' : 'warning';
+    alerts.push({ id:`maintenance:${schedule.id}`,type:'maintenance_due',tenantId:schedule.tenantId,robotId:schedule.robotId,serialNumber:robot.serialNumber,severity,title:view.dueState === 'overdue' ? `Maintenance overdue: ${schedule.title}` : `Maintenance due soon: ${schedule.title}`,message:`Scheduled for ${schedule.nextDueAt.slice(0,10)}${view.technicianName ? ` with ${view.technicianName}` : ''}.`,recommendedAction:'Confirm the service window, assign a qualified technician, and record completion in the Robot Passport.',occurredAt:schedule.nextDueAt });
+  }
+  return alerts;
+}
+
+function autoXingAlertsForRobots(robots) {
+  const alerts=[...robots.flatMap(autoXingRobotAlerts),...autoXingMaintenanceAlerts(robots)];
+  for (const [index,warning] of (state.autoxing.resourceErrors || []).entries()) alerts.push({ id:`resource:${index}`,type:'integration_warning',tenantId:robots[0]?.tenantId || 'tenant-demo',robotId:null,serialNumber:warning.externalRobotId || 'Fleet resource',severity:'warning',title:`${warning.resource || 'AutoXing resource'} synchronization warning`,message:String(warning.message || warning.error || 'Provider resource could not be read').slice(0,500),recommendedAction:'Retry synchronization. If the warning remains, check the provider endpoint permission and protected server log.',occurredAt:state.autoxing.lastSyncAt });
+  const severityRank={ critical:0,error:1,warning:2,info:3 }; alerts.sort((a,b) => (severityRank[a.severity] ?? 4)-(severityRank[b.severity] ?? 4)); return alerts;
+}
+
+function alertWithWorkflow(alert) {
+  const workflow = state.alertWorkflows.get(alert.id) || null;
+  return { ...alert, workflow:workflow ? clone(workflow) : { status:'open', technicianId:null, technicianName:null, note:'', serviceCaseId:null, updatedAt:null, updatedBy:null } };
+}
+
+function findVisibleAutoXingAlert(actor, alertId) {
+  return autoXingOperations(actor).alerts.find((alert) => alert.id === alertId) || null;
+}
+
+function autoXingTaskView(actor, task) {
+  const externalId = String(taskRobotExternalId(task) || '');
+  const robot = [...state.robots.values()].find((item) => visibleToActor(actor,item) && item.externalIdentities?.some((identity) => identity.system === 'autoxing' && String(identity.externalId) === externalId));
+  if (!robot) return null;
+  const normalized = autoXingTaskSummary([task]).tasks[0];
+  return { taskId:String(task.taskId || normalized.taskId), robot:{ id:robot.id, serialNumber:robot.serialNumber, externalId }, normalized, provider:clone(task), syncedAt:state.autoxing.lastSyncAt };
 }
 
 function autoXingOperations(actor) {
@@ -508,11 +658,39 @@ function autoXingOperations(actor) {
     const batterySamples = dayEvents.map((event) => Number(event.payload?.battery)).filter(Number.isFinite);
     trends.push({ date:day.toISOString().slice(0,10), onlineEvents:dayEvents.filter((event) => event.eventType === 'online').length, offlineEvents:dayEvents.filter((event) => event.eventType === 'offline').length, errorEvents:dayEvents.filter((event) => ['error','critical'].includes(event.severity)).length, taskEvents:dayTasks.length, completedTasks:dayTasks.filter((task) => task.completed).length, averageBattery:batterySamples.length ? Math.round(batterySamples.reduce((sum, value) => sum + value, 0) / batterySamples.length) : null });
   }
-  const severityRank = { critical:0, error:1, warning:2, info:3 }; const alerts = robots.flatMap(autoXingRobotAlerts);
-  for (const [index, warning] of (state.autoxing.resourceErrors || []).entries()) alerts.push({ id:`resource:${index}`, robotId:null, serialNumber:warning.externalRobotId || 'Fleet resource', severity:'warning', title:`${warning.resource || 'AutoXing resource'} synchronization warning`, message:String(warning.message || warning.error || 'Provider resource could not be read').slice(0,500), recommendedAction:'Retry synchronization. If the warning remains, check the provider endpoint permission and protected server log.', occurredAt:state.autoxing.lastSyncAt });
-  alerts.sort((a,b) => (severityRank[a.severity] ?? 4) - (severityRank[b.severity] ?? 4));
+  const alerts=autoXingAlertsForRobots(robots); const maintenance=[...state.maintenanceSchedules.values()].filter((schedule) => robots.some((robot) => robot.id === schedule.robotId)).map(maintenanceScheduleView);
   const adapter = state.adapters.get('autoxing') || {};
-  return { fleet:robots.map((robot) => ({ id:robot.id, serialNumber:robot.serialNumber, externalId:robot.externalIdentities.find((identity) => identity.system === 'autoxing').externalId, online:robot.online, battery:robot.battery, charging:robot.charging, position:robot.position, speed:robot.speed, emergencyStop:robot.emergencyStop, obstruction:robot.obstruction, currentTask:robot.providerTask, providerVersion:robot.providerVersion, businessName:robot.providerBusinessName, siteId:robot.siteId, mappingStatus:robot.mappingStatus, updatedAt:robot.updatedAt, alertCount:autoXingRobotAlerts(robot).length })), taskAnalytics:{ ...taskSummary, tasks:undefined }, alerts, trends, diagnostics:{ liveEnabled:autoXingLiveEnabled(), status:adapter.status, lastSyncAt:adapter.lastSyncAt, lastSyncStatus:adapter.lastSyncStatus, lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null, lastSyncDurationMs:adapter.lastSyncDurationMs, lastSyncCount:adapter.lastSyncCount, lastSyncWarnings:adapter.lastSyncWarnings || 0, pollingIntervalMs:autoXingPollIntervalMs(), nextPollAt:adapter.lastSyncAt && autoXingPollIntervalMs() ? new Date(Date.parse(adapter.lastSyncAt) + autoXingPollIntervalMs()).toISOString() : null, secretMode:secretConfigurationMode(), syncHistory:clone(adapter.syncHistory || []) }, generatedAt:timestamp() };
+  return { fleet:robots.map((robot) => ({ id:robot.id,serialNumber:robot.serialNumber,externalId:robot.externalIdentities.find((identity) => identity.system === 'autoxing').externalId,online:robot.online,battery:robot.battery,charging:robot.charging,position:robot.position,speed:robot.speed,emergencyStop:robot.emergencyStop,obstruction:robot.obstruction,currentTask:robot.providerTask,providerVersion:robot.providerVersion,businessName:robot.providerBusinessName,siteId:robot.siteId,mappingStatus:robot.mappingStatus,updatedAt:robot.updatedAt,alertCount:alerts.filter((alert) => alert.robotId === robot.id).length })),taskAnalytics:{ ...taskSummary,tasks:undefined },maintenance:{ schedules:maintenance,total:maintenance.length,overdue:maintenance.filter((item) => item.dueState === 'overdue').length,dueSoon:maintenance.filter((item) => item.dueState === 'due_soon').length },alerts:alerts.map(alertWithWorkflow),alertWorkflow:{ canManage:canWrite(actor),technicians:techniciansForActor(actor).filter((technician) => technician.status === 'active').map((technician) => ({ id:technician.id,name:technician.name })) },trends,diagnostics:{ liveEnabled:autoXingLiveEnabled(),status:adapter.status,lastSyncAt:adapter.lastSyncAt,lastSyncStatus:adapter.lastSyncStatus,lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncCount:adapter.lastSyncCount,lastSyncWarnings:adapter.lastSyncWarnings || 0,pollingIntervalMs:autoXingPollIntervalMs(),nextPollAt:adapter.lastSyncAt && autoXingPollIntervalMs() ? new Date(Date.parse(adapter.lastSyncAt)+autoXingPollIntervalMs()).toISOString() : null,secretMode:secretConfigurationMode(),secretPolicy:managedSecretStatus(),syncHistory:clone(adapter.syncHistory || []) },generatedAt:timestamp() };
+}
+
+function autoXingDiagnosticReport(actor,robot) {
+  const externalId=robot.externalIdentities.find((identity) => identity.system === 'autoxing')?.externalId; const tasks=[...state.autoxing.tasks.values()].filter((task) => String(taskRobotExternalId(task)) === String(externalId)); const events=state.events.filter((event) => event.robotId === robot.id).sort((a,b) => Date.parse(b.occurredAt)-Date.parse(a.occurredAt)).slice(0,50); const schedules=[...state.maintenanceSchedules.values()].filter((schedule) => schedule.robotId === robot.id).map(maintenanceScheduleView); const assignments=[...state.robotAssignments.values()].filter((assignment) => assignment.robotId === robot.id && assignment.status === 'active').map((assignment) => ({ ...clone(assignment),technician:state.technicians.get(assignment.technicianId) ? { id:assignment.technicianId,name:state.technicians.get(assignment.technicianId).name } : null })); const adapter=state.adapters.get('autoxing') || {};
+  return { schemaVersion:'1.0.0',reportType:'autoxing_remote_diagnostic',generatedAt:timestamp(),generatedBy:{ id:actor.id,name:actor.name,role:actor.role },robot:{ id:robot.id,serialNumber:robot.serialNumber,modelId:robot.modelId,siteId:robot.siteId,status:robot.status,externalId,providerVersion:robot.providerVersion,mappingStatus:robot.mappingStatus },liveTelemetry:{ online:robot.online ?? null,battery:robot.battery ?? null,charging:robot.charging ?? null,position:clone(robot.position || null),speed:robot.speed ?? null,emergencyStop:robot.emergencyStop ?? null,obstruction:robot.obstruction ?? null,currentTask:clone(robot.providerTask || null),statusDetails:clone(robot.statusDetails || {}),providerErrors:clone(robot.errors || []),lastProviderError:robot.lastProviderError || null,updatedAt:robot.updatedAt },diagnostics:{ alerts:autoXingAlertsForRobots([robot]).map(alertWithWorkflow),taskSummary:autoXingTaskSummary(tasks),recentEvents:clone(events),maintenanceSchedules:schedules,qualifiedAssignments:assignments,adapter:{ status:adapter.status,lastSyncAt:adapter.lastSyncAt,lastSyncStatus:adapter.lastSyncStatus,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncWarnings:adapter.lastSyncWarnings || 0 },resources:autoXingResourcesForRobot(robot) },safetyNotice:'Read-only diagnostic report. Verify physical robot safety conditions before maintenance or recovery work.' };
+}
+
+function escalationRuleView(rule) {
+  const technician=rule.technicianId ? state.technicians.get(rule.technicianId) : null; const executions=[...state.alertEscalations.values()].filter((item) => item.ruleId === rule.id);
+  return { ...clone(rule),technicianName:technician?.name || null,executionCount:executions.length,lastEscalatedAt:executions.sort((a,b) => Date.parse(b.escalatedAt)-Date.parse(a.escalatedAt))[0]?.escalatedAt || null };
+}
+
+function ensureEscalationServiceCase(alert,rule,actor) {
+  if (!alert.robotId) return null; const robot=state.robots.get(alert.robotId); if (!robot) return null; const digest=crypto.createHash('sha256').update(`${rule.id}:${alert.id}`).digest('hex').slice(0,12).toUpperCase(); const externalId=`AX-ESC-${digest}`; const key=`altegro:${externalId}`; let serviceCase=state.serviceCases.get(key); if (serviceCase) return serviceCase;
+  let technician=null; if (rule.technicianId) { const candidate=state.technicians.get(rule.technicianId); if (candidate?.status === 'active' && technicianEligibility(candidate,robot).eligible) technician=candidate; }
+  serviceCase={ id:ids(),robotId:robot.id,tenantId:robot.tenantId,provider:'altegro',externalId,title:`Escalated: ${alert.title}`,description:`${alert.message}\nEscalation rule: ${rule.name}\nRecommended action: ${alert.recommendedAction}`,severity:alert.severity,status:'open',cause:null,action:`Automatically escalated by ${rule.name}.`,parts:[],assignedTo:technician?.name || null,createdAt:timestamp(),updatedAt:timestamp(),closedAt:null };
+  state.serviceCases.set(key,serviceCase); appendPassportEntry(robot.id,{ type:'incident_opened',source:'autoxing_escalation',data:{ serviceCaseId:serviceCase.id,externalId,alertId:alert.id,ruleId:rule.id,title:alert.title,severity:alert.severity } },actor); appendOutbox('service_case.escalated','service_case',serviceCase.id,{ ...serviceCase,ruleId:rule.id,alertId:alert.id }); return serviceCase;
+}
+
+function evaluateAlertEscalations(tenantId='tenant-demo') {
+  const robots=[...state.robots.values()].filter((robot) => robot.tenantId === tenantId && robot.externalIdentities?.some((identity) => identity.system === 'autoxing')); const alerts=autoXingAlertsForRobots(robots); const rules=[...state.alertEscalationRules.values()].filter((rule) => rule.tenantId === tenantId && rule.active); const rank={ info:0,warning:1,error:2,critical:3 }; const actor={ id:'system-alert-escalation',name:'Alert Escalation Worker',role:'platform_admin',tenantId,organizationId:'org-ef' }; const created=[];
+  for (const rule of rules) for (const alert of alerts) {
+    if (rule.alertType !== 'any' && rule.alertType !== alert.type) continue; if ((rank[alert.severity] ?? 0) < (rank[rule.minimumSeverity] ?? 0)) continue; if (state.alertWorkflows.get(alert.id)?.status === 'resolved') continue; const occurred=Date.parse(alert.occurredAt); if (!Number.isFinite(occurred) || Date.now()-occurred < rule.afterMinutes*60000) continue; const key=`${rule.id}:${alert.id}`; if (state.alertEscalations.has(key)) continue;
+    const actions=[]; let serviceCase=null; let delivery=null;
+    if (['email','email_and_service_case'].includes(rule.action)) { delivery=queueEmailAlert({ notificationKey:`escalation:${key}`,type:'alert_escalation',severity:alert.severity,title:`Escalated: ${alert.title}`,message:`Rule ${rule.name} escalated ${alert.serialNumber}: ${alert.message}`,robotId:alert.robotId,robotSerialNumber:alert.serialNumber,occurredAt:alert.occurredAt },{ force:true }); if (delivery) actions.push('email'); }
+    if (['service_case','email_and_service_case'].includes(rule.action)) { serviceCase=ensureEscalationServiceCase(alert,rule,actor); if (serviceCase) actions.push('service_case'); }
+    if (!actions.length) continue; let assignedTechnician=null; if (rule.technicianId && alert.robotId) { const candidate=state.technicians.get(rule.technicianId); const robot=state.robots.get(alert.robotId); if (candidate && robot && technicianEligibility(candidate,robot).eligible) assignedTechnician=candidate; }
+    const execution={ id:ids(),ruleId:rule.id,alertId:alert.id,tenantId,severity:alert.severity,robotId:alert.robotId,actions,deliveryId:delivery?.id || null,serviceCaseId:serviceCase?.id || null,escalatedAt:timestamp() }; state.alertEscalations.set(key,execution); const existing=state.alertWorkflows.get(alert.id) || {}; state.alertWorkflows.set(alert.id,{ alertId:alert.id,status:serviceCase ? 'in_progress' : existing.status || 'acknowledged',technicianId:assignedTechnician?.id || existing.technicianId || null,technicianName:assignedTechnician?.name || existing.technicianName || null,note:`Escalated automatically by ${rule.name}.`,serviceCaseId:serviceCase?.id || existing.serviceCaseId || null,updatedAt:timestamp(),updatedBy:actor.name }); appendOutbox('autoxing.alert.escalated','autoxing_alert',alert.id,execution); recordAudit(actor,'autoxing.alert.escalate','robot',alert.robotId || 'autoxing-fleet','success',{ ruleId:rule.id,alertId:alert.id,actions }); created.push(execution);
+  }
+  if (created.length) schedulePersist(); return { evaluatedRules:rules.length,evaluatedAlerts:alerts.length,created:clone(created),createdCount:created.length };
 }
 
 async function syncAutoXingLive(actor) {
@@ -567,6 +745,7 @@ async function syncAutoXingLive(actor) {
   }
   storeAutoXingResources(bridge.resources, bridge.resourceErrors);
   recordAdapterSync(adapter, { status:'success', startedAt:syncStartedAt, count:synced.length, warnings:bridge.resourceErrors?.length || 0, trigger:String(actor.id || '').includes('poller') ? 'poll' : 'manual' });
+  evaluateAlertEscalations(actor.tenantId);
   return { provider: 'autoxing', adapterVersion: 'wrapper-backed', source: bridge.wrapper, robots: synced, count: synced.length, resources: { businesses: state.autoxing.businesses.length, buildings: state.autoxing.buildings.length, poiRobotScopes: state.autoxing.pois.size, areaRobotScopes: state.autoxing.areas.size, maps: state.autoxing.maps.size, tasks: state.autoxing.tasks.size, warnings: state.autoxing.resourceErrors.length }, resourceErrors: clone(state.autoxing.resourceErrors), commandCapabilitiesEnabled: false };
 }
 
@@ -879,6 +1058,49 @@ function sendDownload(res, contentType, filename, body) {
   res.end(content);
 }
 
+function systemReadiness() {
+  const checks = [];
+  const secretPolicy = managedSecretStatus();
+  checks.push({ name:'secret-policy', ok:secretPolicy.valid, detail:secretPolicy.valid ? 'valid' : 'managed secret configuration required' });
+  let storageOk = true;
+  if (persistenceEnabled()) {
+    try { fs.accessSync(pathUtil.dirname(DATA_FILE), fs.constants.R_OK | fs.constants.W_OK); }
+    catch { storageOk = false; }
+  }
+  checks.push({ name:'persistence', ok:storageOk, detail:persistenceEnabled() ? (storageOk ? 'read-write' : 'unavailable') : 'disabled' });
+  return { ready:checks.every((check) => check.ok), checks };
+}
+
+function monitoringSnapshot(actor = null) {
+  const uptimeSeconds = Math.max(0,Math.floor((Date.now() - Date.parse(startedAt)) / 1000));
+  const robots=actor ? [...state.robots.values()].filter((robot) => visibleToActor(actor,robot)) : [...state.robots.values()]; const robotIds=new Set(robots.map((robot) => robot.id));
+  const email=emailDeliverySummary();
+  return { service:'altegro-prototype', uptimeSeconds, startedAt, readiness:systemReadiness(), requests:{ total:runtimeMetrics.requestsTotal, active:runtimeMetrics.activeRequests, errors:runtimeMetrics.errorsTotal, averageResponseTimeMs:runtimeMetrics.requestsTotal ? Math.round(runtimeMetrics.responseTimeMsTotal/runtimeMetrics.requestsTotal) : 0, maxResponseTimeMs:runtimeMetrics.responseTimeMsMax, byStatus:clone(runtimeMetrics.byStatus) }, fleet:{ robots:robots.length, events:state.events.filter((event) => robotIds.has(event.robotId)).length, openServiceCases:[...state.serviceCases.values()].filter((item) => robotIds.has(item.robotId) && !['resolved','closed'].includes(item.status)).length }, adapters:actor && ['robot_user','auditor'].includes(actor.role) ? [] : [...state.adapters.values()].map((adapter) => ({ provider:adapter.provider,status:adapter.status,lastSyncStatus:adapter.lastSyncStatus,lastSyncAt:adapter.lastSyncAt,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncWarnings:adapter.lastSyncWarnings || 0 })),email:actor && ['platform_admin','data_admin','support_admin'].includes(actor.role) ? { configuration:email.configuration,counts:email.counts } : null };
+}
+
+function metricsAuthorized(req) {
+  const expected = secretEnvValue('METRICS_TOKEN');
+  if (!expected) return true;
+  const supplied = String(req.headers.authorization || '').replace(/^Bearer\s+/i,'');
+  const left = Buffer.from(supplied); const right = Buffer.from(expected);
+  return left.length === right.length && crypto.timingSafeEqual(left,right);
+}
+
+function sendPrometheusMetrics(res) {
+  const snapshot = monitoringSnapshot();
+  const lines = [
+    '# HELP altegro_up Whether the Altegro process is ready.', '# TYPE altegro_up gauge', `altegro_up ${snapshot.readiness.ready ? 1 : 0}`,
+    '# HELP altegro_uptime_seconds Process uptime.', '# TYPE altegro_uptime_seconds gauge', `altegro_uptime_seconds ${snapshot.uptimeSeconds}`,
+    '# HELP altegro_http_requests_total Completed HTTP requests.', '# TYPE altegro_http_requests_total counter', `altegro_http_requests_total ${runtimeMetrics.requestsTotal}`,
+    '# HELP altegro_http_errors_total HTTP 5xx responses.', '# TYPE altegro_http_errors_total counter', `altegro_http_errors_total ${runtimeMetrics.errorsTotal}`,
+    '# HELP altegro_http_active_requests Active HTTP requests.', '# TYPE altegro_http_active_requests gauge', `altegro_http_active_requests ${runtimeMetrics.activeRequests}`,
+    '# HELP altegro_robots_total Robots stored by Altegro.', '# TYPE altegro_robots_total gauge', `altegro_robots_total ${state.robots.size}`,
+    '# HELP altegro_service_cases_open Open service cases.', '# TYPE altegro_service_cases_open gauge', `altegro_service_cases_open ${snapshot.fleet.openServiceCases}`
+  ];
+  for (const adapter of snapshot.adapters) lines.push(`altegro_adapter_last_sync_success{provider="${adapter.provider}"} ${adapter.lastSyncStatus === 'success' ? 1 : 0}`);
+  const body = `${lines.join('\n')}\n`; res.writeHead(200,securityHeaders('text/plain; version=0.0.4; charset=utf-8',{'content-length':Buffer.byteLength(body)})); res.end(body);
+}
+
 function csvCell(value) {
   const text = value == null ? '' : String(value);
   return `"${text.replaceAll('"', '""')}"`;
@@ -909,6 +1131,8 @@ async function handle(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
   if (req.method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: 'altegro-prototype', startedAt, now: timestamp() });
+  if (req.method === 'GET' && path === '/ready') { const readiness=systemReadiness(); return send(res,readiness.ready ? 200 : 503,{ status:readiness.ready ? 'ready' : 'not_ready',...readiness,now:timestamp() }); }
+  if (req.method === 'GET' && path === '/metrics') { if (!metricsAuthorized(req)) throw httpError(401,'A valid monitoring token is required'); return sendPrometheusMetrics(res); }
   if (req.method === 'GET' && path === '/api/v1/demo/tokens') {
     throw httpError(404, 'Static demo bearer tokens are disabled; sign in with username and password');
   }
@@ -1024,7 +1248,62 @@ async function handle(req, res) {
     return send(res, 200, { warning: 'Passwords are hashed and cannot be retrieved. Reset a password if access is lost.', data: accounts, count: accounts.length });
   }
   if (req.method === 'GET' && path === '/api/v1/adapters') return send(res, 200, { data: ['robot_user', 'auditor'].includes(actor.role) ? [] : [...state.adapters.values()].map(({ sync, lastError, ...adapter }) => ({ ...adapter, lastError: lastError ? 'Synchronization failed. Retry the operation or check the protected server log.' : null })) });
+  if (req.method === 'GET' && path === '/api/v1/monitoring') return send(res,200,{ data:monitoringSnapshot(actor) });
+  if (req.method === 'GET' && path === '/api/v1/email-notifications') {
+    if (!['platform_admin','data_admin','support_admin'].includes(actor.role)) throw httpError(403,'Email notification administration permission required');
+    return send(res,200,{ data:emailDeliverySummary() });
+  }
+  if (req.method === 'POST' && path === '/api/v1/email-notifications/test') {
+    if (!['platform_admin','support_admin'].includes(actor.role)) throw httpError(403,'Email notification test permission required');
+    const config=emailAlertConfiguration(); if (!config.enabled || !config.configured) throw httpError(400,config.configurationError || 'Email alerts are disabled');
+    const delivery=createEmailDelivery({ notificationKey:`test:${ids()}`,type:'test',severity:'info',title:'Altegro email notification test',message:`Test requested by ${actor.name}. Email alerts are configured correctly when this message arrives.`,occurredAt:timestamp() });
+    try { await deliverEmailNotification(delivery); } catch(error) { throw httpError(503,`Test email delivery failed: ${error.message}`); }
+    recordAudit(actor,'email_notification.test','tenant',actor.tenantId,'success',{ deliveryId:delivery.id,recipientCount:delivery.recipients.length }); return send(res,200,{ data:{ id:delivery.id,status:delivery.status,sentAt:delivery.sentAt,recipientCount:delivery.recipients.length } });
+  }
+  const emailRetry=route(req.method,path,/^\/api\/v1\/email-notifications\/([^/]+)\/retry$/);
+  if (emailRetry && req.method === 'POST') {
+    if (!['platform_admin','support_admin'].includes(actor.role)) throw httpError(403,'Email notification retry permission required');
+    const delivery=state.emailDeliveries.find((item) => item.id === emailRetry.id); if (!delivery) throw httpError(404,'Email delivery not found'); delivery.nextAttemptAt=null;
+    try { await deliverEmailNotification(delivery); } catch(error) { throw httpError(503,`Email retry failed: ${error.message}`); }
+    recordAudit(actor,'email_notification.retry','email_delivery',delivery.id); return send(res,200,{ data:{ id:delivery.id,status:delivery.status,sentAt:delivery.sentAt } });
+  }
   if (req.method === 'GET' && path === '/api/v1/autoxing/operations') return send(res, 200, { data:autoXingOperations(actor) });
+  if (req.method === 'GET' && path === '/api/v1/autoxing/maintenance-schedules') {
+    const robotIds=visibleRobotIds(actor); const schedules=[...state.maintenanceSchedules.values()].filter((schedule) => robotIds.has(schedule.robotId)).map(maintenanceScheduleView).sort((a,b) => Date.parse(a.nextDueAt)-Date.parse(b.nextDueAt)); return send(res,200,{ data:schedules,count:schedules.length,permissions:{ manage:canWrite(actor) } });
+  }
+  if (req.method === 'POST' && path === '/api/v1/autoxing/maintenance-schedules') {
+    if (!canWrite(actor)) throw httpError(403,'Maintenance scheduling permission required'); for (const field of ['robotId','title','nextDueAt','intervalDays']) if (!body[field]) throw httpError(400,`Missing required field: ${field}`);
+    const robot=state.robots.get(body.robotId); if (!robot || !visibleToActor(actor,robot) || !robot.externalIdentities?.some((identity) => identity.system === 'autoxing')) throw httpError(404,'AutoXing robot not found'); const nextDueAt=new Date(body.nextDueAt); if (Number.isNaN(nextDueAt.getTime())) throw httpError(400,'nextDueAt must be a valid date'); const intervalDays=Number(body.intervalDays); if (!Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 730) throw httpError(400,'intervalDays must be between 1 and 730');
+    let technician=null; if (body.assignedTechnicianId) { technician=state.technicians.get(body.assignedTechnicianId); if (!technician || technician.tenantId !== actor.tenantId || !technicianEligibility(technician,robot).eligible) throw httpError(409,'Assigned technician must be qualified for this robot'); }
+    const schedule={ id:ids(),tenantId:robot.tenantId,robotId:robot.id,title:String(body.title).trim().slice(0,160),description:String(body.description || '').trim().slice(0,2000),intervalDays,nextDueAt:nextDueAt.toISOString(),priority:['low','normal','high','critical'].includes(body.priority) ? body.priority : 'normal',assignedTechnicianId:technician?.id || null,status:'active',lastCompletedAt:null,createdAt:timestamp(),updatedAt:timestamp(),createdBy:actor.id };
+    state.maintenanceSchedules.set(schedule.id,schedule); appendPassportEntry(robot.id,{ type:'maintenance_scheduled',source:'altegro',data:{ scheduleId:schedule.id,title:schedule.title,nextDueAt:schedule.nextDueAt,intervalDays,assignedTechnicianId:schedule.assignedTechnicianId } },actor); appendOutbox('maintenance.schedule.created','maintenance_schedule',schedule.id,schedule); recordAudit(actor,'maintenance.schedule.create','robot',robot.id,'success',{ scheduleId:schedule.id }); return send(res,201,{ data:maintenanceScheduleView(schedule) });
+  }
+  const maintenanceScheduleUpdate=route(req.method,path,/^\/api\/v1\/autoxing\/maintenance-schedules\/([^/]+)$/);
+  if (maintenanceScheduleUpdate && req.method === 'PATCH') {
+    if (!canWrite(actor)) throw httpError(403,'Maintenance scheduling permission required'); const schedule=state.maintenanceSchedules.get(maintenanceScheduleUpdate.id); const robot=schedule ? state.robots.get(schedule.robotId) : null; if (!schedule || !robot || !visibleToActor(actor,robot)) throw httpError(404,'Maintenance schedule not found');
+    if (body.status && !['active','paused','cancelled'].includes(body.status)) throw httpError(400,'Invalid maintenance schedule status'); if (body.status) schedule.status=body.status; if (body.nextDueAt) { const next=new Date(body.nextDueAt); if (Number.isNaN(next.getTime())) throw httpError(400,'nextDueAt must be a valid date'); schedule.nextDueAt=next.toISOString(); }
+    if (body.complete) { const completedAt=timestamp(); schedule.lastCompletedAt=completedAt; schedule.nextDueAt=new Date(Date.now()+schedule.intervalDays*86400000).toISOString(); schedule.status='active'; upsertEvent(robot.id,{ eventType:'maintenance_completed',sourceSystem:'altegro',sourceEventId:`maintenance:${schedule.id}:${completedAt}`,severity:'info',title:`Maintenance completed: ${schedule.title}`,description:String(body.completionNote || 'Scheduled maintenance completed.').slice(0,2000),occurredAt:completedAt,payload:{ scheduleId:schedule.id,nextDueAt:schedule.nextDueAt,technicianId:schedule.assignedTechnicianId } },actor); appendPassportEntry(robot.id,{ type:'maintenance_completion',source:'altegro',data:{ scheduleId:schedule.id,title:schedule.title,completedAt,nextDueAt:schedule.nextDueAt,note:String(body.completionNote || '').slice(0,2000) } },actor); const workflow=state.alertWorkflows.get(`maintenance:${schedule.id}`); if (workflow) state.alertWorkflows.set(`maintenance:${schedule.id}`,{ ...workflow,status:'resolved',updatedAt:timestamp(),updatedBy:actor.name }); }
+    schedule.updatedAt=timestamp(); appendOutbox('maintenance.schedule.updated','maintenance_schedule',schedule.id,{ status:schedule.status,nextDueAt:schedule.nextDueAt,complete:Boolean(body.complete) }); recordAudit(actor,'maintenance.schedule.update','robot',robot.id,'success',{ scheduleId:schedule.id,complete:Boolean(body.complete) }); return send(res,200,{ data:maintenanceScheduleView(schedule) });
+  }
+  if (req.method === 'GET' && path === '/api/v1/autoxing/escalation-rules') {
+    if (actor.role === 'robot_user') throw httpError(403,'Escalation rule access is not available to robot accounts'); const rules=[...state.alertEscalationRules.values()].filter((rule) => rule.tenantId === actor.tenantId).map(escalationRuleView); return send(res,200,{ data:rules,count:rules.length,executions:clone([...state.alertEscalations.values()].filter((item) => item.tenantId === actor.tenantId).slice(-30)),permissions:{ manage:['platform_admin','data_admin','support_admin'].includes(actor.role) } });
+  }
+  if (req.method === 'POST' && path === '/api/v1/autoxing/escalation-rules') {
+    if (!['platform_admin','data_admin','support_admin'].includes(actor.role)) throw httpError(403,'Escalation rule administration permission required'); for (const field of ['name','minimumSeverity','alertType','action']) if (!body[field]) throw httpError(400,`Missing required field: ${field}`); if (!['info','warning','error','critical'].includes(body.minimumSeverity)) throw httpError(400,'Invalid minimumSeverity'); if (!['any','offline','low-battery','emergency-stop','obstruction','provider-state','provider-errors','maintenance_due','integration_warning'].includes(body.alertType)) throw httpError(400,'Invalid alertType'); if (!['email','service_case','email_and_service_case'].includes(body.action)) throw httpError(400,'Invalid escalation action'); const afterMinutes=Number(body.afterMinutes ?? 0); if (!Number.isInteger(afterMinutes) || afterMinutes < 0 || afterMinutes > 43200) throw httpError(400,'afterMinutes must be between 0 and 43200');
+    if (body.technicianId) { const technician=state.technicians.get(body.technicianId); if (!technician || technician.tenantId !== actor.tenantId || technician.status !== 'active') throw httpError(400,'Active technician not found'); }
+    const rule={ id:ids(),tenantId:actor.tenantId,name:String(body.name).trim().slice(0,160),minimumSeverity:body.minimumSeverity,alertType:body.alertType,afterMinutes,action:body.action,technicianId:body.technicianId || null,active:body.active !== false,createdAt:timestamp(),updatedAt:timestamp(),createdBy:actor.id }; state.alertEscalationRules.set(rule.id,rule); appendOutbox('autoxing.escalation_rule.created','escalation_rule',rule.id,rule); recordAudit(actor,'autoxing.escalation_rule.create','tenant',actor.tenantId,'success',{ ruleId:rule.id }); return send(res,201,{ data:escalationRuleView(rule) });
+  }
+  const escalationRuleUpdate=route(req.method,path,/^\/api\/v1\/autoxing\/escalation-rules\/([^/]+)$/);
+  if (escalationRuleUpdate && req.method === 'PATCH') {
+    if (!['platform_admin','data_admin','support_admin'].includes(actor.role)) throw httpError(403,'Escalation rule administration permission required'); const rule=state.alertEscalationRules.get(escalationRuleUpdate.id); if (!rule || rule.tenantId !== actor.tenantId) throw httpError(404,'Escalation rule not found'); if (body.active !== undefined) rule.active=Boolean(body.active); if (body.afterMinutes !== undefined) { const value=Number(body.afterMinutes); if (!Number.isInteger(value) || value < 0 || value > 43200) throw httpError(400,'afterMinutes must be between 0 and 43200'); rule.afterMinutes=value; } rule.updatedAt=timestamp(); appendOutbox('autoxing.escalation_rule.updated','escalation_rule',rule.id,{ active:rule.active,afterMinutes:rule.afterMinutes }); recordAudit(actor,'autoxing.escalation_rule.update','tenant',actor.tenantId,'success',{ ruleId:rule.id }); return send(res,200,{ data:escalationRuleView(rule) });
+  }
+  if (req.method === 'POST' && path === '/api/v1/autoxing/escalations/evaluate') {
+    if (!['platform_admin','support_admin'].includes(actor.role)) throw httpError(403,'Escalation evaluation permission required'); return send(res,200,{ data:evaluateAlertEscalations(actor.tenantId) });
+  }
+  const diagnosticReport=route(req.method,path,/^\/api\/v1\/autoxing\/diagnostic-reports\/([^/]+)$/);
+  if (diagnosticReport && req.method === 'GET') {
+    if (!canExport(actor) && !canWrite(actor) && actor.role !== 'robot_user') throw httpError(403,'Diagnostic report permission required'); const robot=state.robots.get(diagnosticReport.id); if (!robot || !visibleToActor(actor,robot) || !robot.externalIdentities?.some((identity) => identity.system === 'autoxing')) throw httpError(404,'AutoXing robot not found'); const report=autoXingDiagnosticReport(actor,robot); recordAudit(actor,'autoxing.diagnostic_report.download','robot',robot.id,'success',{ alertCount:report.diagnostics.alerts.length,taskCount:report.diagnostics.taskSummary.total }); schedulePersist(); return sendDownload(res,'application/json; charset=utf-8',`autoxing-diagnostic-${robot.serialNumber}-${timestamp().slice(0,10)}.json`,JSON.stringify(report,null,2));
+  }
   if (req.method === 'GET' && path === '/api/v1/adapters/autoxing/resources') {
     if (actor.role === 'robot_user') return send(res, 200, { data: { businesses: [], buildings: [], maps: [], syncedAt: state.autoxing.lastSyncAt, resourceErrors: [] } });
     return send(res, 200, { data: { businesses: clone(state.autoxing.businesses), buildings: clone(state.autoxing.buildings), maps: clone([...state.autoxing.maps.values()]), syncedAt: state.autoxing.lastSyncAt, resourceErrors: clone(state.autoxing.resourceErrors) } });
@@ -1040,6 +1319,38 @@ async function handle(req, res) {
       tasks = tasks.filter((task) => String(taskRobotExternalId(task)) === String(externalId));
     }
     return send(res, 200, { data: clone(tasks), count: tasks.length, syncedAt: state.autoxing.lastSyncAt });
+  }
+  const autoXingTaskDetail = route(req.method,path,/^\/api\/v1\/autoxing\/tasks\/([^/]+)$/);
+  if (autoXingTaskDetail && req.method === 'GET') {
+    const taskId = decodeURIComponent(autoXingTaskDetail.id); const task = state.autoxing.tasks.get(taskId);
+    const detail = task ? autoXingTaskView(actor,task) : null;
+    if (!detail) throw httpError(404,'AutoXing task not found');
+    return send(res,200,{ data:detail });
+  }
+  const autoXingAlertUpdate = route(req.method,path,/^\/api\/v1\/autoxing\/alerts\/([^/]+)$/);
+  if (autoXingAlertUpdate && req.method === 'PATCH') {
+    if (!canWrite(actor)) throw httpError(403,'Alert workflow permission required');
+    const alertId = decodeURIComponent(autoXingAlertUpdate.id); const alert = findVisibleAutoXingAlert(actor,alertId);
+    if (!alert) throw httpError(404,'AutoXing alert not found');
+    const allowedStatuses = ['open','acknowledged','in_progress','resolved'];
+    if (body.status && !allowedStatuses.includes(body.status)) throw httpError(400,'Invalid alert workflow status');
+    let technician = null;
+    if (body.technicianId) {
+      technician = state.technicians.get(body.technicianId);
+      if (!technician || technician.tenantId !== actor.tenantId || technician.status !== 'active') throw httpError(400,'Active technician not found');
+      if (alert.robotId) { const robot=state.robots.get(alert.robotId); const eligibility=technicianEligibility(technician,robot); if (!eligibility.eligible) throw httpError(409,`Technician is not qualified: ${eligibility.reasons.join('; ')}`,eligibility); }
+    }
+    const existing = state.alertWorkflows.get(alertId) || {};
+    const workflow = { alertId, status:body.status || existing.status || 'acknowledged', technicianId:technician?.id || existing.technicianId || null, technicianName:technician?.name || existing.technicianName || null, note:body.note !== undefined ? String(body.note).trim().slice(0,2000) : existing.note || '', serviceCaseId:existing.serviceCaseId || null, updatedAt:timestamp(), updatedBy:actor.name };
+    if (body.createServiceCase) {
+      if (!alert.robotId) throw httpError(400,'A fleet-level synchronization warning cannot create a robot service case');
+      const digest=crypto.createHash('sha256').update(alertId).digest('hex').slice(0,12).toUpperCase(); const externalId=`AX-ALERT-${digest}`; const key=`altegro:${externalId}`;
+      let serviceCase=state.serviceCases.get(key);
+      if (!serviceCase) { const robot=state.robots.get(alert.robotId); serviceCase={ id:ids(),robotId:robot.id,tenantId:robot.tenantId,provider:'altegro',externalId,title:alert.title,description:`${alert.message}\nRecommended action: ${alert.recommendedAction}`,severity:alert.severity,status:'open',cause:null,action:workflow.note || null,parts:[],assignedTo:workflow.technicianName,createdAt:timestamp(),updatedAt:timestamp(),closedAt:null }; state.serviceCases.set(key,serviceCase); appendPassportEntry(robot.id,{ type:'incident_opened',source:'autoxing',data:{ serviceCaseId:serviceCase.id,externalId,alertId,title:alert.title,severity:alert.severity } },actor); appendOutbox('service_case.opened','service_case',serviceCase.id,serviceCase); }
+      workflow.serviceCaseId=serviceCase.id; workflow.status='in_progress';
+    }
+    state.alertWorkflows.set(alertId,workflow); recordAudit(actor,'autoxing.alert.update','robot',alert.robotId || 'autoxing-fleet','success',{ alertId,status:workflow.status,technicianId:workflow.technicianId,serviceCaseId:workflow.serviceCaseId }); appendOutbox('autoxing.alert.updated','autoxing_alert',alertId,workflow);
+    return send(res,200,{ data:{ ...alert,workflow } });
   }
   const eventAttachment = route(req.method, path, /^\/api\/v1\/events\/([^/]+)\/attachment$/);
   if (eventAttachment && req.method === 'GET') {
@@ -1266,8 +1577,11 @@ seed();
 initializeCredentialHashes();
 loadPersistedState();
 applyRequestedTechnicianRoster();
+assertProductionSecretConfiguration();
 if (persistenceEnabled()) persistState();
 const server = http.createServer(async (req, res) => {
+  const requestStartedAt=Date.now(); runtimeMetrics.activeRequests += 1;
+  res.once('finish',() => { const duration=Date.now()-requestStartedAt; runtimeMetrics.activeRequests=Math.max(0,runtimeMetrics.activeRequests-1); runtimeMetrics.requestsTotal += 1; runtimeMetrics.responseTimeMsTotal += duration; runtimeMetrics.responseTimeMsMax=Math.max(runtimeMetrics.responseTimeMsMax,duration); const statusClass=`${Math.floor(res.statusCode/100)}xx`; runtimeMetrics.byStatus[statusClass]=(runtimeMetrics.byStatus[statusClass] || 0)+1; if (res.statusCode >= 500) runtimeMetrics.errorsTotal += 1; });
   try {
     await handle(req, res);
     if (req.method !== 'GET' && req.method !== 'HEAD') persistState();
@@ -1281,6 +1595,10 @@ const server = http.createServer(async (req, res) => {
 
 let autoXingPollTimer = null;
 let autoXingPollRunning = false;
+let emailQueueTimer = null;
+function startEmailDeliveryWorker() { if (!emailAlertConfiguration().enabled) return; processEmailQueue(); emailQueueTimer=setInterval(processEmailQueue,60000); emailQueueTimer.unref?.(); }
+let operationsAutomationTimer=null;
+function startOperationsAutomationWorker() { operationsAutomationTimer=setInterval(() => { for (const tenantId of state.tenants.keys()) evaluateAlertEscalations(tenantId); },60000); operationsAutomationTimer.unref?.(); }
 function startAutoXingPolling() {
   if (!autoXingLiveEnabled() || autoXingPollIntervalMs() === 0) return;
   const pollActor = { id: 'system-autoxing-poller', name: 'AutoXing Poller', role: 'platform_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' };
@@ -1295,8 +1613,8 @@ function startAutoXingPolling() {
 }
 
 if (require.main === module) {
-  server.listen(PORT, BIND_HOST, () => { startAutoXingPolling(); console.log(`Altegro prototype listening on http://${BIND_HOST}:${PORT}`); });
-  const shutdown = (signal) => { console.log(`${signal} received; saving state and shutting down.`); try { persistState(); } catch (error) { console.error(`Final persistence failed: ${error.message}`); } server.close(() => process.exit(0)); };
+  server.listen(PORT, BIND_HOST, () => { startAutoXingPolling(); startEmailDeliveryWorker(); startOperationsAutomationWorker(); console.log(`Altegro prototype listening on http://${BIND_HOST}:${PORT}`); });
+  const shutdown = (signal) => { console.log(`${signal} received; saving state and shutting down.`); if (emailQueueTimer) clearInterval(emailQueueTimer); if (operationsAutomationTimer) clearInterval(operationsAutomationTimer); try { persistState(); } catch (error) { console.error(`Final persistence failed: ${error.message}`); } server.close(() => process.exit(0)); };
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));
 }

@@ -1,0 +1,33 @@
+services:
+  altegro:
+    environment:
+      NODE_ENV: production
+      COOKIE_SECURE: "true"
+      ALTEGRO_REQUIRE_MANAGED_SECRETS: "true"
+      APPID_FILE: /run/secrets/autoxing_app_id
+      APPSECRET_FILE: /run/secrets/autoxing_app_secret
+      APPCODE_FILE: /run/secrets/autoxing_app_code
+      CENOBOTS_ACCESS_KEY_FILE: /run/secrets/cenobots_access_key
+      CENOBOTS_SECRET_KEY_FILE: /run/secrets/cenobots_secret_key
+      METRICS_TOKEN_FILE: /run/secrets/altegro_metrics_token
+    secrets:
+      - autoxing_app_id
+      - autoxing_app_secret
+      - autoxing_app_code
+      - cenobots_access_key
+      - cenobots_secret_key
+      - altegro_metrics_token
+
+secrets:
+  autoxing_app_id:
+    external: true
+  autoxing_app_secret:
+    external: true
+  autoxing_app_code:
+    external: true
+  cenobots_access_key:
+    external: true
+  cenobots_secret_key:
+    external: true
+  altegro_metrics_token:
+    external: true

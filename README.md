@@ -148,13 +148,56 @@ Read-only resource endpoints after synchronization:
 ```text
 GET /api/v1/robots/:id/autoxing
 GET /api/v1/autoxing/tasks
+GET /api/v1/autoxing/tasks/:taskId
 GET /api/v1/autoxing/operations
+PATCH /api/v1/autoxing/alerts/:alertId
+GET|POST /api/v1/autoxing/maintenance-schedules
+PATCH /api/v1/autoxing/maintenance-schedules/:id
+GET /api/v1/autoxing/diagnostic-reports/:robotId
+GET|POST /api/v1/autoxing/escalation-rules
+PATCH /api/v1/autoxing/escalation-rules/:id
+POST /api/v1/autoxing/escalations/evaluate
 GET /api/v1/adapters/autoxing/resources
 ```
 
-The AutoXing tab automatically refreshes locally cached fleet telemetry every 30 seconds. The server performs provider synchronization at `AUTOXING_POLL_INTERVAL_MS`. The operations endpoint supplies live fleet cards, task KPIs, actionable error guidance, synchronization history, and seven-day trends. `AUTOXING_TASK_SYNC=true` collects task history even when the slower POI, area, and map resource synchronization is disabled.
+The AutoXing tab automatically refreshes locally cached fleet telemetry every 30 seconds. The live fleet has search, status/battery/alert filters, and 12-card pagination. Task rows open a normalized detail view with the protected provider response. Alerts can be acknowledged, assigned to an eligible technician, and converted into a linked service case. The server performs provider synchronization at `AUTOXING_POLL_INTERVAL_MS`. The operations endpoint supplies live fleet cards, task KPIs, actionable error guidance, synchronization history, and seven-day trends. `AUTOXING_TASK_SYNC=true` collects task history even when the slower POI, area, and map resource synchronization is disabled.
 
-For production, mount credentials as protected files and set `APPID_FILE`, `APPSECRET_FILE`, and `APPCODE_FILE` instead of placing secret values in `.env`. The same pattern is available for `CENOBOTS_ACCESS_KEY_FILE` and `CENOBOTS_SECRET_KEY_FILE`. Docker secrets, Kubernetes Secrets mounted as volumes, and systemd credentials can all use this interface. The API and browser expose only the configuration mode, never credential values or secret paths.
+Maintenance schedules support recurring intervals, due/overdue status, qualified technician assignment, pause/resume, and completion. Completing maintenance advances the next due date and writes immutable event and Passport evidence.
+
+Remote diagnostic reports are read-only JSON support bundles containing current telemetry, provider errors, alerts, task summary, recent events, maintenance schedules, qualified assignments, adapter health, and synchronized robot resources. Reports never invoke a movement or robot-control command and are tenant/robot scoped.
+
+Alert escalation rules match alert type, minimum severity, and elapsed minutes. A rule can send email, create a service case, or do both. Rules run after successful AutoXing synchronization and once per minute. Each rule/alert pair is executed once; inactive rules and resolved alerts are skipped. Preferred technicians are assigned only when their current skills and certificates qualify them for the affected robot.
+
+For production, mount credentials as protected files and set `APPID_FILE`, `APPSECRET_FILE`, and `APPCODE_FILE` instead of placing secret values in `.env`. The same pattern is available for `CENOBOTS_ACCESS_KEY_FILE` and `CENOBOTS_SECRET_KEY_FILE`. Set `ALTEGRO_REQUIRE_MANAGED_SECRETS=true` to make startup fail safely when an enabled live provider uses direct values or has an incomplete secret mount. Docker secrets, Kubernetes Secrets mounted as volumes, and systemd credentials can all use this interface. The API and browser expose only counts and configuration mode, never credential values or secret paths.
+
+Use `compose.production.yaml` as a production override after creating the six external Docker secrets it references. Rotate a provider credential by creating a new secret version, updating the deployment secret mount, restarting one instance, verifying `/ready` and a read-only synchronization, then rolling the remaining instances. Revoke the previous provider credential only after the new version succeeds. Do not commit secret files or copy their values into Compose.
+
+## Monitoring
+
+The server exposes four monitoring surfaces:
+
+```text
+GET /health                 process liveness
+GET /ready                  persistence and secret-policy readiness
+GET /metrics                Prometheus text metrics
+GET /api/v1/monitoring      authenticated dashboard summary
+```
+
+Set `METRICS_TOKEN_FILE` to protect `/metrics` with a bearer token when it is not restricted to a private monitoring network. The metrics include request/error counts, active requests, uptime, robot count, open service cases, and last adapter-sync success. The AutoXing tab shows the authenticated monitoring summary. Configure alerts for `altegro_up == 0`, increasing `altegro_http_errors_total`, and `altegro_adapter_last_sync_success == 0`.
+
+## Email alert notifications
+
+Altegro can email error and critical robot events and provider synchronization failures. Delivery is disabled by default. Configure `EMAIL_ALERTS_ENABLED=true`, `EMAIL_ALERT_FROM`, `EMAIL_ALERT_RECIPIENTS`, and the `EMAIL_SMTP_*` settings from `.env.example`. Multiple recipients are comma-separated. `EMAIL_ALERT_MIN_SEVERITY` accepts `info`, `warning`, `error`, or `critical`; `EMAIL_ALERT_COOLDOWN_MINUTES` prevents repeated delivery of the same alert.
+
+Authenticated SMTP should use direct TLS (`EMAIL_SMTP_SECURE=true`, normally port 465). Plain SMTP is supported for trusted local relays without authentication. In production, mount the password through `EMAIL_SMTP_PASSWORD_FILE`; direct password values are rejected by the managed-secret policy. The Administration tab provides safe configuration status, delivery history, test delivery, and retry controls without exposing credentials.
+
+For a Docker deployment, create the external `altegro_smtp_password` secret and apply the optional email override:
+
+```bash
+docker compose -f compose.yaml -f compose.production.yaml -f compose.email.yaml up -d --build
+```
+
+Email delivery history and retry state are persisted. Failed messages retry every minute, up to three attempts. A successful provider synchronization does not generate email. The `capture` transport exists only for automated tests and is rejected when `NODE_ENV=production`.
 
 For real customer/site assignment, configure a JSON business mapping before the pilot. The keys can be an AutoXing business ID or business name:
 
@@ -225,7 +268,7 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - Atomic file-backed persistence with restart recovery
 - Salted scrypt password hashes and hashed server-side session tokens
 - HttpOnly SameSite session cookies with optional HTTPS-only mode
-- Role-scoped operational notifications
+- Role-scoped operational notifications and SMTP email alerts
 - Container build, health check, persistent volume, and graceful shutdown
 - Fleet-level AutoXing resource explorer and role-scoped task history
 - Platform robot-account administration without password disclosure
@@ -247,4 +290,4 @@ The Compose configuration mounts a named volume for `/app/data`. For an internet
 
 ## Intentionally not production-ready
 
-The prototype uses a local JSON state file rather than a transactional database. Its Outbox is durable for local restarts but is not transactionally published. Attachments are stored inside the JSON file rather than Object Storage. It does not yet implement PostgreSQL, OIDC, managed Secret Management, Object Storage, OpenAPI generation, signed Webhooks, distributed rate limiting, or migrations. AutoXing and CenoBots can run through their configured read-only bridges, but production deployment still requires managed credentials, provider authorization, monitoring, and external infrastructure.
+The prototype uses a local JSON state file rather than a transactional database. Its Outbox is durable for local restarts but is not transactionally published. Attachments are stored inside the JSON file rather than Object Storage. It does not yet implement PostgreSQL, OIDC, a cloud Secret Manager, Object Storage, OpenAPI generation, signed Webhooks, distributed rate limiting, or migrations. AutoXing and CenoBots can run through their configured read-only bridges, but production deployment still requires provider authorization and external infrastructure.
