@@ -64,6 +64,36 @@ A live command is sent only when all three conditions are met:
 
 For example, the final live-only arguments are `--execute --confirm-device AUGCEMZK85`. First inspect the dry-run JSON and ensure the map ID, map version, area, target robot, and physical surroundings are correct. The wrapper never prints API keys.
 
+## Python `Robot` wrapper
+
+Application code can import the root-level `Robot` class. It loads `CENOBOTS_HOST`, `CENOBOTS_ACCESS_KEY`, and `CENOBOTS_SECRET_KEY` from the ignored `.env` file, so credentials are not passed in application code:
+
+```python
+from wrapper import Robot
+
+robot = Robot("KK93DZ0Q37")
+robot.go_home()
+robot.start_cleaning_task()
+```
+
+The method calls require parentheses. `start_cleaning_task()` reads the robot's current map automatically, cleans the full map once at `MEDIUM` intensity, and returns to the station. It can also target selected areas or override the map:
+
+```python
+robot.start_cleaning_task(area_ids=["3", "8"], intensity="HIGH")
+robot.pause_task()
+robot.continue_task()
+robot.stop_task()
+```
+
+`continue_task()` resumes a paused mission. `stop_task()` ends the mission and cannot be undone. When `go_home()` reports provider code `35002` (`Another mission in progress`), stop the active mission first and then send the robot home:
+
+```python
+robot.stop_task()
+robot.go_home()
+```
+
+These Python methods are intentional live commands, so creating `Robot(...)` enables commands for that object without requiring `CENOBOTS_COMMANDS_ENABLED`. The environment switch remains required for the low-level client and command-line executor. Provider errors raise `CenoBotsError`; successful commands return a dictionary containing `success`, provider `data`, and the trace `rid`.
+
 The API account currently enforces less than one request per second. The client therefore spaces calls by `CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS` (default `1.05`). Set `CENOBOTS_RESOURCE_SYNC=true` only when map, area, and mission-history resources are needed because those resources require additional provider calls.
 
 Maintenance reset history is capped at ten records per item by default to prevent a fleet snapshot and local state file from growing without limit. Change this with `CENOBOTS_MAINTENANCE_HISTORY_LIMIT`. Set `CENOBOTS_INCLUDE_RAW=true` only for protected diagnostics.

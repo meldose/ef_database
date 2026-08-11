@@ -95,6 +95,24 @@ class CenoBotsTaskTests(unittest.TestCase):
             client.go_home('AUGCEMZK85')
         urlopen.assert_not_called()
 
+    def test_explicitly_enabled_client_can_send_a_command(self):
+        client = CenoBotsClient(
+            'https://example.test',
+            'access',
+            'secret',
+            commands_enabled=True,
+        )
+        expected = {'success': True, 'code': 0, 'data': ''}
+        with patch.object(client, '_request', return_value=expected) as request:
+            response = client.go_home('KK93DZ0Q37')
+
+        self.assertEqual(response, expected)
+        request.assert_called_once_with(
+            'POST',
+            '/app/openapi/v1/mission/home/KK93DZ0Q37',
+            body=None,
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

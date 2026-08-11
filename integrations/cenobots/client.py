@@ -27,11 +27,13 @@ class CenoBotsClient:
         secret_key: str,
         timeout: float = 20.0,
         min_request_interval: float | None = None,
+        commands_enabled: bool | None = None,
     ):
         self.host = host.rstrip('/')
         self.access_key = access_key
         self.secret_key = secret_key
         self.timeout = timeout
+        self.commands_enabled = commands_enabled
         configured_interval = os.environ.get('CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS', '1.05')
         self.min_request_interval = max(
             0.0,
@@ -105,7 +107,10 @@ class CenoBotsClient:
         return self._request('POST', '/app/openapi/v1/mission/list', body={'pageIndex': page_index, 'pageLength': page_length, 'requestData': request_data})
 
     def _command_request(self, path: str, *, body: dict | None = None):
-        if os.environ.get('CENOBOTS_COMMANDS_ENABLED', '').strip().lower() != 'true':
+        commands_enabled = self.commands_enabled
+        if commands_enabled is None:
+            commands_enabled = os.environ.get('CENOBOTS_COMMANDS_ENABLED', '').strip().lower() == 'true'
+        if not commands_enabled:
             raise CenoBotsError(
                 'CenoBots commands are disabled. Set CENOBOTS_COMMANDS_ENABLED=true only when live robot control is intended.'
             )
@@ -208,7 +213,7 @@ def secret_value(name: str) -> str:
         raise CenoBotsError(f'Could not read managed secret {name}: {error}') from error
 
 
-def from_environment() -> CenoBotsClient:
+def from_environment(*, commands_enabled: bool | None = None) -> CenoBotsClient:
     load_env_file()
     values = {
         'CENOBOTS_HOST': os.environ.get('CENOBOTS_HOST', ''),
@@ -218,7 +223,12 @@ def from_environment() -> CenoBotsClient:
     missing = [key for key, value in values.items() if not value]
     if missing:
         raise CenoBotsError('Missing environment variables: ' + ', '.join(missing))
-    return CenoBotsClient(values['CENOBOTS_HOST'], values['CENOBOTS_ACCESS_KEY'], values['CENOBOTS_SECRET_KEY'])
+    return CenoBotsClient(
+        values['CENOBOTS_HOST'],
+        values['CENOBOTS_ACCESS_KEY'],
+        values['CENOBOTS_SECRET_KEY'],
+        commands_enabled=commands_enabled,
+    )
 
 
 if __name__ == '__main__':
