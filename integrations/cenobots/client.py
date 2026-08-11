@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal read-only CenoBots Open API v1.0.16 client."""
+"""CenoBots Open API v1.0.16 client with command calls disabled by default."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from urllib.request import Request, urlopen
 
 
 class CenoBotsError(RuntimeError):
-    """Raised when the CenoBots API cannot be read successfully."""
+    """Raised when a CenoBots API operation cannot be completed safely."""
 
 
 class CenoBotsClient:
@@ -103,6 +103,29 @@ class CenoBotsClient:
         if end_timestamp is not None:
             request_data['endTimestamp'] = end_timestamp
         return self._request('POST', '/app/openapi/v1/mission/list', body={'pageIndex': page_index, 'pageLength': page_length, 'requestData': request_data})
+
+    def _command_request(self, path: str, *, body: dict | None = None):
+        if os.environ.get('CENOBOTS_COMMANDS_ENABLED', '').strip().lower() != 'true':
+            raise CenoBotsError(
+                'CenoBots commands are disabled. Set CENOBOTS_COMMANDS_ENABLED=true only when live robot control is intended.'
+            )
+        return self._request('POST', path, body=body)
+
+    def create_temporary_mission(self, mission: dict):
+        """Start a validated mission payload prepared by the task wrapper."""
+        return self._command_request('/app/openapi/v1/mission', body=mission)
+
+    def go_home(self, device_open_id: str):
+        return self._command_request(f'/app/openapi/v1/mission/home/{device_open_id}')
+
+    def stop_current_mission(self, device_open_id: str):
+        return self._command_request(f'/app/openapi/v1/mission/current/stop/{device_open_id}')
+
+    def pause_current_mission(self, device_open_id: str):
+        return self._command_request(f'/app/openapi/v1/mission/current/pause/{device_open_id}')
+
+    def continue_current_mission(self, device_open_id: str):
+        return self._command_request(f'/app/openapi/v1/mission/current/continue/{device_open_id}')
 
     @staticmethod
     def response_data(response: dict, operation: str):

@@ -1,4 +1,4 @@
-# CenoBots read-only integration
+# CenoBots integration
 
 This folder is based on `CenoBots Open API v1.0.16.pdf` in Downloads.
 
@@ -10,11 +10,11 @@ This folder is based on `CenoBots Open API v1.0.16.pdf` in Downloads.
 - The signature input is `HTTP_METHOD + timestamp + request_path`.
 - The robot identifier is the CenoBots `deviceOpenId`.
 
-## Phase 1 read-only surface
+## Altegro read-only surface
 
 The low-level client covers device status, robot information, maintenance details, settings read, system errors, device open IDs, current maps, map areas, and mission history. The separate `integrations/cenobots_bridge.py` process normalizes those provider responses into Altegro's canonical robot snapshot.
 
-The PDF also documents schedules, audio, mission control, map changes, back points, and favorite missions. Those mutating/control operations are deliberately not implemented in this Phase 1 scaffold.
+The Altegro website and its CenoBots bridge remain read-only. Robot-control operations are available only through the separate, safety-gated `tasks.py` command wrapper described below; they are not exposed by a dashboard button or server route.
 
 ## Usage
 
@@ -37,6 +37,32 @@ It calls `GET /app/openapi/v1/device/deviceOpenIds`, prints the available `devic
 The Open API cannot register or attach a robot to an account. If this endpoint returns an empty list, assign the robot to the same API account in the CenoBots operation platform (or ask CenoBots support to bind it), confirm that the API keys and robot use the same regional host, and run the helper again. `CENOBOTS_ROBOT_OPEN_ID` and the optional comma-separated `CENOBOTS_ROBOT_OPEN_IDS` are fallback IDs for querying already-authorized robots; they cannot grant account access.
 
 When `CENOBOTS_LIVE=true`, the Node server invokes the bridge behind the existing **Sync CenoBots** button. The live sync imports device identity, status, battery, position, maintenance, and system-error data into canonical Robots, Passports, and Events. Control operations remain disabled.
+
+## Robot task wrapper
+
+The wrapper supports an L50 `SWEEP` cleaning mission plus `go-home`, `pause`, `continue`, and `stop`. Every command is a dry-run preview by default and does not contact CenoBots:
+
+```bash
+python3 integrations/cenobots/tasks.py clean \
+  --device-open-id AUGCEMZK85 \
+  --map-id YOUR_MAP_ID \
+  --map-version YOUR_MAP_VERSION \
+  --everywhere \
+  --intensity MEDIUM
+
+python3 integrations/cenobots/tasks.py go-home \
+  --device-open-id AUGCEMZK85
+```
+
+Area cleaning uses one or more `--area-id` arguments instead of `--everywhere`. Cleaning returns to the station by default; use `--stop-after` to stop at the end or `--back-point-id ID` for a configured custom return point.
+
+A live command is sent only when all three conditions are met:
+
+1. Set `CENOBOTS_COMMANDS_ENABLED=true` in the ignored local `.env` file.
+2. Add `--execute`.
+3. Add `--confirm-device` with exactly the same Open ID as `--device-open-id`.
+
+For example, the final live-only arguments are `--execute --confirm-device AUGCEMZK85`. First inspect the dry-run JSON and ensure the map ID, map version, area, target robot, and physical surroundings are correct. The wrapper never prints API keys.
 
 The API account currently enforces less than one request per second. The client therefore spaces calls by `CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS` (default `1.05`). Set `CENOBOTS_RESOURCE_SYNC=true` only when map, area, and mission-history resources are needed because those resources require additional provider calls.
 
