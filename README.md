@@ -134,7 +134,7 @@ export AUTOXING_TASK_DETAIL_LIMIT=25
 npm start
 ```
 
-Then use the existing **Sync AutoXing** button or call:
+Use **Sync all robots** for the normal operator workflow. AutoXing and CenoBots run independently, so one provider can succeed even when the other reports an error. The provider-specific **Sync AutoXing** and **Sync CenoBots** buttons remain available for diagnostics. To synchronize only AutoXing by API, call:
 
 ```bash
 curl -X POST -H "Authorization: Bearer $SESSION_TOKEN" \
@@ -212,9 +212,13 @@ The Python environment must have the wrapper dependencies installed. If credenti
 
 ## CenoBots Open API integration
 
-The CenoBots adapter supports read-only live synchronization through Open API v1.0.16. Put the region host and credentials in the ignored root `.env`, set `CENOBOTS_LIVE=true`, and start the server normally. The server loads `.env` automatically.
+The CenoBots adapter supports read-only live synchronization through Open API v1.0.16. Put the region host and credentials in the ignored root `.env`, set `CENOBOTS_LIVE=true`, and start the server normally. The server loads `.env` automatically and invokes `integrations/cenobots_bridge.py`, which converts provider responses into the same canonical robot boundary used by the AutoXing integration.
 
-Use the **Sync CenoBots** button or call `POST /api/v1/adapters/cenobots/sync`. The adapter discovers permitted device open IDs and imports robot information, online state, battery, position, mission status, maintenance details, and system errors. It never exposes mission or robot-control operations.
+Use **Sync all robots**, the provider-specific **Sync CenoBots** button, or call `POST /api/v1/adapters/cenobots/sync`. The adapter discovers permitted device open IDs and imports robot information, online state, battery, position, mission status, maintenance details, and system errors. It never exposes mission or robot-control operations.
+
+CenoBots has its own dashboard tab with fleet totals, online/offline and charging KPIs, searchable live robot cards, version/map/mission status, maintenance and system-error attention items, and connector synchronization diagnostics. The tenant-scoped data is supplied by `GET /api/v1/cenobots/operations`.
+
+CenoBots limits this account to less than one request per second, so calls are paced by `CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS` (default `1.05`). Optional map, area, and mission-history collection is enabled with `CENOBOTS_RESOURCE_SYNC=true`; it is off by default to keep normal fleet synchronization fast.
 
 Append an immutable Passport entry:
 

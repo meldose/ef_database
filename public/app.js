@@ -1,6 +1,6 @@
 'use strict';
 
-const state = { token:null,user:null,robots:[],robotOptions:[],serviceCases:[],compatibility:[],notifications:[],audit:[],autoXingResources:null,autoXingTasks:[],autoXingOperations:null,maintenanceSchedules:[],escalationRules:null,monitoring:null,emailNotifications:null,selectedAlertId:null,autoXingFleet:{ query:'',status:'all',battery:'all',alerts:'all',page:1,pageSize:12 },robotAccounts:[],workforce:null,summary:null,selectedRobotId:null,registry:{ page:1,pageSize:10,pageCount:1,count:0 },sync:{ provider:null,startedAt:0,timer:null },autoRefresh:{ timer:null,intervalMs:30000,lastAt:null } };
+const state = { token:null,user:null,robots:[],robotOptions:[],serviceCases:[],compatibility:[],notifications:[],audit:[],autoXingResources:null,autoXingTasks:[],autoXingOperations:null,cenoBotsOperations:null,maintenanceSchedules:[],escalationRules:null,monitoring:null,emailNotifications:null,selectedAlertId:null,autoXingFleet:{ query:'',status:'all',battery:'all',alerts:'all',page:1,pageSize:12 },cenoBotsFleet:{ query:'',status:'all',attention:'all' },robotAccounts:[],workforce:null,summary:null,selectedRobotId:null,registry:{ page:1,pageSize:10,pageCount:1,count:0 },sync:{ provider:null,startedAt:0,timer:null },autoRefresh:{ timer:null,intervalMs:30000,lastAt:null } };
 const $ = (selector) => document.querySelector(selector);
 const api = async (path, options = {}) => {
   const response = await fetch(path, { ...options, headers: { Authorization: `Bearer ${state.token}`, 'Content-Type': 'application/json', ...(options.headers || {}) } });
@@ -17,7 +17,7 @@ const download = async (path, fallbackName) => {
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 const formatDate = (value) => value ? new Date(value).toLocaleString([], { dateStyle:'medium', timeStyle:'short' }) : '—';
 const toDateTimeLocal = (date = new Date()) => { const offset = date.getTimezoneOffset(); return new Date(date.getTime() - offset * 60000).toISOString().slice(0, 16); };
-const dashboardViews = new Set(['overview', 'robots', 'operations', 'autoxing', 'workforce', 'admin']);
+const dashboardViews = new Set(['overview', 'robots', 'operations', 'autoxing', 'cenobots', 'workforce', 'admin']);
 
 function toast(message, isError = false) {
   const element = $('#toast'); element.textContent = message; element.classList.toggle('error', isError); element.classList.add('show');
@@ -36,7 +36,7 @@ function showApp() {
   $('#loginScreen').classList.add('hidden'); $('#appShell').classList.remove('hidden');
   $('#loggedInUser').textContent = `${state.user.name} · ${state.user.role.replaceAll('_', ' ')}`;
   const robotUser = state.user.role === 'robot_user'; const auditor = state.user.role === 'auditor';
-  ['syncAutoXing', 'syncCenoBots'].forEach((id) => { const element = $(`#${id}`); if (element) element.classList.toggle('hidden', robotUser || auditor); });
+  ['syncAll', 'syncAutoXing', 'syncCenoBots', 'syncCenoBotsWorkspace'].forEach((id) => { const element = $(`#${id}`); if (element) element.classList.toggle('hidden', robotUser || auditor); });
   $('#newRobotButton').classList.toggle('hidden', auditor);
   $('#exportTenant').classList.toggle('hidden', robotUser);
   $('#exportRobotsCsv').classList.toggle('hidden', robotUser);
@@ -358,6 +358,33 @@ async function loadAutoXingOperations() {
   const payload = await api('/api/v1/autoxing/operations'); state.autoXingOperations = payload.data; renderAutoXingOperations(); populateDiagnosticRobots();
 }
 
+function renderCenoBotsOperations() {
+  const operations=state.cenoBotsOperations; if (!operations) return;
+  const summary=operations.summary || {}; const diagnostics=operations.diagnostics || {}; const alerts=operations.alerts || []; const filter=state.cenoBotsFleet; const query=filter.query.trim().toLowerCase();
+  $('#cenoBotsSummary').innerHTML=`<div class="resource-metric"><strong>${summary.total ?? 0}</strong><span>Robots</span></div><div class="resource-metric"><strong class="safe-text">${summary.online ?? 0}</strong><span>Online</span></div><div class="resource-metric"><strong class="${summary.offline ? 'danger-text' : ''}">${summary.offline ?? 0}</strong><span>Offline</span></div><div class="resource-metric"><strong>${summary.charging ?? 0}</strong><span>Charging</span></div><div class="resource-metric"><strong class="${summary.maintenanceDue ? 'danger-text' : ''}">${summary.maintenanceDue ?? 0}</strong><span>Maintenance due</span></div><div class="resource-metric"><strong class="${summary.errors ? 'danger-text' : ''}">${summary.errors ?? 0}</strong><span>System errors</span></div>`;
+  const fleet=(operations.fleet || []).filter((robot) => {
+    const connection=robot.online === true ? 'online' : robot.online === false ? 'offline' : 'unknown'; const attention=(robot.errorCount || 0)+(robot.maintenanceDueCount || 0);
+    if (query && ![robot.serialNumber,robot.externalId,robot.buildingName,robot.mapName,robot.providerVersion].some((value) => String(value || '').toLowerCase().includes(query))) return false;
+    if (filter.status !== 'all' && connection !== filter.status) return false;
+    if (filter.attention === 'attention' && !attention || filter.attention === 'clear' && attention) return false;
+    return true;
+  });
+  $('#cenoBotsLiveFleet').innerHTML=fleet.length ? fleet.map((robot) => {
+    const battery=Number(robot.battery); const batteryValue=Number.isFinite(battery) ? Math.max(0,Math.min(100,battery)) : null; const task=compactProviderValue(robot.currentTask,'No active mission'); const attention=(robot.errorCount || 0)+(robot.maintenanceDueCount || 0);
+    return `<button class="autoxing-live-card cenobots-card" type="button" data-cenobots-robot="${escapeHtml(robot.id)}"><div class="live-card-head"><div><strong>${escapeHtml(robot.serialNumber)}</strong><small>${escapeHtml(robot.externalId)}</small></div><span class="live-state ${robot.online === true ? 'online' : robot.online === false ? 'offline' : ''}">${robot.online === true ? 'Online' : robot.online === false ? 'Offline' : 'Unknown'}</span></div><div class="battery-row"><span>Battery</span><strong>${batteryValue == null ? '—' : `${batteryValue}%`}</strong></div><div class="battery-track"><span style="width:${batteryValue ?? 0}%"></span></div><dl class="live-card-details"><div><dt>Charging</dt><dd>${robot.charging === true ? 'Yes' : robot.charging === false ? 'No' : '—'}</dd></div><div><dt>Docked</dt><dd>${robot.docked === true ? 'Yes' : robot.docked === false ? 'No' : '—'}</dd></div><div><dt>Version</dt><dd>${escapeHtml(robot.providerVersion || '—')}</dd></div><div><dt>Map</dt><dd>${escapeHtml(robot.mapName || '—')}</dd></div></dl><div class="live-task"><span>Mission status</span><strong>${escapeHtml(task)}</strong></div><div class="live-card-foot"><span>${escapeHtml(robot.buildingName || 'No building')}</span><span class="${attention ? 'danger-text' : 'safe-text'}">${attention ? `${attention} item${attention === 1 ? '' : 's'} need attention` : 'No alerts'}</span></div></button>`;
+  }).join('') : `<div class="empty">${operations.fleet?.length ? 'No CenoBots robots match these filters.' : 'No visible CenoBots robots. Run synchronization or review API account access.'}</div>`;
+  $('#cenoBotsLiveFleet').querySelectorAll('[data-cenobots-robot]').forEach((button) => button.addEventListener('click',async () => { setDashboardView('robots'); await loadPassport(button.dataset.cenobotsRobot); $('#detailPanel').scrollIntoView({ behavior:'smooth',block:'start' }); }));
+  $('#cenoBotsAlertCount').textContent=alerts.length;
+  $('#cenoBotsAlerts').innerHTML=alerts.length ? alerts.slice(0,50).map((alert) => `<article class="action-alert alert-${escapeHtml(alert.severity)}"><div class="alert-heading"><div><strong>${escapeHtml(alert.title)}</strong><small>${escapeHtml(alert.serialNumber)} · ${escapeHtml(alert.message)}</small></div><span class="workflow-status">${escapeHtml(alert.type.replaceAll('_',' '))}</span></div><time class="event-time">${formatDate(alert.occurredAt)}</time></article>`).join('') : '<div class="empty"><span class="safe-text">No CenoBots maintenance or system-error alerts.</span></div>';
+  const duration=diagnostics.lastSyncDurationMs == null ? '—' : diagnostics.lastSyncDurationMs < 1000 ? `${diagnostics.lastSyncDurationMs} ms` : `${(diagnostics.lastSyncDurationMs/1000).toFixed(1)} s`; const history=(diagnostics.syncHistory || []).slice().reverse().slice(0,6);
+  $('#cenoBotsDiagnostics').innerHTML=`<div class="diagnostic-grid"><div><span>Connector</span><strong>${diagnostics.liveEnabled ? 'Live EU bridge' : 'Mock fallback'}</strong></div><div><span>Last result</span><strong class="${diagnostics.lastSyncStatus === 'success' ? 'safe-text' : diagnostics.lastSyncStatus === 'error' ? 'danger-text' : ''}">${escapeHtml(diagnostics.lastSyncStatus || 'Never')}</strong></div><div><span>Last duration</span><strong>${escapeHtml(duration)}</strong></div><div><span>Robots updated</span><strong>${diagnostics.lastSyncCount ?? '—'}</strong></div><div><span>Warnings</span><strong>${diagnostics.lastSyncWarnings || 0}</strong></div><div><span>Request spacing</span><strong>${diagnostics.minimumRequestIntervalSeconds || 1.05} s</strong></div></div>${diagnostics.lastError ? `<div class="resource-warning">${escapeHtml(diagnostics.lastError)}</div>` : ''}<div class="sync-history">${history.map((item) => `<div><span class="status status-${item.status === 'success' ? 'active' : 'draft'}">${escapeHtml(item.status)}</span><span>${escapeHtml(item.trigger)} · ${item.count} robots · ${item.warnings} warnings</span><time>${formatDate(item.completedAt)}</time></div>`).join('') || '<div class="provider-empty serial">No CenoBots synchronization history recorded yet.</div>'}</div>`;
+  $('#cenoBotsRefreshStatus').textContent=`Updated ${new Date(operations.generatedAt || Date.now()).toLocaleTimeString([], { hour:'2-digit',minute:'2-digit',second:'2-digit' })}`;
+}
+
+async function loadCenoBotsOperations() {
+  const payload=await api('/api/v1/cenobots/operations'); state.cenoBotsOperations=payload.data; renderCenoBotsOperations();
+}
+
 function populateDiagnosticRobots() { const select=$('#diagnosticRobotSelect'); const selected=select.value; const fleet=state.autoXingOperations?.fleet || []; select.innerHTML='<option value="">Select a robot</option>'+fleet.map((robot) => `<option value="${escapeHtml(robot.id)}">${escapeHtml(robot.serialNumber)} · ${escapeHtml(robot.externalId)}</option>`).join(''); if (fleet.some((robot) => robot.id === selected)) select.value=selected; }
 
 async function loadMaintenanceSchedules() {
@@ -390,7 +417,7 @@ function startAutoRefresh() {
   clearInterval(state.autoRefresh.timer);
   state.autoRefresh.timer = setInterval(async () => {
     if (!state.token || document.hidden || state.sync.provider) return;
-    try { await Promise.all([loadAutoXingOperations(),loadMaintenanceSchedules(),loadEscalationRules(),loadMonitoring(),loadEmailNotifications(),loadRobots(),loadOperationsSummary(),loadAdapters()]); }
+    try { await Promise.all([loadAutoXingOperations(),loadCenoBotsOperations(),loadMaintenanceSchedules(),loadEscalationRules(),loadMonitoring(),loadEmailNotifications(),loadRobots(),loadOperationsSummary(),loadAdapters()]); }
     catch (error) { if (error.status !== 401) $('#autoRefreshStatus').textContent = `Automatic refresh paused · ${error.message}`; }
   },state.autoRefresh.intervalMs);
 }
@@ -461,7 +488,7 @@ function setSyncButtons(running) {
 
 function setSyncStatus(message, kind = '', retryProvider = null) {
   const panel = $('#syncStatus'); panel.className = `sync-status ${kind}`.trim(); panel.innerHTML = `<span>${escapeHtml(message)}</span>${retryProvider ? `<button type="button" class="text-button" id="retrySync">Try again</button>` : ''}`;
-  if (retryProvider) $('#retrySync').addEventListener('click', () => syncAdapter(retryProvider));
+  if (retryProvider) $('#retrySync').addEventListener('click', () => retryProvider === 'all' ? syncAllAdapters() : syncAdapter(retryProvider));
 }
 
 async function syncAdapter(provider) {
@@ -476,7 +503,31 @@ async function syncAdapter(provider) {
     if (error.status !== 401) { setSyncStatus(`${provider} synchronization failed. ${error.message}`, 'error', provider); toast(`Sync failed: ${error.message}`, true); await loadAdapters().catch(() => {}); }
   } finally { clearInterval(state.sync.timer); state.sync.timer = null; state.sync.provider = null; setSyncButtons(false); }
 }
-async function refreshAll() { try { await Promise.all([loadRobotOptions(),loadRobots(),loadEvents(),loadAdapters(),loadOperationsSummary(),loadServiceCases(),loadCompatibility(),loadNotifications(),loadAudit(),loadAutoXingResources(),loadAutoXingTasks(),loadAutoXingOperations(),loadMaintenanceSchedules(),loadEscalationRules(),loadMonitoring(),loadRobotAccounts(),loadEmailNotifications(),loadWorkforceMatrix()]); } catch (error) { if (error.status !== 401) toast(error.message,true); } }
+
+async function syncAllAdapters() {
+  if (state.sync.provider) return toast(`${state.sync.provider} synchronization is already running`);
+  const providers = ['autoxing', 'cenobots']; const labels = { autoxing:'AutoXing', cenobots:'CenoBots' };
+  state.sync.provider = 'all providers'; state.sync.startedAt = Date.now(); setSyncButtons(true);
+  const updateElapsed = () => setSyncStatus(`Synchronizing AutoXing and CenoBots… ${Math.floor((Date.now() - state.sync.startedAt) / 1000)}s`);
+  updateElapsed(); state.sync.timer = setInterval(updateElapsed, 1000);
+  try {
+    const results = await Promise.allSettled(providers.map(async (provider) => ({ provider, payload:await api(`/api/v1/adapters/${provider}/sync`, { method:'POST', body:'{}' }) })));
+    const summaries = results.map((result, index) => {
+      const provider = providers[index]; const label = labels[provider];
+      if (result.status === 'rejected') return `${label}: failed (${result.reason.message})`;
+      const data = result.value.payload.data || {}; const warnings = data.resourceErrors?.length || data.resources?.warnings || 0;
+      return `${label}: ${data.count ?? 0} robots${warnings ? `, ${warnings} warning${warnings === 1 ? '' : 's'}` : ''}`;
+    });
+    const successes = results.filter((result) => result.status === 'fulfilled').length;
+    const kind = successes === providers.length ? (results.some((result) => (result.value?.payload.data?.resourceErrors?.length || result.value?.payload.data?.resources?.warnings)) ? 'warning' : 'success') : successes ? 'warning' : 'error';
+    const heading = successes === providers.length ? 'All providers synchronized.' : successes ? 'Synchronization completed partially.' : 'Synchronization failed.';
+    setSyncStatus(`${heading} ${summaries.join(' · ')}`, kind, successes < providers.length ? 'all' : null);
+    toast(successes === providers.length ? 'All robot providers synchronized' : successes ? 'Some providers could not synchronize' : 'All provider synchronizations failed', successes === 0);
+    if (successes) await refreshAll();
+    else await loadAdapters().catch(() => {});
+  } finally { clearInterval(state.sync.timer); state.sync.timer = null; state.sync.provider = null; setSyncButtons(false); }
+}
+async function refreshAll() { try { await Promise.all([loadRobotOptions(),loadRobots(),loadEvents(),loadAdapters(),loadOperationsSummary(),loadServiceCases(),loadCompatibility(),loadNotifications(),loadAudit(),loadAutoXingResources(),loadAutoXingTasks(),loadAutoXingOperations(),loadCenoBotsOperations(),loadMaintenanceSchedules(),loadEscalationRules(),loadMonitoring(),loadRobotAccounts(),loadEmailNotifications(),loadWorkforceMatrix()]); } catch (error) { if (error.status !== 401) toast(error.message,true); } }
 
 function setFormBusy(form, busy) {
   form.querySelectorAll('button[type="submit"], button:not([type])').forEach((button) => { if (button.value !== 'cancel') button.disabled = busy; });
@@ -505,6 +556,7 @@ function bindUi() {
   $('#refreshAudit').addEventListener('click', loadAudit);
   $('#refreshResources').addEventListener('click', () => loadAutoXingResources().catch((error) => toast(error.message, true)));
   $('#refreshAutoXingOperations').addEventListener('click', () => loadAutoXingOperations().catch((error) => toast(error.message, true)));
+  $('#refreshCenoBotsOperations').addEventListener('click', () => loadCenoBotsOperations().catch((error) => toast(error.message, true)));
   $('#refreshMaintenanceSchedules').addEventListener('click',() => loadMaintenanceSchedules().catch((error) => toast(error.message,true)));
   $('#newMaintenanceSchedule').addEventListener('click',() => openMaintenanceScheduleDialog().catch((error) => toast(error.message,true)));
   $('#maintenanceRobot').addEventListener('change',populateMaintenanceTechnicians);
@@ -514,6 +566,8 @@ function bindUi() {
   $('#refreshMonitoring').addEventListener('click', () => loadMonitoring().catch((error) => toast(error.message,true)));
   let fleetSearchTimer; $('#autoXingFleetSearch').addEventListener('input',(event) => { clearTimeout(fleetSearchTimer); fleetSearchTimer=setTimeout(() => { state.autoXingFleet.query=event.target.value; state.autoXingFleet.page=1; renderAutoXingFleet(); },150); });
   [['autoXingFleetStatus','status'],['autoXingFleetBattery','battery'],['autoXingFleetAlerts','alerts']].forEach(([id,key]) => $(`#${id}`).addEventListener('change',(event) => { state.autoXingFleet[key]=event.target.value; state.autoXingFleet.page=1; renderAutoXingFleet(); }));
+  let cenoBotsSearchTimer; $('#cenoBotsFleetSearch').addEventListener('input',(event) => { clearTimeout(cenoBotsSearchTimer); cenoBotsSearchTimer=setTimeout(() => { state.cenoBotsFleet.query=event.target.value; renderCenoBotsOperations(); },150); });
+  [['cenoBotsFleetStatus','status'],['cenoBotsFleetAttention','attention']].forEach(([id,key]) => $(`#${id}`).addEventListener('change',(event) => { state.cenoBotsFleet[key]=event.target.value; renderCenoBotsOperations(); }));
   $('#autoXingFleetPrevious').addEventListener('click',() => { if (state.autoXingFleet.page > 1) { state.autoXingFleet.page -= 1; renderAutoXingFleet(); } }); $('#autoXingFleetNext').addEventListener('click',() => { state.autoXingFleet.page += 1; renderAutoXingFleet(); });
   $('#refreshTasks').addEventListener('click', () => loadAutoXingTasks().catch((error) => toast(error.message, true)));
   $('#taskRobotFilter').addEventListener('change', () => loadAutoXingTasks().catch((error) => toast(error.message, true)));
@@ -525,7 +579,7 @@ function bindUi() {
   $('#workforceStatusFilter').addEventListener('change', renderWorkforceMatrix);
   ['eventRobotFilter','eventSeverityFilter','eventTypeFilter','eventFromFilter','eventToFilter'].forEach((id) => $(`#${id}`).addEventListener('change', loadEvents)); $('#clearEventFilters').addEventListener('click', () => { ['eventRobotFilter','eventSeverityFilter','eventTypeFilter','eventFromFilter','eventToFilter'].forEach((id) => { $(`#${id}`).value = ''; }); loadEvents(); });
   document.querySelectorAll('[data-metric-action]').forEach((card) => { card.addEventListener('click', () => applyMetricAction(card.dataset.metricAction)); card.addEventListener('keydown', (event) => { if (['Enter',' '].includes(event.key)) { event.preventDefault(); applyMetricAction(card.dataset.metricAction); } }); });
-  $('#syncAutoXing').addEventListener('click', () => syncAdapter('autoxing')); $('#syncCenoBots').addEventListener('click', () => syncAdapter('cenobots'));
+  $('#syncAll').addEventListener('click', syncAllAdapters); $('#syncAutoXing').addEventListener('click', () => syncAdapter('autoxing')); $('#syncCenoBots').addEventListener('click', () => syncAdapter('cenobots')); $('#syncCenoBotsWorkspace').addEventListener('click', () => syncAdapter('cenobots'));
   $('#exportTenant').addEventListener('click', () => download('/api/v1/exports/tenant.json', 'altegro-tenant-export.json').catch((error) => toast(error.message, true)));
   $('#exportRobotsCsv').addEventListener('click', () => download('/api/v1/exports/robots.csv', 'altegro-robots.csv').catch((error) => toast(error.message, true)));
   $('#serviceTechniciansButton').addEventListener('click', () => { setDashboardView('workforce'); $('#workforceSection').scrollIntoView({ behavior:'smooth', block:'start' }); });

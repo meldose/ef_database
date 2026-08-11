@@ -20,15 +20,31 @@ class CenoBotsError(RuntimeError):
 
 
 class CenoBotsClient:
-    def __init__(self, host: str, access_key: str, secret_key: str, timeout: float = 20.0):
+    def __init__(
+        self,
+        host: str,
+        access_key: str,
+        secret_key: str,
+        timeout: float = 20.0,
+        min_request_interval: float | None = None,
+    ):
         self.host = host.rstrip('/')
         self.access_key = access_key
         self.secret_key = secret_key
         self.timeout = timeout
+        configured_interval = os.environ.get('CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS', '1.05')
+        self.min_request_interval = max(
+            0.0,
+            float(configured_interval) if min_request_interval is None else float(min_request_interval),
+        )
+        self._last_request_at = 0.0
 
     def _request(self, method: str, path: str, *, query: dict | None = None, body: dict | None = None):
         query = query or {}
         request_path = f"{path}?{urlencode(query)}" if query else path
+        elapsed = time.monotonic() - self._last_request_at
+        if elapsed < self.min_request_interval:
+            time.sleep(self.min_request_interval - elapsed)
         timestamp = str(int(time.time() * 1000))
         signature_input = f"{method.upper()}{timestamp}{request_path}".encode('utf-8')
         signature = hmac.new(self.secret_key.encode('utf-8'), signature_input, hashlib.sha256).hexdigest()
@@ -43,6 +59,7 @@ class CenoBotsClient:
             headers['Content-Type'] = 'application/json'
         request = Request(f"{self.host}{request_path}", data=data, headers=headers, method=method.upper())
         try:
+            self._last_request_at = time.monotonic()
             with urlopen(request, timeout=self.timeout) as response:
                 raw = response.read().decode('utf-8')
         except HTTPError as error:
@@ -93,13 +110,21 @@ class CenoBotsClient:
             raise CenoBotsError(f"{operation} failed ({response.get('code')}): {response.get('info') or 'unknown provider error'}")
         return response.get('data')
 
-    def snapshot(self):
-        devices = self.response_data(self.device_open_ids(), 'Device list') or []
-        configured_ids = [value.strip() for value in (os.environ.get('CENOBOTS_ROBOT_OPEN_IDS=9Y8C0RZPP2') or os.environ.get('CENOBOTS_ROBOT_OPEN_ID') or '').split(',') if value.strip()]
-        listed_ids = {str(device.get('deviceOpenId') or '').strip() for device in devices}
-        devices.extend({'deviceOpenId': device_open_id, 'licensePlate': ''} for device_open_id in configured_ids if device_open_id not in listed_ids)
+    def snapshot(self, device_ids: list[str] | None = None):
+        if device_ids is None:
+            devices = list(self.response_data(self.device_open_ids(), 'Device list') or [])
+            configured_ids = configured_device_open_ids()
+            listed_ids = {str(device.get('deviceOpenId') or '').strip() for device in devices}
+            devices.extend({'deviceOpenId': device_open_id, 'licensePlate': ''} for device_open_id in configured_ids if device_open_id not in listed_ids)
+        else:
+            devices = [{'deviceOpenId': value, 'licensePlate': ''} for value in dict.fromkeys(device_ids) if value]
         robots = []
         warnings = []
+        if not devices:
+            warnings.append({
+                'operation': 'device-list',
+                'message': 'No robots are assigned to this CenoBots Open API account. Assign a robot in the CenoBots operation platform, then synchronize again.',
+            })
         for device in devices:
             device_open_id = str(device.get('deviceOpenId') or '').strip()
             if not device_open_id:
@@ -124,6 +149,14 @@ class CenoBotsClient:
         return {'ok': True, 'provider': 'cenobots', 'version': 'open-api-v1.0.16', 'robots': robots, 'count': len(robots), 'warnings': warnings}
 
 
+def configured_device_open_ids() -> list[str]:
+    """Return unique configured fallback IDs without embedding device values in code."""
+    values = []
+    for name in ('CENOBOTS_ROBOT_OPEN_IDS', 'CENOBOTS_ROBOT_OPEN_ID'):
+        values.extend(value.strip() for value in os.environ.get(name, '').split(',') if value.strip())
+    return list(dict.fromkeys(values))
+
+
 def load_env_file():
     env_path = Path(os.environ.get('CENOBOTS_ENV_FILE') or Path(__file__).resolve().parents[2] / '.env')
     if not env_path.is_file():
@@ -139,9 +172,26 @@ def load_env_file():
             os.environ[key] = value
 
 
+def secret_value(name: str) -> str:
+    value = os.environ.get(name, '')
+    if value:
+        return value
+    file_path = os.environ.get(f'{name}_FILE', '')
+    if not file_path:
+        return ''
+    try:
+        return Path(file_path).read_text(encoding='utf-8').strip()
+    except OSError as error:
+        raise CenoBotsError(f'Could not read managed secret {name}: {error}') from error
+
+
 def from_environment() -> CenoBotsClient:
     load_env_file()
-    values = {key: os.environ.get(key, '') for key in ('CENOBOTS_HOST', 'CENOBOTS_ACCESS_KEY', 'CENOBOTS_SECRET_KEY')}
+    values = {
+        'CENOBOTS_HOST': os.environ.get('CENOBOTS_HOST', ''),
+        'CENOBOTS_ACCESS_KEY': secret_value('CENOBOTS_ACCESS_KEY'),
+        'CENOBOTS_SECRET_KEY': secret_value('CENOBOTS_SECRET_KEY'),
+    }
     missing = [key for key, value in values.items() if not value]
     if missing:
         raise CenoBotsError('Missing environment variables: ' + ', '.join(missing))
@@ -150,9 +200,9 @@ def from_environment() -> CenoBotsClient:
 
 if __name__ == '__main__':
     command = sys.argv[1] if len(sys.argv) > 1 else 'status'
-    device_open_id = sys.argv[2] if len(sys.argv) > 2 else os.environ.get('CENOBOTS_ROBOT_OPEN_ID', '')
     try:
         client = from_environment()
+        device_open_id = sys.argv[2] if len(sys.argv) > 2 else next(iter(configured_device_open_ids()), '')
         if command == 'snapshot':
             result = client.snapshot()
         elif command == 'open-ids':

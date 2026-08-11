@@ -9,6 +9,7 @@ const testDataFile = path.join('/tmp', `altegro-test-state-${process.pid}.json`)
 fs.rmSync(testDataFile, { force: true });
 process.env.ALTEGRO_DATA_FILE = testDataFile;
 process.env.ALTEGRO_PERSISTENCE = 'true';
+process.env.AUTOXING_LIVE = 'false';
 process.env.CENOBOTS_LIVE = 'false';
 process.env.EMAIL_ALERTS_ENABLED = 'true';
 process.env.EMAIL_ALERT_TRANSPORT = 'capture';
@@ -102,6 +103,20 @@ async function startFakeSmtpServer() {
     assert.equal(result.body.facets.total, 2);
     const robotId = result.body.data[0].id;
     const cenobotsRobotId = result.body.data[1].id;
+
+    result = await request('/api/v1/cenobots/operations');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.summary.total, 1);
+    assert.equal(result.body.data.fleet[0].id, cenobotsRobotId);
+    assert.equal(result.body.data.fleet[0].externalId, 'CB-1001');
+    assert.equal(result.body.data.diagnostics.liveEnabled, false);
+    assert.ok(Array.isArray(result.body.data.alerts));
+    state.robots.get(cenobotsRobotId).maintenance = { maintenanceItems:[{ name:'Solution Tank Filter',remainPercent:'19%',overDueHours:null }] };
+    state.robots.get(cenobotsRobotId).errors = [{ code:'CB-TEST',message:'Synthetic system error' }];
+    result = await request('/api/v1/cenobots/operations');
+    assert.equal(result.body.data.summary.maintenanceDue, 1);
+    assert.equal(result.body.data.summary.errors, 1);
+    assert.equal(result.body.data.alerts.length, 2);
 
     result=await request('/api/v1/autoxing/maintenance-schedules',{ method:'POST',body:JSON.stringify({ robotId,title:'Quarterly AutoXing inspection',description:'Inspect sensors and safety systems.',nextDueAt:'2026-07-01T09:00:00.000Z',intervalDays:90,priority:'high',assignedTechnicianId:'technician-lena' }) });
     assert.equal(result.status,201); assert.equal(result.body.data.dueState,'overdue'); assert.equal(result.body.data.technicianName,'Midhun Eldose'); const maintenanceScheduleId=result.body.data.id;

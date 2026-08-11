@@ -44,6 +44,7 @@
         <button type="button" role="tab" aria-selected="false" data-dashboard-tab="robots">Robots</button>
         <button type="button" role="tab" aria-selected="false" data-dashboard-tab="operations">Events &amp; Service</button>
         <button type="button" role="tab" aria-selected="false" data-dashboard-tab="autoxing">AutoXing</button>
+        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="cenobots">CenoBots</button>
         <button type="button" role="tab" aria-selected="false" data-dashboard-tab="workforce">Technicians</button>
         <button type="button" role="tab" aria-selected="false" data-dashboard-tab="admin">Administration</button>
       </nav>
@@ -56,6 +57,7 @@
         <div class="hero-actions">
           <button class="button secondary" id="exportTenant">Export tenant</button>
           <button class="button secondary" id="exportRobotsCsv">Export robots CSV</button>
+          <button class="button primary sync-button" id="syncAll"><span class="button-label">Sync all robots</span></button>
           <button class="button secondary sync-button" id="syncAutoXing"><span class="button-label">Sync AutoXing</span></button>
           <button class="button secondary sync-button" id="syncCenoBots"><span class="button-label">Sync CenoBots</span></button>
           <button class="button secondary" id="serviceTechniciansButton" type="button">Service Technicians</button>
@@ -186,6 +188,24 @@
         <article class="panel audit-panel" id="resourceExplorerPanel">
           <div class="panel-header"><div><p class="eyebrow">AutoXing fleet resources</p><h2>Resource explorer</h2></div><button class="text-button" id="refreshResources">Refresh</button></div>
           <div id="resourceExplorer" class="record-list"><div class="empty">Loading businesses, buildings, and maps…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid" id="cenobotsWorkspace" data-dashboard-view="cenobots">
+        <article class="panel audit-panel">
+          <div class="panel-header"><div><p class="eyebrow">Live read-only telemetry</p><h2>CenoBots live fleet</h2></div><div class="panel-header-actions"><span class="auto-refresh-status" id="cenoBotsRefreshStatus">Waiting for fleet data…</span><button class="text-button" id="refreshCenoBotsOperations" type="button">Refresh</button><button class="button primary mini sync-button" id="syncCenoBotsWorkspace" type="button"><span class="button-label">Sync CenoBots</span></button></div></div>
+          <div id="cenoBotsSummary" class="resource-metrics cenobots-summary-grid"><div class="empty">Loading CenoBots summary…</div></div>
+          <div class="fleet-filter-toolbar cenobots-filter-toolbar"><label>Search<input id="cenoBotsFleetSearch" type="search" placeholder="Serial, Open ID, building or map" /></label><label>Status<select id="cenoBotsFleetStatus"><option value="all">All statuses</option><option value="online">Online</option><option value="offline">Offline</option><option value="unknown">Unknown</option></select></label><label>Attention<select id="cenoBotsFleetAttention"><option value="all">All robots</option><option value="attention">Needs attention</option><option value="clear">No alerts</option></select></label></div>
+          <div id="cenoBotsLiveFleet" class="autoxing-live-grid"><div class="empty">Loading CenoBots fleet status…</div></div>
+        </article>
+      </section>
+      <section class="lower-grid" data-dashboard-view="cenobots">
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Connector health</p><h2>CenoBots sync diagnostics</h2></div></div>
+          <div id="cenoBotsDiagnostics" class="record-list"><div class="empty">Loading synchronization diagnostics…</div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Maintenance and errors</p><h2>Robot attention queue</h2></div><span class="count-pill" id="cenoBotsAlertCount">0</span></div>
+          <div id="cenoBotsAlerts" class="record-list"><div class="empty">Loading CenoBots alerts…</div></div>
         </article>
       </section>
       <section class="lower-grid">
