@@ -98,6 +98,63 @@ class RobotWrapperTests(unittest.TestCase):
         client.continue_current_mission.assert_called_once_with('KK93DZ0Q37')
         client.stop_current_mission.assert_called_once_with('KK93DZ0Q37')
 
+    def test_status_helpers_return_provider_values(self):
+        client = self.create_client()
+        client.device_status.return_value = successful({
+            'soc': 73,
+            'online': True,
+            'running': False,
+            'charging': True,
+            'dockingStationDetail': {'isDocked': True},
+            'missionTaskDetail': {'taskStatus': 'PAUSED', 'taskProgress': 25},
+        })
+        robot = Robot('KK93DZ0Q37', client=client)
+
+        self.assertEqual(robot.battery_level(), 73)
+        self.assertTrue(robot.is_online())
+        self.assertFalse(robot.is_running())
+        self.assertTrue(robot.is_charging())
+        self.assertTrue(robot.is_docked())
+        self.assertEqual(robot.get_current_task()['taskStatus'], 'PAUSED')
+
+    def test_maps_areas_diagnostics_and_history_are_unwrapped(self):
+        client = self.create_client()
+        client.maps.return_value = successful([{'mapId': 42}])
+        client.areas.return_value = successful([{'areaId': '3'}])
+        client.robot_info.return_value = successful({'serialNumber': 'L50-10041'})
+        client.maintenance_detail.return_value = successful({'maintenanceItems': []})
+        client.robot_setting.return_value = successful({'runDebug': False})
+        client.system_errors.return_value = successful([])
+        client.mission_history.return_value = successful({'data': []})
+        client.mission_summary.return_value = successful({'totalJobs': 12})
+        robot = Robot('KK93DZ0Q37', client=client)
+
+        self.assertEqual(robot.get_maps(), [{'mapId': 42}])
+        self.assertEqual(robot.get_areas(42), [{'areaId': '3'}])
+        self.assertEqual(robot.get_robot_info()['serialNumber'], 'L50-10041')
+        self.assertEqual(robot.get_maintenance(), {'maintenanceItems': []})
+        self.assertEqual(robot.get_settings(), {'runDebug': False})
+        self.assertEqual(robot.get_errors(), [])
+        self.assertEqual(robot.get_task_history(), {'data': []})
+        self.assertEqual(robot.get_task_summary()['totalJobs'], 12)
+
+    def test_area_cleaning_requires_an_area_and_uses_aliases(self):
+        client = self.create_client()
+        client.create_temporary_mission.return_value = successful('mission-1')
+        client.continue_current_mission.return_value = successful({})
+        client.go_home.return_value = successful({})
+        robot = Robot('KK93DZ0Q37', client=client)
+
+        with self.assertRaisesRegex(CenoBotsError, 'at least one area ID'):
+            robot.start_area_cleaning_task([])
+        robot.start_area_cleaning_task(['3'], map_id=42, map_version='v7')
+        robot.resume_task()
+        robot.return_home()
+
+        self.assertEqual(client.create_temporary_mission.call_args.args[0]['areaIds'], ['3'])
+        client.continue_current_mission.assert_called_once_with('KK93DZ0Q37')
+        client.go_home.assert_called_once_with('KK93DZ0Q37')
+
 
 if __name__ == '__main__':
     unittest.main()

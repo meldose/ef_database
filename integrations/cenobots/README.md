@@ -85,6 +85,31 @@ robot.continue_task()
 robot.stop_task()
 ```
 
+Useful monitoring and reporting methods are also available:
+
+```python
+robot.get_status()
+robot.get_current_task()
+robot.battery_level()
+robot.is_online()
+robot.is_running()
+robot.is_charging()
+robot.is_docked()
+
+robot.get_robot_info()
+robot.get_maintenance()
+robot.get_errors()
+robot.get_settings()
+robot.get_maps()
+robot.get_areas()                 # current map
+robot.get_task_history()
+robot.get_task_summary()
+
+robot.start_area_cleaning_task(["3", "8"])
+robot.resume_task()               # alias for continue_task()
+robot.return_home()               # alias for go_home()
+```
+
 `continue_task()` resumes a paused mission. `stop_task()` ends the mission and cannot be undone. When `go_home()` reports provider code `35002` (`Another mission in progress`), stop the active mission first and then send the robot home:
 
 ```python

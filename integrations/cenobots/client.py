@@ -98,13 +98,35 @@ class CenoBotsClient:
     def areas(self, device_open_id: str, map_id: int | str):
         return self._request('GET', '/app/openapi/v1/map/area', query={'deviceOpenId': device_open_id, 'mapId': map_id})
 
-    def mission_history(self, device_open_id: str, start_timestamp: int | None = None, end_timestamp: int | None = None, page_index: int = 0, page_length: int = 50):
+    def mission_history(
+        self,
+        device_open_id: str,
+        start_timestamp: int | None = None,
+        end_timestamp: int | None = None,
+        page_index: int = 0,
+        page_length: int = 50,
+        include_navigation: bool = False,
+    ):
         request_data = {'deviceOpenId': device_open_id}
         if start_timestamp is not None:
             request_data['startTimestamp'] = start_timestamp
         if end_timestamp is not None:
             request_data['endTimestamp'] = end_timestamp
+        request_data['isShowNavigationMission'] = include_navigation
         return self._request('POST', '/app/openapi/v1/mission/list', body={'pageIndex': page_index, 'pageLength': page_length, 'requestData': request_data})
+
+    def mission_summary(
+        self,
+        device_open_id: str,
+        start_timestamp: int | None = None,
+        end_timestamp: int | None = None,
+    ):
+        body = {'deviceOpenId': device_open_id}
+        if start_timestamp is not None:
+            body['startTimestamp'] = start_timestamp
+        if end_timestamp is not None:
+            body['endTimestamp'] = end_timestamp
+        return self._request('POST', '/app/openapi/v1/mission/summary', body=body)
 
     def _command_request(self, path: str, *, body: dict | None = None):
         commands_enabled = self.commands_enabled
