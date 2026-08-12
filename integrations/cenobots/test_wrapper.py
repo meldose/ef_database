@@ -155,6 +155,58 @@ class RobotWrapperTests(unittest.TestCase):
         client.continue_current_mission.assert_called_once_with('KK93DZ0Q37')
         client.go_home.assert_called_once_with('KK93DZ0Q37')
 
+    def test_water_level_and_station_helpers_preserve_provider_readings(self):
+        client = self.create_client()
+        client.device_status.return_value = successful({
+            'waterBox': [82, 79],
+            'dirtyBox': [18],
+            'dockingStationDetail': {
+                'isDocked': True,
+                'type': 'CWS_01',
+                'cleanWaterStatus': 'ADDING_WATER',
+                'dirtyWaterStatus': 'DRAINING_SEWAGE',
+            },
+        })
+        robot = Robot('KK93DZ0Q37', client=client)
+
+        self.assertEqual(robot.get_water_levels(), {
+            'cleanWater': [82, 79],
+            'dirtyWater': [18],
+        })
+        self.assertEqual(robot.get_clean_water_levels(), [82, 79])
+        self.assertEqual(robot.get_dirty_water_levels(), [18])
+        self.assertEqual(robot.get_water_station_status(), {
+            'isDocked': True,
+            'stationType': 'CWS_01',
+            'cleanWaterStatus': 'ADDING_WATER',
+            'dirtyWaterStatus': 'DRAINING_SEWAGE',
+        })
+        self.assertTrue(robot.is_adding_clean_water())
+        self.assertFalse(robot.is_adding_cleaning_solution())
+        self.assertTrue(robot.is_draining_dirty_water())
+
+    def test_water_usage_uses_mission_summary(self):
+        client = self.create_client()
+        client.mission_summary.return_value = successful({
+            'totalWater': 12.5,
+            'totalCleaningSolution': 240,
+            'totalJobs': 7,
+            'totalWorkingTime': 93,
+            'totalCleanedArea': 840.5,
+        })
+        robot = Robot('KK93DZ0Q37', client=client)
+
+        usage = robot.get_water_usage(start_timestamp=1000, end_timestamp=2000)
+
+        self.assertEqual(usage['waterLiters'], 12.5)
+        self.assertEqual(usage['cleaningSolutionMilliliters'], 240)
+        self.assertEqual(usage['totalJobs'], 7)
+        client.mission_summary.assert_called_once_with(
+            'KK93DZ0Q37',
+            start_timestamp=1000,
+            end_timestamp=2000,
+        )
+
 
 if __name__ == '__main__':
     unittest.main()

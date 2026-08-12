@@ -115,6 +115,62 @@ class Robot:
         docking = self.get_status().get('dockingStationDetail') or {}
         return bool(docking.get('isDocked'))
 
+    def get_water_levels(self) -> dict[str, list[int]]:
+        """Return provider readings for the clean- and dirty-water tanks.
+
+        CenoBots returns these values as arrays and does not document a stable
+        percentage/unit for each entry, so the wrapper preserves them exactly.
+        """
+        status = self.get_status()
+        return {
+            'cleanWater': list(status.get('waterBox') or []),
+            'dirtyWater': list(status.get('dirtyBox') or []),
+        }
+
+    def get_clean_water_levels(self) -> list[int]:
+        return self.get_water_levels()['cleanWater']
+
+    def get_dirty_water_levels(self) -> list[int]:
+        return self.get_water_levels()['dirtyWater']
+
+    def get_water_station_status(self) -> dict[str, Any]:
+        """Return docking, filling, solution, and sewage-draining status."""
+        docking = self.get_status().get('dockingStationDetail') or {}
+        return {
+            'isDocked': bool(docking.get('isDocked')),
+            'stationType': docking.get('type') or '',
+            'cleanWaterStatus': docking.get('cleanWaterStatus') or '',
+            'dirtyWaterStatus': docking.get('dirtyWaterStatus') or '',
+        }
+
+    def is_adding_clean_water(self) -> bool:
+        return self.get_water_station_status()['cleanWaterStatus'] == 'ADDING_WATER'
+
+    def is_adding_cleaning_solution(self) -> bool:
+        return self.get_water_station_status()['cleanWaterStatus'] == 'ADDING_CLEANING_SOLUTION'
+
+    def is_draining_dirty_water(self) -> bool:
+        return self.get_water_station_status()['dirtyWaterStatus'] == 'DRAINING_SEWAGE'
+
+    def get_water_usage(
+        self,
+        *,
+        start_timestamp: int | None = None,
+        end_timestamp: int | None = None,
+    ) -> dict[str, Any]:
+        """Return aggregate water and cleaning-solution consumption."""
+        summary = self.get_task_summary(
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
+        )
+        return {
+            'waterLiters': summary.get('totalWater', 0),
+            'cleaningSolutionMilliliters': summary.get('totalCleaningSolution', 0),
+            'totalJobs': summary.get('totalJobs', 0),
+            'totalWorkingMinutes': summary.get('totalWorkingTime', 0),
+            'totalCleanedSquareMeters': summary.get('totalCleanedArea', 0),
+        }
+
     def go_home(self) -> dict[str, Any]:
         """Tell the robot to return to its charging station."""
         return self._command_result(self._client.go_home(self.device_open_id), 'Go home')

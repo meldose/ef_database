@@ -110,6 +110,24 @@ robot.resume_task()               # alias for continue_task()
 robot.return_home()               # alias for go_home()
 ```
 
+Water telemetry and usage functions:
+
+```python
+robot.get_water_levels()
+robot.get_clean_water_levels()
+robot.get_dirty_water_levels()
+robot.get_water_station_status()
+
+robot.is_adding_clean_water()
+robot.is_adding_cleaning_solution()
+robot.is_draining_dirty_water()
+
+robot.get_water_usage()
+robot.get_water_usage(start_timestamp=START_MS, end_timestamp=END_MS)
+```
+
+The API reports tank readings as integer arrays without documenting a stable unit or percentage for each entry, so the wrapper returns those readings unchanged. CenoBots Open API v1.0.16 reports automatic filling/draining status but does not expose a command to manually start either operation.
+
 `continue_task()` resumes a paused mission. `stop_task()` ends the mission and cannot be undone. When `go_home()` reports provider code `35002` (`Another mission in progress`), stop the active mission first and then send the robot home:
 
 ```python
