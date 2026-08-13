@@ -9,6 +9,9 @@ const testDataFile = path.join('/tmp', `altegro-test-state-${process.pid}.json`)
 fs.rmSync(testDataFile, { force: true });
 process.env.ALTEGRO_DATA_FILE = testDataFile;
 process.env.ALTEGRO_PERSISTENCE = 'true';
+process.env.ALTEGRO_PERSISTENCE_DRIVER = 'file';
+process.env.OBJECT_STORAGE_DRIVER = 'inline';
+process.env.ALTEGRO_SYNC_MODE = 'inline';
 process.env.AUTOXING_LIVE = 'false';
 process.env.CENOBOTS_LIVE = 'false';
 process.env.EMAIL_ALERTS_ENABLED = 'true';
@@ -59,8 +62,8 @@ async function startFakeSmtpServer() {
     const frontendResponse = await fetch(`http://localhost:${port}/`);
     assert.equal(frontendResponse.status, 200);
     const frontendHtml = await frontendResponse.text();
-    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
-    for (const view of ['overview', 'robots', 'operations', 'autoxing', 'workforce', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
+    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'cenoBotsLiveFleet', 'cenoBotsDiagnostics', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
+    for (const view of ['overview', 'robots', 'operations', 'autoxing', 'cenobots', 'workforce', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
 
     const oldPasswordLogin = await loginWithPassword('admin@demo.altegro.local', 'demo');
     assert.equal(oldPasswordLogin.status, 401);
@@ -76,6 +79,7 @@ async function startFakeSmtpServer() {
     assert.equal(cookieSessionResponse.status, 200);
     assert.equal((await cookieSessionResponse.json()).user.role, 'platform_admin');
     defaultToken = loginBody.token;
+    result=await request('/api/v1/sync-jobs'); assert.equal(result.status,200); assert.equal(result.body.mode,'inline'); assert.deepEqual(result.body.data,[]);
     result = await request('/api/v1/auth/session');
     assert.equal(result.status, 200);
     assert.equal(result.body.user.role, 'platform_admin');

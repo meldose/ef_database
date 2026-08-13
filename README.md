@@ -5,7 +5,7 @@ This is a dependency-free Node.js prototype for testing the first Altegro thin s
 - `Altegro_Projektbriefing_Entwickler.md`
 - `Altegro_Technisches_Lastenheft_Phase_1.md`
 
-It demonstrates the domain boundaries and API flow with file-backed local persistence and hardened prototype authentication. It is still not a substitute for PostgreSQL, OIDC, or a managed production platform.
+It demonstrates the domain boundaries and API flow with PostgreSQL-backed persistence, S3-compatible attachments, durable background jobs, and hardened prototype authentication. OIDC/SSO and managed cloud operations remain future production work.
 
 ## Run
 
@@ -44,11 +44,38 @@ Robot accounts are read-only. The third account will show data after the AutoXin
 
 Every additional robot returned by an adapter synchronization automatically receives a new robot-scoped prototype account. Passwords are shown only once when an administrator manually creates an account; the account-list API never returns stored passwords.
 
-## Local persistence
+## PostgreSQL persistence and object storage
 
-Runtime state is atomically saved to `data/altegro-state.json` by default. This includes the Robot Registry, Passport records, events, service cases, audit history, Outbox, users with password hashes, unexpired hashed sessions, and synchronized AutoXing resources. The file is excluded from Git and created with owner-only permissions.
+The default Docker deployment now uses PostgreSQL for durable application state and sync jobs, plus S3-compatible MinIO for attachment bytes. Database migrations in `migrations/` run during application startup and can also be applied explicitly:
 
-Use `ALTEGRO_DATA_FILE` to choose another location, or `ALTEGRO_PERSISTENCE=false` for an intentionally ephemeral run. Back up the data file while the service is stopped. PostgreSQL and Object Storage remain the recommended production targets.
+```bash
+npm run migrate
+docker compose up -d --build
+```
+
+`ALTEGRO_PERSISTENCE_DRIVER=postgres` and `OBJECT_STORAGE_DRIVER=s3` are mandatory when `NODE_ENV=production`. PostgreSQL stores the durable application snapshot together with queryable projections for users, sessions, robots, Passport entries, events, audits, provider tasks, attachments, and sync jobs. Attachment metadata stays in PostgreSQL while bytes are stored under tenant/robot-scoped object keys.
+
+The previous JSON/inline implementation remains available only for local tests or migration work:
+
+```bash
+ALTEGRO_PERSISTENCE_DRIVER=file OBJECT_STORAGE_DRIVER=inline ALTEGRO_SYNC_MODE=inline npm test
+```
+
+Create coordinated database and object-storage backups with `npm run backup`; restore them with `npm run restore -- BACKUP_DIRECTORY`. The scripts require PostgreSQL client tools and the AWS CLI. Test restoration regularly in an isolated environment before relying on a backup.
+
+To migrate the existing JSON state and its embedded attachments after PostgreSQL and object storage are configured, stop the Altegro web process and run:
+
+```bash
+npm run import:legacy -- ./data/altegro-state.json
+```
+
+The importer runs migrations, uploads event/document attachment bytes, replaces them with object metadata, and writes the resulting snapshot and relational projections. Keep the source JSON as a rollback backup until the imported site has been verified.
+
+## Legacy local persistence
+
+In explicit `ALTEGRO_PERSISTENCE_DRIVER=file` mode, runtime state is atomically saved to `data/altegro-state.json`. This mode exists for the dependency-light test suite and one-instance migration support; it is rejected in production.
+
+Use `ALTEGRO_DATA_FILE` to choose another location in legacy file mode, or `ALTEGRO_PERSISTENCE_DRIVER=memory` for an intentionally ephemeral test run. PostgreSQL and Object Storage are the supported production targets.
 
 ## Notifications
 
@@ -141,6 +168,15 @@ curl -X POST -H "Authorization: Bearer $SESSION_TOKEN" \
   http://127.0.0.1:3000/api/v1/adapters/autoxing/sync
 ```
 
+With PostgreSQL-backed `ALTEGRO_SYNC_MODE=async`, this endpoint returns `202 Accepted` with a durable job instead of waiting for the provider. The dashboard polls until completion. API clients can do the same through:
+
+```text
+GET /api/v1/sync-jobs
+GET /api/v1/sync-jobs/:jobId
+```
+
+Jobs move through `queued`, `running`, `succeeded`, or `failed`. PostgreSQL prevents two active jobs for the same tenant/provider, workers claim work with row locking, and abandoned running jobs can be reclaimed after `SYNC_JOB_STALE_SECONDS`. Both AutoXing and CenoBots scheduled polling enqueue through this same path.
+
 The bridge imports the vendor wrapper in a separate Python process, normalizes robot identity/model/online state/battery, position, safety status, POIs, areas, maps, task history/status, and detailed errors into Altegro records, creates read-only technical events, and keeps command capabilities empty. Base-map images are omitted by default to keep fleet snapshots small; set `AUTOXING_INCLUDE_BASE_MAP=true` when they are needed. It does not expose AutoXing task creation, navigation, cancel, or control methods.
 
 Read-only resource endpoints after synchronization:
@@ -170,7 +206,7 @@ Alert escalation rules match alert type, minimum severity, and elapsed minutes. 
 
 For production, mount credentials as protected files and set `APPID_FILE`, `APPSECRET_FILE`, and `APPCODE_FILE` instead of placing secret values in `.env`. The same pattern is available for `CENOBOTS_ACCESS_KEY_FILE` and `CENOBOTS_SECRET_KEY_FILE`. Set `ALTEGRO_REQUIRE_MANAGED_SECRETS=true` to make startup fail safely when an enabled live provider uses direct values or has an incomplete secret mount. Docker secrets, Kubernetes Secrets mounted as volumes, and systemd credentials can all use this interface. The API and browser expose only counts and configuration mode, never credential values or secret paths.
 
-Use `compose.production.yaml` as a production override after creating the six external Docker secrets it references. Rotate a provider credential by creating a new secret version, updating the deployment secret mount, restarting one instance, verifying `/ready` and a read-only synchronization, then rolling the remaining instances. Revoke the previous provider credential only after the new version succeeds. Do not commit secret files or copy their values into Compose.
+Use `compose.production.yaml` as a production override after creating the external Docker secrets it references for providers, monitoring, PostgreSQL, and object storage. Provision the production object-storage bucket before startup because automatic bucket creation is disabled there. Rotate a provider credential by creating a new secret version, updating the deployment secret mount, restarting one instance, verifying `/ready` and a read-only synchronization, then rolling the remaining instances. Revoke the previous provider credential only after the new version succeeds. Do not commit secret files or copy their values into Compose.
 
 ## Monitoring
 
@@ -238,7 +274,7 @@ curl -X POST -H "Authorization: Bearer $SESSION_TOKEN" \
   http://localhost:3000/api/v1/robots/ROBOT_ID/events
 ```
 
-The browser form also accepts an optional attachment up to 2 MB. In this prototype, attachment content is held in memory; production should store it in S3-compatible Object Storage.
+The browser form also accepts an optional attachment up to 2 MB. In PostgreSQL mode, attachment metadata is persisted in the database and content is stored in S3-compatible Object Storage.
 
 Attempting a robot command returns `403`; Phase 1 command capabilities are intentionally disabled.
 
@@ -269,7 +305,9 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - Login throttling, upload allow-listing, request-size limits, safe public errors, and baseline HTTP security headers
 - Keyboard-accessible metric filters and responsive mobile layouts
 - Stable JSON error responses
-- Atomic file-backed persistence with restart recovery
+- PostgreSQL persistence with migrations and queryable core projections
+- S3-compatible attachment storage with controlled downloads
+- Durable PostgreSQL synchronization and email job queues
 - Salted scrypt password hashes and hashed server-side session tokens
 - HttpOnly SameSite session cookies with optional HTTPS-only mode
 - Role-scoped operational notifications and SMTP email alerts
@@ -294,4 +332,4 @@ The Compose configuration mounts a named volume for `/app/data`. For an internet
 
 ## Intentionally not production-ready
 
-The prototype uses a local JSON state file rather than a transactional database. Its Outbox is durable for local restarts but is not transactionally published. Attachments are stored inside the JSON file rather than Object Storage. It does not yet implement PostgreSQL, OIDC, a cloud Secret Manager, Object Storage, OpenAPI generation, signed Webhooks, distributed rate limiting, or migrations. AutoXing and CenoBots can run through their configured read-only bridges, but production deployment still requires provider authorization and external infrastructure.
+PostgreSQL now stores durable state and queryable core projections, but the domain layer still maintains a process-local working set and currently supports a single web writer. The Outbox is persisted but does not yet have a transactional external publisher. The platform also does not yet implement OIDC, OpenAPI generation, signed Webhooks, distributed login throttling, or automatic object-retention policies. AutoXing and CenoBots can run through their configured read-only bridges, but production deployment still requires provider authorization, managed PostgreSQL/object storage, monitored backups, and restore drills.

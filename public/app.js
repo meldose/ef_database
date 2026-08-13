@@ -491,13 +491,27 @@ function setSyncStatus(message, kind = '', retryProvider = null) {
   if (retryProvider) $('#retrySync').addEventListener('click', () => retryProvider === 'all' ? syncAllAdapters() : syncAdapter(retryProvider));
 }
 
+const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve,milliseconds));
+async function waitForSyncJob(job,onProgress) {
+  if (!job?.id || !['queued','running'].includes(job.status)) return job;
+  const deadline=Date.now()+Math.max(60000,Number(job.timeoutMs || 20*60*1000)); let current=job;
+  while (['queued','running'].includes(current.status)) {
+    if (Date.now() >= deadline) throw new Error(`Synchronization job ${current.id} is still running; check Sync diagnostics later`);
+    onProgress?.(current); await delay(1000); current=(await api(`/api/v1/sync-jobs/${encodeURIComponent(current.id)}`)).data;
+  }
+  if (current.status === 'failed') throw new Error(current.error || `${current.provider} synchronization failed`);
+  return current.result || current;
+}
+
 async function syncAdapter(provider) {
   if (state.sync.provider) return toast(`${state.sync.provider} synchronization is already running`);
   state.sync.provider = provider; state.sync.startedAt = Date.now(); setSyncButtons(true);
   const updateElapsed = () => setSyncStatus(`Synchronizing ${provider}… ${Math.floor((Date.now() - state.sync.startedAt) / 1000)}s`);
   updateElapsed(); state.sync.timer = setInterval(updateElapsed, 1000);
   try {
-    const payload = await api(`/api/v1/adapters/${provider}/sync`, { method:'POST', body:'{}' }); const seconds = Math.max(1, Math.round((Date.now() - state.sync.startedAt) / 1000)); const count = payload.data?.count; const warnings = payload.data?.resourceErrors?.length || payload.data?.resources?.warnings || 0;
+    const payload=await api(`/api/v1/adapters/${provider}/sync`,{ method:'POST',body:'{}' });
+    const data=await waitForSyncJob(payload.data,(job) => setSyncStatus(`${provider} synchronization ${job.status}… ${Math.floor((Date.now()-state.sync.startedAt)/1000)}s`));
+    const seconds=Math.max(1,Math.round((Date.now()-state.sync.startedAt)/1000)); const count=data?.count; const warnings=data?.resourceErrors?.length || data?.resources?.warnings || 0;
     setSyncStatus(warnings ? `${provider} synchronized with ${warnings} warning${warnings === 1 ? '' : 's'} in ${seconds}s${count != null ? ` · ${count} robots updated` : ''}.` : `${provider} synchronized successfully in ${seconds}s${count != null ? ` · ${count} robots updated` : ''}.`, warnings ? 'warning' : 'success'); toast(warnings ? `${provider} synchronized with warnings` : `${provider} adapter synchronized`); await refreshAll();
   } catch (error) {
     if (error.status !== 401) { setSyncStatus(`${provider} synchronization failed. ${error.message}`, 'error', provider); toast(`Sync failed: ${error.message}`, true); await loadAdapters().catch(() => {}); }
@@ -511,7 +525,7 @@ async function syncAllAdapters() {
   const updateElapsed = () => setSyncStatus(`Synchronizing AutoXing and CenoBots… ${Math.floor((Date.now() - state.sync.startedAt) / 1000)}s`);
   updateElapsed(); state.sync.timer = setInterval(updateElapsed, 1000);
   try {
-    const results = await Promise.allSettled(providers.map(async (provider) => ({ provider, payload:await api(`/api/v1/adapters/${provider}/sync`, { method:'POST', body:'{}' }) })));
+    const results=await Promise.allSettled(providers.map(async (provider) => { const payload=await api(`/api/v1/adapters/${provider}/sync`,{ method:'POST',body:'{}' }); const data=await waitForSyncJob(payload.data); return { provider,payload:{ data } }; }));
     const summaries = results.map((result, index) => {
       const provider = providers[index]; const label = labels[provider];
       if (result.status === 'rejected') return `${label}: failed (${result.reason.message})`;

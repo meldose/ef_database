@@ -5,10 +5,18 @@
   "description": "Dependency-free test server for the Altegro Phase 1 thin slice",
   "scripts": {
     "start": "node server.js",
-    "test": "node test-server.js && python3 -m unittest integrations/cenobots/test_client.py integrations/cenobots/test_bridge.py integrations/cenobots/test_tasks.py integrations/cenobots/test_wrapper.py",
+    "migrate": "node scripts/migrate.js",
+    "import:legacy": "node scripts/import-legacy-state.js",
+    "backup": "sh scripts/backup.sh",
+    "restore": "sh scripts/restore.sh",
+    "test": "node infrastructure/test-infrastructure.js && ALTEGRO_PERSISTENCE_DRIVER=file OBJECT_STORAGE_DRIVER=inline ALTEGRO_SYNC_MODE=inline node test-server.js && python3 -m unittest integrations/cenobots/test_client.py integrations/cenobots/test_bridge.py integrations/cenobots/test_tasks.py integrations/cenobots/test_wrapper.py",
     "check": "node --check server.js && node --check public/app.js && node --check test-server.js"
   },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1109.0",
+    "pg": "^8.23.0"
+  },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   }
 }

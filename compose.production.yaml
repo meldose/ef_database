@@ -4,6 +4,13 @@ services:
       NODE_ENV: production
       COOKIE_SECURE: "true"
       ALTEGRO_REQUIRE_MANAGED_SECRETS: "true"
+      PGPASSWORD: ""
+      PGPASSWORD_FILE: /run/secrets/altegro_postgres_password
+      OBJECT_STORAGE_ACCESS_KEY: ""
+      OBJECT_STORAGE_SECRET_KEY: ""
+      OBJECT_STORAGE_ACCESS_KEY_FILE: /run/secrets/altegro_object_access_key
+      OBJECT_STORAGE_SECRET_KEY_FILE: /run/secrets/altegro_object_secret_key
+      OBJECT_STORAGE_CREATE_BUCKET: "false"
       APPID_FILE: /run/secrets/autoxing_app_id
       APPSECRET_FILE: /run/secrets/autoxing_app_secret
       APPCODE_FILE: /run/secrets/autoxing_app_code
@@ -17,6 +24,26 @@ services:
       - cenobots_access_key
       - cenobots_secret_key
       - altegro_metrics_token
+      - altegro_postgres_password
+      - altegro_object_access_key
+      - altegro_object_secret_key
+
+  postgres:
+    environment:
+      POSTGRES_PASSWORD: ""
+      POSTGRES_PASSWORD_FILE: /run/secrets/altegro_postgres_password
+    secrets:
+      - altegro_postgres_password
+
+  minio:
+    environment:
+      MINIO_ROOT_USER: ""
+      MINIO_ROOT_PASSWORD: ""
+      MINIO_ROOT_USER_FILE: /run/secrets/altegro_object_access_key
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/altegro_object_secret_key
+    secrets:
+      - altegro_object_access_key
+      - altegro_object_secret_key
 
 secrets:
   autoxing_app_id:
@@ -30,4 +57,10 @@ secrets:
   cenobots_secret_key:
     external: true
   altegro_metrics_token:
+    external: true
+  altegro_postgres_password:
+    external: true
+  altegro_object_access_key:
+    external: true
+  altegro_object_secret_key:
     external: true

@@ -9,6 +9,8 @@ const { once } = require('node:events');
 const pathUtil = require('node:path');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const { PostgresStore } = require('./infrastructure/postgres-store');
+const { S3ObjectStore } = require('./infrastructure/object-store');
 
 function loadLocalEnv(filePath = process.env.ALTEGRO_ENV_FILE || pathUtil.join(__dirname, '.env')) {
   if (!fs.existsSync(filePath)) return;
@@ -34,7 +36,16 @@ const LOGIN_WINDOW_MS = 15 * 60 * 1000;
 const LOGIN_MAX_FAILURES = 5;
 const PASSWORD_KEY_LENGTH = 64;
 const DATA_FILE = pathUtil.resolve(process.env.ALTEGRO_DATA_FILE || pathUtil.join(__dirname, 'data', 'altegro-state.json'));
-const persistenceEnabled = () => !['0', 'false', 'no'].includes(String(process.env.ALTEGRO_PERSISTENCE ?? 'true').toLowerCase());
+const PERSISTENCE_DRIVER = String(process.env.ALTEGRO_PERSISTENCE_DRIVER || (process.env.NODE_ENV === 'production' ? 'postgres' : 'file')).toLowerCase();
+const OBJECT_STORAGE_DRIVER = String(process.env.OBJECT_STORAGE_DRIVER || (process.env.NODE_ENV === 'production' ? 's3' : 'inline')).toLowerCase();
+const SYNC_MODE = String(process.env.ALTEGRO_SYNC_MODE || (PERSISTENCE_DRIVER === 'postgres' ? 'async' : 'inline')).toLowerCase();
+const persistenceEnabled = () => PERSISTENCE_DRIVER !== 'memory' && !['0','false','no'].includes(String(process.env.ALTEGRO_PERSISTENCE ?? 'true').toLowerCase());
+const filePersistenceEnabled = () => persistenceEnabled() && PERSISTENCE_DRIVER === 'file';
+const postgresPersistenceEnabled = () => persistenceEnabled() && PERSISTENCE_DRIVER === 'postgres';
+const asyncSyncEnabled = () => SYNC_MODE === 'async' && postgresPersistenceEnabled();
+let databaseStore = null;
+let objectStore = null;
+let infrastructureInitialized = false;
 const loginFailures = new Map();
 const allowedAttachmentTypes = new Set(['application/pdf', 'application/json', 'text/plain', 'text/csv', 'image/png', 'image/jpeg', 'image/webp', 'application/octet-stream']);
 const allowedAttachmentExtensions = new Set(['.pdf', '.json', '.txt', '.csv', '.png', '.jpg', '.jpeg', '.webp']);
@@ -53,12 +64,14 @@ const autoXingPollIntervalMs = () => Math.max(0, Number(process.env.AUTOXING_POL
 const parseJsonEnv = (name, fallback = {}) => { try { return process.env[name] ? JSON.parse(process.env[name]) : fallback; } catch { return fallback; } };
 const autoXingMappingRequired = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_REQUIRE_MAPPING || '').toLowerCase());
 const cenoBotsLiveEnabled = () => ['1', 'true', 'yes'].includes(String(process.env.CENOBOTS_LIVE || '').toLowerCase());
+const cenoBotsPollIntervalMs = () => Math.max(0,Number(process.env.CENOBOTS_POLL_INTERVAL_MS || 300000));
 function secretEnvValue(name) {
-  if (process.env[name]) return process.env[name];
   const filePath = process.env[`${name}_FILE`];
-  if (!filePath) return '';
-  try { return fs.readFileSync(pathUtil.resolve(filePath), 'utf8').trim(); }
-  catch (error) { throw new Error(`Could not read managed secret ${name}: ${error.message}`); }
+  if (filePath) {
+    try { return fs.readFileSync(pathUtil.resolve(filePath),'utf8').trim(); }
+    catch(error) { throw new Error(`Could not read managed secret ${name}: ${error.message}`); }
+  }
+  return process.env[name] || '';
 }
 function secretConfigurationMode() {
   if (['APPID', 'APPSECRET', 'APPCODE'].some((name) => process.env[`${name}_FILE`])) return 'managed-secret-files';
@@ -71,7 +84,9 @@ function managedSecretStatus() {
   const providers = [
     { name:'autoxing', enabled:autoXingLiveEnabled(), names:['APPID','APPSECRET','APPCODE'] },
     { name:'cenobots', enabled:cenoBotsLiveEnabled(), names:['CENOBOTS_ACCESS_KEY','CENOBOTS_SECRET_KEY'] },
-    { name:'email', enabled:enabled(process.env.EMAIL_ALERTS_ENABLED) && Boolean(process.env.EMAIL_SMTP_USERNAME), names:['EMAIL_SMTP_PASSWORD'] }
+    { name:'email', enabled:enabled(process.env.EMAIL_ALERTS_ENABLED) && Boolean(process.env.EMAIL_SMTP_USERNAME), names:['EMAIL_SMTP_PASSWORD'] },
+    { name:'postgres',enabled:postgresPersistenceEnabled(),names:['PGPASSWORD'] },
+    { name:'object-storage',enabled:OBJECT_STORAGE_DRIVER === 's3' && Boolean(process.env.OBJECT_STORAGE_ENDPOINT),names:['OBJECT_STORAGE_ACCESS_KEY','OBJECT_STORAGE_SECRET_KEY'] }
   ];
   const requireManaged = enabled(process.env.ALTEGRO_REQUIRE_MANAGED_SECRETS) || process.env.NODE_ENV === 'production';
   const details = providers.map((provider) => {
@@ -138,14 +153,16 @@ async function sendSmtpEmail(delivery,config) {
 function createEmailDelivery(notification) {
   const config=emailAlertConfiguration();
   const delivery={ id:ids(),notificationKey:String(notification.notificationKey),type:notification.type || 'operational_alert',severity:notification.severity || 'error',title:String(notification.title || 'Altegro alert').slice(0,180),message:String(notification.message || '').slice(0,4000),robotId:notification.robotId || null,robotSerialNumber:notification.robotSerialNumber || null,recipients:[...config.recipients],status:'pending',attempts:0,lastError:null,createdAt:timestamp(),occurredAt:notification.occurredAt || timestamp(),sentAt:null,nextAttemptAt:null };
-  state.emailDeliveries.push(delivery); state.emailDeliveries=state.emailDeliveries.slice(-200); schedulePersist(); return delivery;
+  state.emailDeliveries.push(delivery); state.emailDeliveries=state.emailDeliveries.slice(-200); schedulePersist();
+  if (databaseStore) databaseStore.enqueueEmailJob(delivery).then(() => setImmediate(processEmailQueue)).catch((error) => console.error(`Could not enqueue email delivery: ${error.message}`));
+  return delivery;
 }
 
 function queueEmailAlert(notification,{ force=false }={}) {
   const config=emailAlertConfiguration(); if (!config.enabled || !config.configured) return null;
   const severityRank={ info:0,warning:1,error:2,critical:3 }; if (!force && (severityRank[notification.severity] ?? 0) < severityRank[config.minimumSeverity]) return null;
   const cutoff=Date.now()-config.cooldownMinutes*60000; const duplicate=state.emailDeliveries.find((item) => item.notificationKey === notification.notificationKey && Date.parse(item.createdAt) >= cutoff && ['pending','sending','sent'].includes(item.status)); if (duplicate) return duplicate;
-  const delivery=createEmailDelivery(notification); setImmediate(() => processEmailQueue()); return delivery;
+  const delivery=createEmailDelivery(notification); if (!databaseStore) setImmediate(() => processEmailQueue()); return delivery;
 }
 
 let emailQueueRunning=false;
@@ -160,7 +177,18 @@ async function deliverEmailNotification(delivery) {
 
 async function processEmailQueue() {
   if (emailQueueRunning || !emailAlertConfiguration().enabled) return; emailQueueRunning=true;
-  try { for (const delivery of state.emailDeliveries.filter((item) => ['pending','failed'].includes(item.status) && item.attempts < 3 && (!item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= Date.now())).slice(0,20)) { try { await deliverEmailNotification(delivery); } catch {} } }
+  try {
+    if (databaseStore) {
+      for (let index=0;index<20;index+=1) {
+        const job=await databaseStore.claimEmailJob(syncWorkerId,Number(process.env.EMAIL_JOB_STALE_SECONDS || 300)); if (!job) break;
+        let delivery=state.emailDeliveries.find((item) => item.id === job.id);
+        if (!delivery) { delivery=job.delivery; state.emailDeliveries.push(delivery); }
+        try { await deliverEmailNotification(delivery); } catch {} finally { await databaseStore.finishEmailJob(delivery); }
+      }
+      return;
+    }
+    for (const delivery of state.emailDeliveries.filter((item) => ['pending','failed'].includes(item.status) && item.attempts < 3 && (!item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= Date.now())).slice(0,20)) { try { await deliverEmailNotification(delivery); } catch {} }
+  }
   finally { emailQueueRunning=false; }
 }
 
@@ -264,6 +292,10 @@ function persistedSnapshot() {
 
 function persistState() {
   if (!persistenceEnabled()) return false;
+  if (postgresPersistenceEnabled()) {
+    if (!databaseStore) throw new Error('PostgreSQL persistence has not been initialized');
+    return databaseStore.saveSnapshot(persistedSnapshot());
+  }
   fs.mkdirSync(pathUtil.dirname(DATA_FILE), { recursive: true });
   const temporaryFile = `${DATA_FILE}.${process.pid}.tmp`;
   fs.writeFileSync(temporaryFile, `${JSON.stringify(persistedSnapshot(), null, 2)}\n`, { mode: 0o600 });
@@ -275,7 +307,8 @@ function schedulePersist() {
   if (!persistenceEnabled() || persistenceTimer) return;
   persistenceTimer = setTimeout(() => {
     persistenceTimer = null;
-    try { persistState(); } catch (error) { console.error(`Could not persist Altegro state: ${error.message}`); }
+    try { Promise.resolve(persistState()).catch((error) => console.error(`Could not persist Altegro state: ${error.message}`)); }
+    catch (error) { console.error(`Could not persist Altegro state: ${error.message}`); }
   }, 50);
   persistenceTimer.unref?.();
 }
@@ -286,25 +319,69 @@ function replaceMap(target, entries) {
   for (const [key, value] of entries) target.set(key, value);
 }
 
+function hydratePersistedState(saved) {
+  if (saved.schemaVersion !== 1 || !saved.state) throw new Error('unsupported data schema');
+  for (const [token,user] of Object.entries(saved.users || {})) demoUsers[token]=user;
+  initializeCredentialHashes();
+  replaceMap(authenticatedSessions,(saved.sessions || []).filter(([,session]) => session.expiresAt > Date.now()));
+  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','maintenanceSchedules','alertEscalationRules','alertEscalations']) replaceMap(state[name],saved.state[name]);
+  for (const name of ['documents','certificates','deployments','compatibilityRecords','events','audit','outbox','emailDeliveries']) if (Array.isArray(saved.state[name])) state[name]=saved.state[name];
+  const autoXing=saved.state.autoxing || {};
+  state.autoxing.businesses=autoXing.businesses || []; state.autoxing.buildings=autoXing.buildings || []; state.autoxing.lastSyncAt=autoXing.lastSyncAt || null; state.autoxing.resourceErrors=autoXing.resourceErrors || [];
+  for (const name of ['pois','areas','maps','tasks']) replaceMap(state.autoxing[name],autoXing[name]);
+  for (const [provider,runtime] of saved.state.adapterRuntime || []) { const adapter=state.adapters.get(provider); if (!adapter) continue; Object.assign(adapter,runtime); if (!Array.isArray(runtime.syncHistory)) adapter.syncHistory=[]; }
+  return true;
+}
+
 function loadPersistedState() {
-  if (!persistenceEnabled() || !fs.existsSync(DATA_FILE)) return false;
+  if (!filePersistenceEnabled() || !fs.existsSync(DATA_FILE)) return false;
   try {
     const saved = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    if (saved.schemaVersion !== 1 || !saved.state) throw new Error('unsupported data schema');
-    for (const [token, user] of Object.entries(saved.users || {})) demoUsers[token] = user;
-    initializeCredentialHashes();
-    replaceMap(authenticatedSessions, (saved.sessions || []).filter(([, session]) => session.expiresAt > Date.now()));
-    for (const name of ['tenants', 'organizations', 'sites', 'models', 'robots', 'passportEntries', 'serviceCases', 'technicians', 'modelRequirements', 'robotAssignments', 'alertWorkflows', 'maintenanceSchedules', 'alertEscalationRules', 'alertEscalations']) replaceMap(state[name], saved.state[name]);
-    for (const name of ['documents', 'certificates', 'deployments', 'compatibilityRecords', 'events', 'audit', 'outbox', 'emailDeliveries']) if (Array.isArray(saved.state[name])) state[name] = saved.state[name];
-    const autoXing = saved.state.autoxing || {};
-    state.autoxing.businesses = autoXing.businesses || []; state.autoxing.buildings = autoXing.buildings || []; state.autoxing.lastSyncAt = autoXing.lastSyncAt || null; state.autoxing.resourceErrors = autoXing.resourceErrors || [];
-    for (const name of ['pois', 'areas', 'maps', 'tasks']) replaceMap(state.autoxing[name], autoXing[name]);
-    for (const [provider, runtime] of saved.state.adapterRuntime || []) { const adapter = state.adapters.get(provider); if (!adapter) continue; Object.assign(adapter,runtime); if (!Array.isArray(runtime.syncHistory)) adapter.syncHistory = []; }
-    return true;
+    return hydratePersistedState(saved);
   } catch (error) {
     console.error(`Could not load ${DATA_FILE}; starting from the seeded state: ${error.message}`);
     return false;
   }
+}
+
+function postgresOptions() {
+  return {
+    connectionString:process.env.DATABASE_URL || undefined,
+    host:process.env.PGHOST || undefined,port:Number(process.env.PGPORT || 5432),
+    database:process.env.PGDATABASE || undefined,user:process.env.PGUSER || undefined,
+    password:secretEnvValue('PGPASSWORD') || undefined,
+    ssl:String(process.env.PGSSLMODE || '').toLowerCase() === 'require',
+    sslRejectUnauthorized:!['0','false','no'].includes(String(process.env.PGSSL_REJECT_UNAUTHORIZED ?? 'true').toLowerCase()),
+    maxConnections:Number(process.env.PGPOOL_MAX || 10),migrationsDirectory:pathUtil.join(__dirname,'migrations'),
+  };
+}
+
+function objectStorageOptions() {
+  return {
+    endpoint:process.env.OBJECT_STORAGE_ENDPOINT || undefined,region:process.env.OBJECT_STORAGE_REGION || 'eu-central-1',
+    bucket:process.env.OBJECT_STORAGE_BUCKET || 'altegro-attachments',
+    accessKeyId:secretEnvValue('OBJECT_STORAGE_ACCESS_KEY') || undefined,
+    secretAccessKey:secretEnvValue('OBJECT_STORAGE_SECRET_KEY') || undefined,
+    forcePathStyle:enabled(process.env.OBJECT_STORAGE_FORCE_PATH_STYLE),
+    createBucket:enabled(process.env.OBJECT_STORAGE_CREATE_BUCKET),
+  };
+}
+
+async function initializeInfrastructure() {
+  if (infrastructureInitialized) return;
+  if (!['file','postgres','memory'].includes(PERSISTENCE_DRIVER)) throw new Error(`Unsupported ALTEGRO_PERSISTENCE_DRIVER: ${PERSISTENCE_DRIVER}`);
+  if (!['inline','s3'].includes(OBJECT_STORAGE_DRIVER)) throw new Error(`Unsupported OBJECT_STORAGE_DRIVER: ${OBJECT_STORAGE_DRIVER}`);
+  if (process.env.NODE_ENV === 'production' && PERSISTENCE_DRIVER !== 'postgres') throw new Error('Production requires ALTEGRO_PERSISTENCE_DRIVER=postgres');
+  if (process.env.NODE_ENV === 'production' && OBJECT_STORAGE_DRIVER !== 's3') throw new Error('Production requires OBJECT_STORAGE_DRIVER=s3');
+  if (postgresPersistenceEnabled()) {
+    databaseStore=new PostgresStore(postgresOptions()); await databaseStore.initialize();
+    const saved=await databaseStore.loadSnapshot(); if (saved) hydratePersistedState(saved);
+    applyRequestedTechnicianRoster();
+    for (const delivery of state.emailDeliveries.filter((item) => ['pending','sending','failed'].includes(item.status) && item.attempts < 3)) { if (delivery.status === 'sending') delivery.status='pending'; await databaseStore.enqueueEmailJob(delivery); }
+    await persistState();
+  }
+  if (OBJECT_STORAGE_DRIVER === 's3') { objectStore=new S3ObjectStore(objectStorageOptions()); await objectStore.initialize(); }
+  infrastructureInitialized=true;
 }
 
 function applyRequestedTechnicianRoster() {
@@ -378,7 +455,7 @@ function seed() {
 }
 
 function recordAudit(actor, action, objectType, objectId, result = 'success', details = {}) {
-  state.audit.push({ id: ids(), actorId: actor.id, actorName: actor.name, action, objectType, objectId, result, details, occurredAt: timestamp() });
+  state.audit.push({ id:ids(),tenantId:actor.tenantId || null,actorId:actor.id,actorName:actor.name,action,objectType,objectId,result,details,occurredAt:timestamp() });
   schedulePersist();
 }
 
@@ -389,7 +466,7 @@ function appendOutbox(eventType, aggregateType, aggregateId, payload = {}) {
 }
 
 function appendPassportEntry(robotId, entry, actor = { id: 'system', name: 'System' }) {
-  const fullEntry = { id: ids(), robotId, source: entry.source || 'altegro', trustStatus: entry.trustStatus || 'reported', createdBy: actor.id, occurredAt: entry.occurredAt || timestamp(), type: entry.type, data: entry.data || {} };
+  const fullEntry={ id:ids(),tenantId:state.robots.get(robotId)?.tenantId || actor.tenantId || null,robotId,source:entry.source || 'altegro',trustStatus:entry.trustStatus || 'reported',createdBy:actor.id,occurredAt:entry.occurredAt || timestamp(),type:entry.type,data:entry.data || {} };
   const entries = state.passportEntries.get(robotId) || [];
   entries.push(fullEntry);
   state.passportEntries.set(robotId, entries);
@@ -804,6 +881,26 @@ async function syncCenoBotsLive(actor) {
   return { provider:'cenobots', adapterVersion:'open-api-v1.0.16', source:bridge.wrapper || 'integrations/cenobots/client.py', robots:synced, count:synced.length, resources:clone(bridge.resources || {}), resourceErrors:clone(resourceErrors), commandCapabilitiesEnabled:false };
 }
 
+async function executeProviderSync(provider,actor,trigger='manual') {
+  if (!state.adapters.has(provider)) throw httpError(404,`Unknown adapter: ${provider}`);
+  const started=Date.now();
+  try {
+    if (provider === 'autoxing' && autoXingLiveEnabled()) return await syncAutoXingLive(actor);
+    if (provider === 'cenobots' && cenoBotsLiveEnabled()) return await syncCenoBotsLive(actor);
+    return syncAdapter(provider,actor.id);
+  } catch(error) {
+    recordAdapterSync(state.adapters.get(provider),{ status:'error',startedAt:started,error:error.message,trigger });
+    throw error;
+  }
+}
+
+async function enqueueProviderSync(provider,actor,trigger='manual') {
+  if (!databaseStore) throw httpError(503,'Synchronization queue is not initialized');
+  const job=await databaseStore.enqueueSyncJob({ provider,tenantId:actor.tenantId,actor:publicUser(actor),trigger });
+  recordAudit(actor,'adapter.sync.queued','adapter',provider,'success',{ jobId:job.id,alreadyQueued:Boolean(job.alreadyQueued) });
+  return job;
+}
+
 function getPassport(robotId) {
   const robot = state.robots.get(robotId);
   const entries = state.passportEntries.get(robotId) || [];
@@ -1052,6 +1149,30 @@ function validateEventAttachment(attachment) {
   return { name, contentType, size: content.length, sha256: crypto.createHash('sha256').update(content).digest('hex'), contentBase64: attachment.contentBase64 };
 }
 
+async function storeAttachment(attachment,{ tenantId,robotId }) {
+  if (!attachment) return null;
+  if (OBJECT_STORAGE_DRIVER !== 's3') return attachment;
+  if (!objectStore) throw httpError(503,'Object storage is not initialized');
+  const id=ids(); const objectKey=`${tenantId}/${robotId}/${new Date().toISOString().slice(0,10)}/${id}/${attachment.name}`;
+  const metadata={ id,tenantId,robotId,objectKey,name:attachment.name,contentType:attachment.contentType,size:attachment.size,sha256:attachment.sha256 };
+  await objectStore.put(objectKey,Buffer.from(attachment.contentBase64,'base64'),{ ...metadata,serverSideEncryption:process.env.OBJECT_STORAGE_SERVER_SIDE_ENCRYPTION || undefined });
+  if (databaseStore) await databaseStore.recordAttachment(metadata);
+  return metadata;
+}
+
+async function attachmentContent(attachment) {
+  if (attachment?.objectKey) {
+    if (!objectStore) throw httpError(503,'Object storage is not initialized');
+    return objectStore.get(attachment.objectKey);
+  }
+  if (attachment?.contentBase64) return Buffer.from(attachment.contentBase64,'base64');
+  throw httpError(404,'Attachment content is unavailable');
+}
+
+function publicAttachment(attachment) {
+  return attachment ? { name:attachment.name,contentType:attachment.contentType,size:attachment.size,sha256:attachment.sha256 } : null;
+}
+
 function securityHeaders(contentType, extra = {}) {
   return { 'content-type': contentType, 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'", 'referrer-policy': 'no-referrer', 'permissions-policy': 'camera=(), microphone=(), geolocation=()', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'cross-origin-resource-policy': 'same-origin', ...extra };
 }
@@ -1078,12 +1199,17 @@ function systemReadiness() {
   const checks = [];
   const secretPolicy = managedSecretStatus();
   checks.push({ name:'secret-policy', ok:secretPolicy.valid, detail:secretPolicy.valid ? 'valid' : 'managed secret configuration required' });
-  let storageOk = true;
-  if (persistenceEnabled()) {
+  let storageOk=true; let persistenceDetail='disabled';
+  if (filePersistenceEnabled()) {
     try { fs.accessSync(pathUtil.dirname(DATA_FILE), fs.constants.R_OK | fs.constants.W_OK); }
     catch { storageOk = false; }
+    persistenceDetail=storageOk ? 'file read-write (legacy/test mode)' : 'file unavailable';
+  } else if (postgresPersistenceEnabled()) {
+    const health=databaseStore?.health() || { ready:false,error:'not initialized' }; storageOk=health.ready; persistenceDetail=health.ready ? 'postgres ready' : `postgres unavailable: ${health.error}`;
   }
-  checks.push({ name:'persistence', ok:storageOk, detail:persistenceEnabled() ? (storageOk ? 'read-write' : 'unavailable') : 'disabled' });
+  checks.push({ name:'persistence',ok:storageOk,detail:persistenceDetail });
+  if (OBJECT_STORAGE_DRIVER === 's3') { const health=objectStore?.health() || { ready:false,error:'not initialized' }; checks.push({ name:'object-storage',ok:health.ready,detail:health.ready ? `s3 bucket ${health.bucket} ready` : `s3 unavailable: ${health.error}` }); }
+  else checks.push({ name:'object-storage',ok:process.env.NODE_ENV !== 'production',detail:'inline legacy/test mode' });
   return { ready:checks.every((check) => check.ok), checks };
 }
 
@@ -1374,9 +1500,9 @@ async function handle(req, res) {
     const event = state.events.find((item) => item.eventId === eventAttachment.id);
     const robot = event ? state.robots.get(event.robotId) : null;
     if (!event || !robot || !visibleToActor(actor, robot)) throw httpError(404, 'Event attachment not found');
-    if (!event.attachment?.contentBase64) throw httpError(404, 'Event has no downloadable attachment');
+    if (!event.attachment) throw httpError(404, 'Event has no downloadable attachment');
     recordAudit(actor, 'event.attachment.download', 'robot', robot.id, 'success', { eventId: event.eventId });
-    return sendDownload(res, event.attachment.contentType, event.attachment.name, Buffer.from(event.attachment.contentBase64, 'base64'));
+    return sendDownload(res,event.attachment.contentType,event.attachment.name,await attachmentContent(event.attachment));
   }
   if (req.method === 'GET' && path === '/api/v1/events') {
     const robotIds = visibleRobotIds(actor); let data = state.events.filter((event) => robotIds.has(event.robotId));
@@ -1389,7 +1515,7 @@ async function handle(req, res) {
     if (q) data = data.filter((event) => [event.title, event.description, event.eventType, event.sourceSystem].some((value) => String(value || '').toLowerCase().includes(q)));
     data.sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
     const count = data.length; const limit = Math.min(100, Math.max(1, Number(url.searchParams.get('limit') || 25)));
-    return send(res, 200, { data: data.slice(0, limit).map((event) => ({ ...clone(event), attachment: event.attachment ? { name: event.attachment.name, contentType: event.attachment.contentType, size: event.attachment.size, sha256: event.attachment.sha256 } : null })), count });
+    return send(res,200,{ data:data.slice(0,limit).map((event) => ({ ...clone(event),attachment:publicAttachment(event.attachment) })),count });
   }
   if (req.method === 'GET' && path === '/api/v1/audit') {
     const robotIds = visibleRobotIds(actor);
@@ -1433,25 +1559,19 @@ async function handle(req, res) {
   const sync = route(req.method, path, /^\/api\/v1\/adapters\/([^/]+)\/sync$/);
   if (sync && req.method === 'POST') {
     if (!canWrite(actor)) throw httpError(403, 'Write permission required');
-    if (sync.id === 'autoxing' && autoXingLiveEnabled()) {
-      const syncStartedAt = Date.now();
-      try {
-        const result = await syncAutoXingLive(actor); recordAudit(actor, 'adapter.sync.live', 'adapter', sync.id, 'success', { count: result.count }); return send(res, 200, { data: result });
-      } catch (error) {
-        recordAdapterSync(state.adapters.get('autoxing'), { status:'error', startedAt:syncStartedAt, error:error.message, trigger:'manual' });
-        throw error;
-      }
-    }
-    if (sync.id === 'cenobots' && cenoBotsLiveEnabled()) {
-      const syncStartedAt = Date.now();
-      try {
-        const result = await syncCenoBotsLive(actor); recordAudit(actor, 'adapter.sync.live', 'adapter', sync.id, 'success', { count:result.count, warnings:result.resourceErrors.length }); return send(res, 200, { data:result });
-      } catch (error) {
-        recordAdapterSync(state.adapters.get('cenobots'), { status:'error', startedAt:syncStartedAt, error:error.message, trigger:'manual' });
-        throw error;
-      }
-    }
-    const result = syncAdapter(sync.id, actor.id); recordAudit(actor, 'adapter.sync', 'adapter', sync.id); return send(res, 200, { data: result });
+    if (!state.adapters.has(sync.id)) throw httpError(404,`Unknown adapter: ${sync.id}`);
+    if (asyncSyncEnabled()) { if (!['autoxing','cenobots'].includes(sync.id)) throw httpError(400,'Only live provider adapters can be queued'); const job=await enqueueProviderSync(sync.id,actor); return send(res,202,{ data:job }); }
+    const result=await executeProviderSync(sync.id,actor); recordAudit(actor,'adapter.sync','adapter',sync.id,'success',{ count:result.count ?? 1 }); return send(res,200,{ data:result });
+  }
+
+  if (req.method === 'GET' && path === '/api/v1/sync-jobs') {
+    if (!asyncSyncEnabled()) return send(res,200,{ data:[],count:0,mode:'inline' });
+    const jobs=await databaseStore.listSyncJobs(actor.tenantId,Number(url.searchParams.get('limit') || 25)); return send(res,200,{ data:jobs,count:jobs.length,mode:'async' });
+  }
+  const syncJob=route(req.method,path,/^\/api\/v1\/sync-jobs\/([^/]+)$/);
+  if (syncJob && req.method === 'GET') {
+    if (!asyncSyncEnabled()) throw httpError(404,'Synchronization job not found');
+    const job=await databaseStore.getSyncJob(syncJob.id,actor.tenantId); if (!job) throw httpError(404,'Synchronization job not found'); return send(res,200,{ data:job });
   }
 
   if (req.method === 'POST' && path === '/api/v1/robots') {
@@ -1505,7 +1625,7 @@ async function handle(req, res) {
     const common = { id: ids(), robotId: item.id, tenantId: item.tenantId, title: String(body.title).slice(0, 200), description: String(body.description || '').slice(0, 4000), source: body.source || 'manual-portal', createdBy: actor.id, createdAt: timestamp() };
     let record;
     if (body.recordType === 'document') {
-      record = { ...common, documentType: body.documentType || 'general', version: body.version || '1.0', attachment: validateEventAttachment(body.attachment) };
+      record = { ...common, documentType:body.documentType || 'general',version:body.version || '1.0',attachment:await storeAttachment(validateEventAttachment(body.attachment),{ tenantId:item.tenantId,robotId:item.id }) };
       state.documents.push(record);
     } else if (body.recordType === 'certificate') {
       if (!body.validUntil || Number.isNaN(Date.parse(body.validUntil))) throw httpError(400, 'A valid certificate expiry date is required');
@@ -1517,9 +1637,9 @@ async function handle(req, res) {
       record = { ...common, packageName: body.packageName || body.title, version: body.version, status: body.status || 'planned', deployedAt: body.deployedAt || null, approvedBy: body.approvedBy || null, verificationResult: body.verificationResult || null, rollbackVersion: body.rollbackVersion || null };
       state.deployments.push(record);
     }
-    appendPassportEntry(item.id, { type: body.recordType, source: record.source, data: { ...record, attachment: record.attachment ? { name: record.attachment.name, contentType: record.attachment.contentType, size: record.attachment.size, sha256: record.attachment.sha256 } : undefined } }, actor);
+    appendPassportEntry(item.id,{ type:body.recordType,source:record.source,data:{ ...record,attachment:publicAttachment(record.attachment) || undefined } },actor);
     appendOutbox(`${body.recordType}.created`, body.recordType, record.id, { robotId: item.id, title: record.title }); recordAudit(actor, `${body.recordType}.create`, 'robot', item.id, 'success', { recordId: record.id });
-    return send(res, 201, { data: { ...record, attachment: record.attachment ? { name: record.attachment.name, contentType: record.attachment.contentType, size: record.attachment.size, sha256: record.attachment.sha256 } : undefined } });
+    return send(res,201,{ data:{ ...record,attachment:publicAttachment(record.attachment) || undefined } });
   }
   const passport = route(req.method, path, /^\/api\/v1\/robots\/([^/]+)\/passport$/);
   if (passport && req.method === 'GET') {
@@ -1546,7 +1666,7 @@ async function handle(req, res) {
       if (!['info', 'warning', 'error', 'critical'].includes(body.severity)) throw httpError(400, 'severity must be info, warning, error, or critical');
       if (Number.isNaN(Date.parse(body.occurredAt))) throw httpError(400, 'occurredAt must be a valid ISO date/time');
       const sourceEventId = body.sourceEventId || `manual-${ids()}`;
-      const attachment = validateEventAttachment(body.attachment);
+      const attachment=await storeAttachment(validateEventAttachment(body.attachment),{ tenantId:item.tenantId,robotId:item.id });
       const event = upsertEvent(robotEvents.id, { eventType: body.eventType, sourceSystem: body.sourceSystem, sourceEventId, occurredAt: new Date(body.occurredAt).toISOString(), severity: body.severity, title: body.title, description: body.description, attachment, payload: { ...(body.payload || {}), title: body.title, description: body.description } }, actor);
       recordAudit(actor, 'event.create', 'robot', robotEvents.id, 'success', { eventId: event.eventId, sourceEventId });
       return send(res, 201, { data: event });
@@ -1595,45 +1715,66 @@ initializeCredentialHashes();
 loadPersistedState();
 applyRequestedTechnicianRoster();
 assertProductionSecretConfiguration();
-if (persistenceEnabled()) persistState();
+if (filePersistenceEnabled()) persistState();
 const server = http.createServer(async (req, res) => {
   const requestStartedAt=Date.now(); runtimeMetrics.activeRequests += 1;
   res.once('finish',() => { const duration=Date.now()-requestStartedAt; runtimeMetrics.activeRequests=Math.max(0,runtimeMetrics.activeRequests-1); runtimeMetrics.requestsTotal += 1; runtimeMetrics.responseTimeMsTotal += duration; runtimeMetrics.responseTimeMsMax=Math.max(runtimeMetrics.responseTimeMsMax,duration); const statusClass=`${Math.floor(res.statusCode/100)}xx`; runtimeMetrics.byStatus[statusClass]=(runtimeMetrics.byStatus[statusClass] || 0)+1; if (res.statusCode >= 500) runtimeMetrics.errorsTotal += 1; });
   try {
     await handle(req, res);
-    if (req.method !== 'GET' && req.method !== 'HEAD') persistState();
+    if (req.method !== 'GET' && req.method !== 'HEAD') await persistState();
   } catch (error) {
     const status = Number(error.status) || 500; const correlationId = ids();
     if (status >= 500) console.error(`[${correlationId}] ${req.method} ${req.url}:`, error);
+    if (res.headersSent) return;
     const code = status === 401 ? 'UNAUTHENTICATED' : status === 403 ? 'FORBIDDEN' : status === 409 ? 'CONFLICT' : status === 429 ? 'RATE_LIMITED' : status >= 500 ? 'INTERNAL_ERROR' : 'REQUEST_FAILED';
     send(res, status, { error: { code, message: status >= 500 ? 'The operation could not be completed. Retry or contact support with the correlation ID.' : error.message, details: status < 500 ? error.details : undefined, correlationId } });
   }
 });
 
-let autoXingPollTimer = null;
-let autoXingPollRunning = false;
+const providerPollTimers=[];
 let emailQueueTimer = null;
 function startEmailDeliveryWorker() { if (!emailAlertConfiguration().enabled) return; processEmailQueue(); emailQueueTimer=setInterval(processEmailQueue,60000); emailQueueTimer.unref?.(); }
 let operationsAutomationTimer=null;
 function startOperationsAutomationWorker() { operationsAutomationTimer=setInterval(() => { for (const tenantId of state.tenants.keys()) evaluateAlertEscalations(tenantId); },60000); operationsAutomationTimer.unref?.(); }
-function startAutoXingPolling() {
-  if (!autoXingLiveEnabled() || autoXingPollIntervalMs() === 0) return;
-  const pollActor = { id: 'system-autoxing-poller', name: 'AutoXing Poller', role: 'platform_admin', tenantId: 'tenant-demo', organizationId: 'org-ef' };
-  autoXingPollTimer = setInterval(async () => {
-    if (autoXingPollRunning) return;
-    autoXingPollRunning = true;
-    const syncStartedAt = Date.now();
-    try { await syncAutoXingLive(pollActor); } catch (error) { recordAdapterSync(state.adapters.get('autoxing'), { status:'error', startedAt:syncStartedAt, error:error.message, trigger:'poll' }); }
-    finally { autoXingPollRunning = false; try { persistState(); } catch (error) { console.error(`Could not persist AutoXing synchronization: ${error.message}`); } }
-  }, autoXingPollIntervalMs());
-  autoXingPollTimer.unref?.();
+let syncWorkerTimer=null; let syncWorkerRunning=false;
+const syncWorkerId=`${process.env.HOSTNAME || 'altegro'}:${process.pid}:${ids()}`;
+async function processSyncJobs() {
+  if (!asyncSyncEnabled() || syncWorkerRunning) return; syncWorkerRunning=true;
+  try {
+    const job=await databaseStore.claimSyncJob(syncWorkerId,Number(process.env.SYNC_JOB_STALE_SECONDS || 900)); if (!job) return;
+    const actor={ ...job.actor,tenantId:job.tenantId };
+    try {
+      const result=await executeProviderSync(job.provider,actor,job.trigger); await persistState();
+      const compact={ provider:job.provider,count:result.count ?? 1,resources:result.resources || null,resourceErrors:result.resourceErrors || [],completedAt:timestamp() };
+      await databaseStore.completeSyncJob(job.id,compact); recordAudit(actor,'adapter.sync.completed','adapter',job.provider,'success',{ jobId:job.id,count:compact.count }); await persistState();
+    } catch(error) { await databaseStore.failSyncJob(job.id,error.message); recordAudit(actor,'adapter.sync.completed','adapter',job.provider,'error',{ jobId:job.id }); await persistState().catch(() => {}); }
+  } finally { syncWorkerRunning=false; }
+}
+function startSyncJobWorker() { if (!asyncSyncEnabled()) return; processSyncJobs(); syncWorkerTimer=setInterval(processSyncJobs,Math.max(250,Number(process.env.SYNC_JOB_POLL_INTERVAL_MS || 1000))); syncWorkerTimer.unref?.(); }
+function startProviderPolling() {
+  const configurations=[
+    { provider:'autoxing',enabled:autoXingLiveEnabled(),interval:autoXingPollIntervalMs() },
+    { provider:'cenobots',enabled:cenoBotsLiveEnabled(),interval:cenoBotsPollIntervalMs() },
+  ];
+  for (const config of configurations) {
+    if (!config.enabled || !config.interval) continue;
+    const actor={ id:`system-${config.provider}-poller`,name:`${config.provider} Poller`,role:'platform_admin',tenantId:'tenant-demo',organizationId:'org-ef' };
+    let running=false;
+    const timer=setInterval(async () => {
+      if (running) return; running=true;
+      try { if (asyncSyncEnabled()) await enqueueProviderSync(config.provider,actor,'poll'); else { await executeProviderSync(config.provider,actor,'poll'); await persistState(); } }
+      catch(error) { console.error(`${config.provider} polling failed: ${error.message}`); }
+      finally { running=false; }
+    },config.interval);
+    timer.unref?.(); providerPollTimers.push(timer);
+  }
 }
 
 if (require.main === module) {
-  server.listen(PORT, BIND_HOST, () => { startAutoXingPolling(); startEmailDeliveryWorker(); startOperationsAutomationWorker(); console.log(`Altegro prototype listening on http://${BIND_HOST}:${PORT}`); });
-  const shutdown = (signal) => { console.log(`${signal} received; saving state and shutting down.`); if (emailQueueTimer) clearInterval(emailQueueTimer); if (operationsAutomationTimer) clearInterval(operationsAutomationTimer); try { persistState(); } catch (error) { console.error(`Final persistence failed: ${error.message}`); } server.close(() => process.exit(0)); };
+  initializeInfrastructure().then(() => server.listen(PORT,BIND_HOST,() => { startProviderPolling(); startSyncJobWorker(); startEmailDeliveryWorker(); startOperationsAutomationWorker(); console.log(`Altegro listening on http://${BIND_HOST}:${PORT} (${PERSISTENCE_DRIVER} persistence, ${SYNC_MODE} sync)`); })).catch((error) => { console.error(`Altegro startup failed: ${error.message}`); process.exit(1); });
+  const shutdown = async (signal) => { console.log(`${signal} received; saving state and shutting down.`); for (const timer of providerPollTimers) clearInterval(timer); if (syncWorkerTimer) clearInterval(syncWorkerTimer); if (emailQueueTimer) clearInterval(emailQueueTimer); if (operationsAutomationTimer) clearInterval(operationsAutomationTimer); try { await persistState(); } catch (error) { console.error(`Final persistence failed: ${error.message}`); } server.close(async () => { await databaseStore?.close().catch(() => {}); await objectStore?.close().catch(() => {}); process.exit(0); }); };
   process.once('SIGINT', () => shutdown('SIGINT'));
   process.once('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-module.exports = { server, state, persistState, DATA_FILE };
+module.exports={ server,state,persistState,DATA_FILE,initializeInfrastructure };

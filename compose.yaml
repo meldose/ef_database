@@ -4,14 +4,63 @@ services:
     ports:
       - "3000:3000"
     environment:
+      NODE_ENV: development
       BIND_HOST: 0.0.0.0
       ALTEGRO_PERSISTENCE: "true"
-      ALTEGRO_DATA_FILE: /app/data/altegro-state.json
+      ALTEGRO_PERSISTENCE_DRIVER: postgres
+      ALTEGRO_SYNC_MODE: async
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: altegro
+      PGUSER: altegro
+      PGPASSWORD: altegro-dev-password
+      OBJECT_STORAGE_DRIVER: s3
+      OBJECT_STORAGE_ENDPOINT: http://minio:9000
+      OBJECT_STORAGE_REGION: eu-central-1
+      OBJECT_STORAGE_BUCKET: altegro-attachments
+      OBJECT_STORAGE_ACCESS_KEY: altegro-dev-access
+      OBJECT_STORAGE_SECRET_KEY: altegro-dev-secret
+      OBJECT_STORAGE_FORCE_PATH_STYLE: "true"
+      OBJECT_STORAGE_CREATE_BUCKET: "true"
       AUTH_SESSION_TTL_SECONDS: "28800"
       COOKIE_SECURE: "false"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: altegro
+      POSTGRES_USER: altegro
+      POSTGRES_PASSWORD: altegro-dev-password
     volumes:
-      - altegro-data:/app/data
+      - altegro-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U altegro -d altegro"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: altegro-dev-access
+      MINIO_ROOT_PASSWORD: altegro-dev-secret
+    volumes:
+      - altegro-objects:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     restart: unless-stopped
 
 volumes:
-  altegro-data:
+  altegro-postgres:
+  altegro-objects:
