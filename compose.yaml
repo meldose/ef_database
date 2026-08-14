@@ -2,7 +2,7 @@ services:
   altegro:
     build: .
     ports:
-      - "3000:3000"
+      - "${ALTEGRO_HOST_PORT:-3000}:3000"
     environment:
       NODE_ENV: development
       BIND_HOST: 0.0.0.0
