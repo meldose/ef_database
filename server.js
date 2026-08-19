@@ -84,6 +84,7 @@ function managedSecretStatus() {
   const providers = [
     { name:'autoxing', enabled:autoXingLiveEnabled(), names:['APPID','APPSECRET','APPCODE'] },
     { name:'cenobots', enabled:cenoBotsLiveEnabled(), names:['CENOBOTS_ACCESS_KEY','CENOBOTS_SECRET_KEY'] },
+    { name:'cenobots-webhook', enabled:Boolean(process.env.CENOBOTS_WEBHOOK_SECRET || process.env.CENOBOTS_WEBHOOK_SECRET_FILE), names:['CENOBOTS_WEBHOOK_SECRET'] },
     { name:'email', enabled:enabled(process.env.EMAIL_ALERTS_ENABLED) && Boolean(process.env.EMAIL_SMTP_USERNAME), names:['EMAIL_SMTP_PASSWORD'] },
     { name:'postgres',enabled:postgresPersistenceEnabled(),names:['PGPASSWORD'] },
     { name:'object-storage',enabled:OBJECT_STORAGE_DRIVER === 's3' && Boolean(process.env.OBJECT_STORAGE_ENDPOINT),names:['OBJECT_STORAGE_ACCESS_KEY','OBJECT_STORAGE_SECRET_KEY'] }
@@ -211,6 +212,8 @@ const state = {
   modelRequirements: new Map(),
   robotAssignments: new Map(),
   alertWorkflows: new Map(),
+  notificationWorkflows: new Map(),
+  cenobotsWebhookReceipts: new Map(),
   maintenanceSchedules: new Map(),
   alertEscalationRules: new Map(),
   alertEscalations: new Map(),
@@ -282,7 +285,7 @@ function persistedSnapshot() {
     sessions: mapEntries(authenticatedSessions).filter(([, session]) => session.expiresAt > Date.now()),
     state: {
       tenants: mapEntries(state.tenants), organizations: mapEntries(state.organizations), sites: mapEntries(state.sites), models: mapEntries(state.models), robots: mapEntries(state.robots),
-      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), maintenanceSchedules:mapEntries(state.maintenanceSchedules), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
+      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), notificationWorkflows:mapEntries(state.notificationWorkflows), cenobotsWebhookReceipts:mapEntries(state.cenobotsWebhookReceipts), maintenanceSchedules:mapEntries(state.maintenanceSchedules), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
       deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox, emailDeliveries:state.emailDeliveries,
       autoxing: { ...state.autoxing, pois: mapEntries(state.autoxing.pois), areas: mapEntries(state.autoxing.areas), maps: mapEntries(state.autoxing.maps), tasks: mapEntries(state.autoxing.tasks) },
       adapterRuntime: mapEntries(state.adapters).map(([provider, adapter]) => [provider, { lastSyncAt: adapter.lastSyncAt || null, lastSyncStatus: adapter.lastSyncStatus || 'never', lastError: adapter.lastError || null, lastSyncDurationMs:adapter.lastSyncDurationMs || null, lastSyncCount:adapter.lastSyncCount ?? null, lastSyncWarnings:adapter.lastSyncWarnings || 0, syncHistory:clone(adapter.syncHistory || []) }])
@@ -324,7 +327,7 @@ function hydratePersistedState(saved) {
   for (const [token,user] of Object.entries(saved.users || {})) demoUsers[token]=user;
   initializeCredentialHashes();
   replaceMap(authenticatedSessions,(saved.sessions || []).filter(([,session]) => session.expiresAt > Date.now()));
-  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','maintenanceSchedules','alertEscalationRules','alertEscalations']) replaceMap(state[name],saved.state[name]);
+  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','notificationWorkflows','cenobotsWebhookReceipts','maintenanceSchedules','alertEscalationRules','alertEscalations']) replaceMap(state[name],saved.state[name]);
   for (const name of ['documents','certificates','deployments','compatibilityRecords','events','audit','outbox','emailDeliveries']) if (Array.isArray(saved.state[name])) state[name]=saved.state[name];
   const autoXing=saved.state.autoxing || {};
   state.autoxing.businesses=autoXing.businesses || []; state.autoxing.buildings=autoXing.buildings || []; state.autoxing.lastSyncAt=autoXing.lastSyncAt || null; state.autoxing.resourceErrors=autoXing.resourceErrors || [];
@@ -753,7 +756,7 @@ function cenoBotsOperations(actor) {
     return { id:robot.id,serialNumber:robot.serialNumber,externalId,online:robot.online,battery:robot.battery,charging:robot.charging,position:clone(robot.position || null),speed:robot.speed ?? null,emergencyStop:robot.emergencyStop ?? null,manualMode:robot.manualMode ?? null,docked:robot.docked ?? null,currentTask:clone(robot.providerTask || null),providerVersion:robot.providerVersion || null,buildingName:robot.providerBuildingName || null,mapId:robot.providerMapId || null,mapName:robot.providerMapName || null,mapVersion:robot.providerMapVersion || null,maintenanceItems:clone(maintenanceItems),maintenanceDueCount:maintenanceDue.length,errorCount:errorItems.length,updatedAt:robot.updatedAt };
   });
   const adapter=state.adapters.get('cenobots') || {}; const policy=managedSecretStatus().providers.find((item) => item.provider === 'cenobots') || null;
-  return { summary:{ total:fleet.length,online:fleet.filter((item) => item.online === true).length,offline:fleet.filter((item) => item.online === false).length,charging:fleet.filter((item) => item.charging === true).length,docked:fleet.filter((item) => item.docked === true).length,maintenanceDue:fleet.reduce((sum,item) => sum+item.maintenanceDueCount,0),errors:fleet.reduce((sum,item) => sum+item.errorCount,0) },fleet,alerts:alerts.sort((a,b) => Date.parse(b.occurredAt || 0)-Date.parse(a.occurredAt || 0)),diagnostics:{ liveEnabled:cenoBotsLiveEnabled(),status:adapter.status,lastSyncAt:adapter.lastSyncAt,lastSyncStatus:adapter.lastSyncStatus,lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncCount:adapter.lastSyncCount,lastSyncWarnings:adapter.lastSyncWarnings || 0,minimumRequestIntervalSeconds:Number(process.env.CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS || 1.05),secretPolicy:policy,syncHistory:clone(adapter.syncHistory || []) },generatedAt:timestamp() };
+  return { summary:{ total:fleet.length,online:fleet.filter((item) => item.online === true).length,offline:fleet.filter((item) => item.online === false).length,charging:fleet.filter((item) => item.charging === true).length,docked:fleet.filter((item) => item.docked === true).length,maintenanceDue:fleet.reduce((sum,item) => sum+item.maintenanceDueCount,0),errors:fleet.reduce((sum,item) => sum+item.errorCount,0) },fleet,alerts:alerts.sort((a,b) => Date.parse(b.occurredAt || 0)-Date.parse(a.occurredAt || 0)),diagnostics:{ liveEnabled:cenoBotsLiveEnabled(),status:adapter.status,lastSyncAt:adapter.lastSyncAt,lastSyncStatus:adapter.lastSyncStatus,lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncCount:adapter.lastSyncCount,lastSyncWarnings:adapter.lastSyncWarnings || 0,minimumRequestIntervalSeconds:Number(process.env.CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS || 1.05),secretPolicy:policy,webhook:cenoBotsWebhookConfiguration(),syncHistory:clone(adapter.syncHistory || []) },generatedAt:timestamp() };
 }
 
 function autoXingDiagnosticReport(actor,robot) {
@@ -1061,6 +1064,70 @@ function operationsSummary(actor) {
   };
 }
 
+function cenoBotsWebhookConfiguration() {
+  const configured=Boolean(process.env.CENOBOTS_WEBHOOK_SECRET || process.env.CENOBOTS_WEBHOOK_SECRET_FILE);
+  return { configured,endpoint:'/api/v1/webhooks/cenobots',freshnessWindowSeconds:Math.max(30,Number(process.env.CENOBOTS_WEBHOOK_FRESHNESS_SECONDS || 300)),receiptCount:state.cenobotsWebhookReceipts.size,lastReceivedAt:[...state.cenobotsWebhookReceipts.values()].sort((a,b) => Date.parse(b.receivedAt)-Date.parse(a.receivedAt))[0]?.receivedAt || null };
+}
+
+function decryptCenoBotsWebhook(envelope,secret) {
+  if (!envelope || typeof envelope.iv !== 'string' || typeof envelope.encrypt !== 'string') throw httpError(401,'Invalid encrypted webhook envelope');
+  try {
+    const iv=Buffer.from(envelope.iv,'base64url'); const encrypted=Buffer.from(envelope.encrypt,'base64url');
+    if (iv.length !== 12 || encrypted.length <= 16) throw new Error('invalid encrypted payload length');
+    const ciphertext=encrypted.subarray(0,encrypted.length-16); const authTag=encrypted.subarray(encrypted.length-16);
+    const key=crypto.createHash('sha256').update(secret,'utf8').digest(); const decipher=crypto.createDecipheriv('aes-256-gcm',key,iv); decipher.setAuthTag(authTag);
+    return JSON.parse(Buffer.concat([decipher.update(ciphertext),decipher.final()]).toString('utf8'));
+  } catch { throw httpError(401,'Unable to decrypt webhook message'); }
+}
+
+function ingestCenoBotsWebhook(message,traceId) {
+  if (!message || message.messageType !== 'event' || !message.data?.id) throw httpError(400,'Webhook event envelope is invalid');
+  const event=message.data; const eventId=String(event.id); const existing=state.cenobotsWebhookReceipts.get(eventId);
+  if (existing) return { duplicate:true,receipt:existing };
+  const deviceOpenId=String(event.device?.openId || '').trim(); const robot=[...state.robots.values()].find((item) => item.externalIdentities?.some((identity) => identity.system === 'cenobots' && String(identity.externalId) === deviceOpenId));
+  const occurredAt=Number.isFinite(Number(event.occurredAt)) ? new Date(Number(event.occurredAt)).toISOString() : timestamp();
+  const receipt={ id:eventId,traceId,type:String(event.type || 'unknown'),deviceOpenId,robotId:robot?.id || null,occurredAt,receivedAt:timestamp(),status:robot ? 'applied' : 'unmatched_robot',event:clone(event) };
+  state.cenobotsWebhookReceipts.set(eventId,receipt);
+  if (!robot) { appendOutbox('cenobots.webhook.unmatched','cenobots_device',deviceOpenId || 'unknown',{ eventId,type:event.type }); return { duplicate:false,receipt }; }
+  const actor={ id:'system-cenobots-webhook',name:'CenoBots Webhook',role:'platform_admin',tenantId:robot.tenantId,organizationId:'org-ef' };
+  const newer=!robot.lastWebhookOccurredAt || Date.parse(occurredAt) >= Date.parse(robot.lastWebhookOccurredAt);
+  let canonical={ eventType:'provider_event',severity:'info',title:'CenoBots robot event',description:`CenoBots sent ${event.type}.` };
+  if (event.type === 'robot.error.changed') {
+    const codes=Array.isArray(event.data?.codes) ? event.data.codes : [];
+    if (newer) robot.errors=codes.map((item) => ({ code:item.code,name:item.desc || `Error ${item.code}`,description:item.desc || '' }));
+    canonical={ eventType:codes.length ? 'error' : 'error_cleared',severity:codes.length ? 'error' : 'info',title:codes.length ? 'CenoBots error state changed' : 'CenoBots errors cleared',description:codes.length ? `${codes.length} active error code${codes.length === 1 ? '' : 's'} reported.` : 'The robot reports no active error codes.' };
+  } else if (event.type === 'robot.task.status_changed') {
+    if (newer) robot.providerTask=clone(event.data || {});
+    canonical={ eventType:'mission_status',severity:event.data?.status?.name === 'ABEND' ? 'error' : 'info',title:'CenoBots task status changed',description:`Task ${event.data?.taskId || event.data?.previousTaskId || 'state'} is ${event.data?.status?.name || (event.data?.isRunning ? 'running' : 'stopped')}.` };
+  } else if (event.type === 'robot.maintenance.changed') {
+    if (newer) robot.maintenanceWebhook=clone(event.data || {});
+    canonical={ eventType:'maintenance',severity:'info',title:'CenoBots maintenance changed',description:`${event.data?.changedItems?.length || 0} maintenance item${event.data?.changedItems?.length === 1 ? '' : 's'} changed.` };
+  } else if (event.type === 'robot.need_help_door_call') {
+    canonical={ eventType:'assistance_required',severity:'warning',title:'Robot needs door assistance',description:'CenoBots reports that the robot needs help opening a door.' };
+  }
+  if (newer) { robot.lastWebhookOccurredAt=occurredAt; robot.updatedAt=timestamp(); }
+  upsertEvent(robot.id,{ ...canonical,sourceSystem:'cenobots-webhook',sourceEventId:eventId,occurredAt,payload:clone(event) },actor);
+  appendOutbox('cenobots.webhook.received','robot',robot.id,{ eventId,type:event.type,occurredAt }); recordAudit(actor,'cenobots.webhook.ingest','robot',robot.id,'success',{ eventId,type:event.type });
+  return { duplicate:false,receipt };
+}
+
+async function handleCenoBotsWebhook(req,res) {
+  const secret=secretEnvValue('CENOBOTS_WEBHOOK_SECRET'); if (!secret) throw httpError(503,'CenoBots webhook secret is not configured');
+  if (!String(req.headers['content-type'] || '').toLowerCase().includes('application/json')) throw httpError(415,'CenoBots webhooks require application/json');
+  const traceId=String(req.headers['x-webhook-id'] || '').trim(); const rawTimestamp=String(req.headers['x-webhook-timestamp'] || '').trim(); const requestTime=Number(rawTimestamp); const config=cenoBotsWebhookConfiguration();
+  if (!traceId || !Number.isFinite(requestTime) || Math.abs(Math.floor(Date.now()/1000)-requestTime) > config.freshnessWindowSeconds) throw httpError(401,'Missing or stale webhook credentials');
+  const message=decryptCenoBotsWebhook(await readBody(req),secret);
+  if (message.messageType === 'challenge') { const challenge=message.data?.challenge; if (typeof challenge !== 'string' || !challenge) throw httpError(400,'Webhook challenge is missing'); return send(res,200,{ challenge }); }
+  const result=ingestCenoBotsWebhook(message,traceId);
+  await persistState();
+  return send(res,result.receipt.status === 'unmatched_robot' ? 202 : 200,{ received:true,duplicate:result.duplicate,eventId:result.receipt.id,status:result.receipt.status });
+}
+
+function notificationWorkflow(notificationId) {
+  const workflow=state.notificationWorkflows.get(notificationId); if (workflow?.status === 'snoozed' && workflow.snoozeUntil && Date.parse(workflow.snoozeUntil) <= Date.now()) return { ...workflow,status:'open',snoozeUntil:null };
+  return workflow || { status:'open',technicianId:null,technicianName:null,note:'',snoozeUntil:null,updatedAt:null,updatedBy:null };
+}
+
 function operationalNotifications(actor) {
   const robotIds = visibleRobotIds(actor);
   const robots = [...state.robots.values()].filter((robot) => robotIds.has(robot.id));
@@ -1085,7 +1152,15 @@ function operationalNotifications(actor) {
   if (!['robot_user', 'auditor'].includes(actor.role)) for (const adapter of state.adapters.values()) if (adapter.lastSyncStatus === 'error') notifications.push({ id: `adapter:${adapter.provider}`, type: 'integration_error', severity: 'error', title: `${adapter.provider} synchronization failed`, message: 'Retry synchronization or inspect the protected server log.', robotId: null, occurredAt: adapter.lastSyncAt || startedAt });
   const rank = { critical: 0, error: 1, warning: 2, info: 3 };
   notifications.sort((a, b) => (rank[a.severity] ?? 4) - (rank[b.severity] ?? 4) || Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
-  return notifications.slice(0, 30);
+  return notifications.slice(0, 100).map((item) => ({ ...item,workflow:clone(notificationWorkflow(item.id)) }));
+}
+
+function operationalReport(actor,days=30) {
+  days=Math.min(365,Math.max(1,Number(days) || 30)); const since=Date.now()-days*86400000; const robots=[...state.robots.values()].filter((robot) => visibleToActor(actor,robot)); const robotIds=new Set(robots.map((robot) => robot.id)); const events=state.events.filter((event) => robotIds.has(event.robotId) && Date.parse(event.occurredAt) >= since);
+  const externalIds=new Set(robots.flatMap((robot) => robot.externalIdentities || []).filter((identity) => identity.system === 'autoxing').map((identity) => String(identity.externalId))); const tasks=[...state.autoxing.tasks.values()].filter((task) => externalIds.has(String(taskRobotExternalId(task)))); const taskSummary=autoXingTaskSummary(tasks); const periodTasks=taskSummary.tasks.filter((task) => !task.occurredAt || Date.parse(task.occurredAt) >= since); const completed=periodTasks.filter((task) => task.completed).length; const failed=periodTasks.filter((task) => task.failed).length; const batteryValues=robots.map((robot) => Number(robot.battery)).filter(Number.isFinite); const serviceCases=[...state.serviceCases.values()].filter((item) => robotIds.has(item.robotId) && Date.parse(item.createdAt) >= since); const schedules=[...state.maintenanceSchedules.values()].filter((item) => robotIds.has(item.robotId));
+  const daily=[]; for (let offset=days-1;offset>=0;offset-=1) { const day=new Date(); day.setUTCHours(0,0,0,0); day.setUTCDate(day.getUTCDate()-offset); const next=new Date(day); next.setUTCDate(next.getUTCDate()+1); const dayEvents=events.filter((item) => Date.parse(item.occurredAt) >= day.getTime() && Date.parse(item.occurredAt) < next.getTime()); daily.push({ date:day.toISOString().slice(0,10),events:dayEvents.length,errors:dayEvents.filter((item) => ['error','critical'].includes(item.severity)).length,maintenance:dayEvents.filter((item) => item.eventType.includes('maintenance')).length,tasks:periodTasks.filter((item) => item.occurredAt && Date.parse(item.occurredAt) >= day.getTime() && Date.parse(item.occurredAt) < next.getTime()).length }); }
+  const providerBreakdown=['autoxing','cenobots','manual'].map((provider) => ({ provider,count:robots.filter((robot) => provider === 'manual' ? !(robot.externalIdentities || []).length : robot.externalIdentities?.some((identity) => identity.system === provider)).length }));
+  return { period:{ days,from:new Date(since).toISOString(),to:timestamp() },fleet:{ total:robots.length,online:robots.filter((item) => item.online === true).length,offline:robots.filter((item) => item.online === false).length,availabilityPercent:robots.length ? Math.round(robots.filter((item) => item.online === true).length/robots.length*100) : null,averageBattery:batteryValues.length ? Math.round(batteryValues.reduce((sum,value) => sum+value,0)/batteryValues.length) : null,providers:providerBreakdown },tasks:{ total:periodTasks.length,completed,failed,running:periodTasks.filter((item) => item.running).length,successRate:completed+failed ? Math.round(completed/(completed+failed)*100) : null,cleanedArea:Math.round(periodTasks.map((item) => item.cleanedArea).filter(Number.isFinite).reduce((sum,value) => sum+value,0)),averageDurationMinutes:(() => { const values=periodTasks.map((item) => item.durationMinutes).filter(Number.isFinite); return values.length ? Math.round(values.reduce((sum,value) => sum+value,0)/values.length) : null; })() },service:{ casesOpened:serviceCases.length,casesClosed:serviceCases.filter((item) => item.status === 'closed').length,schedules:schedules.length,overdue:schedules.map(maintenanceScheduleView).filter((item) => item.dueState === 'overdue').length,costTrackingAvailable:false },events:{ total:events.length,critical:events.filter((item) => item.severity === 'critical').length,errors:events.filter((item) => item.severity === 'error').length },daily,generatedAt:timestamp() };
 }
 
 function readBody(req) {
@@ -1275,6 +1350,7 @@ async function handle(req, res) {
   if (req.method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: 'altegro-prototype', startedAt, now: timestamp() });
   if (req.method === 'GET' && path === '/ready') { const readiness=systemReadiness(); return send(res,readiness.ready ? 200 : 503,{ status:readiness.ready ? 'ready' : 'not_ready',...readiness,now:timestamp() }); }
   if (req.method === 'GET' && path === '/metrics') { if (!metricsAuthorized(req)) throw httpError(401,'A valid monitoring token is required'); return sendPrometheusMetrics(res); }
+  if (req.method === 'POST' && path === '/api/v1/webhooks/cenobots') return handleCenoBotsWebhook(req,res);
   if (req.method === 'GET' && path === '/api/v1/demo/tokens') {
     throw httpError(404, 'Static demo bearer tokens are disabled; sign in with username and password');
   }
@@ -1305,7 +1381,25 @@ async function handle(req, res) {
   const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
 
   if (req.method === 'GET' && path === '/api/v1/operations/summary') return send(res, 200, { data: operationsSummary(actor) });
-  if (req.method === 'GET' && path === '/api/v1/notifications') { const data = operationalNotifications(actor); return send(res, 200, { data, count: data.length, generatedAt: timestamp() }); }
+  if (req.method === 'GET' && path === '/api/v1/notifications') {
+    let data=operationalNotifications(actor); const q=String(url.searchParams.get('q') || '').trim().toLowerCase(); const severity=url.searchParams.get('severity'); const status=url.searchParams.get('status');
+    if (q) data=data.filter((item) => [item.title,item.message,item.type,item.workflow?.technicianName].some((value) => String(value || '').toLowerCase().includes(q)));
+    if (severity) data=data.filter((item) => item.severity === severity);
+    if (status) data=data.filter((item) => item.workflow.status === status);
+    const activeCount=data.filter((item) => item.workflow.status !== 'resolved' && !(item.workflow.status === 'snoozed' && Date.parse(item.workflow.snoozeUntil) > Date.now())).length;
+    return send(res, 200, { data, count:data.length,activeCount,generatedAt:timestamp() });
+  }
+  const notificationUpdate=route(req.method,path,/^\/api\/v1\/notifications\/([^/]+)$/);
+  if (notificationUpdate && req.method === 'PATCH') {
+    if (!canWrite(actor)) throw httpError(403,'Notification management permission required'); const notificationId=decodeURIComponent(notificationUpdate.id); const notification=operationalNotifications(actor).find((item) => item.id === notificationId); if (!notification) throw httpError(404,'Notification not found'); const allowed=['open','acknowledged','snoozed','resolved']; if (!allowed.includes(body.status)) throw httpError(400,'Notification status must be open, acknowledged, snoozed, or resolved');
+    let technician=null; if (body.technicianId) { technician=state.technicians.get(body.technicianId); if (!technician || technician.tenantId !== actor.tenantId || technician.status !== 'active') throw httpError(400,'Select an active technician'); if (notification.robotId && !technicianEligibility(technician,state.robots.get(notification.robotId)).eligible) throw httpError(400,'The technician is not qualified for this robot'); }
+    const snoozeUntil=body.status === 'snoozed' ? new Date(body.snoozeUntil || Date.now()+3600000) : null; if (snoozeUntil && Number.isNaN(snoozeUntil.getTime())) throw httpError(400,'Provide a valid snooze time');
+    const workflow={ notificationId,status:body.status,technicianId:technician?.id || null,technicianName:technician?.name || null,note:String(body.note || '').trim().slice(0,2000),snoozeUntil:snoozeUntil?.toISOString() || null,updatedAt:timestamp(),updatedBy:actor.name }; state.notificationWorkflows.set(notificationId,workflow); appendOutbox('notification.workflow.updated','notification',notificationId,workflow); recordAudit(actor,'notification.workflow.update',notification.robotId ? 'robot' : 'notification',notification.robotId || notificationId,'success',{ notificationId,status:workflow.status }); return send(res,200,{ data:workflow });
+  }
+  if (req.method === 'GET' && path === '/api/v1/reports/operations') return send(res,200,{ data:operationalReport(actor,url.searchParams.get('days')) });
+  if (req.method === 'GET' && path === '/api/v1/reports/operations.json') { const report=operationalReport(actor,url.searchParams.get('days')); recordAudit(actor,'report.operations.export','tenant',actor.tenantId,'success',{ format:'json',days:report.period.days }); return sendDownload(res,'application/json; charset=utf-8',`altegro-operations-${report.period.days}d.json`,JSON.stringify(report,null,2)); }
+  if (req.method === 'GET' && path === '/api/v1/reports/operations.csv') { const report=operationalReport(actor,url.searchParams.get('days')); const rows=[['date','events','errors','maintenance','tasks'],...report.daily.map((day) => [day.date,day.events,day.errors,day.maintenance,day.tasks])]; recordAudit(actor,'report.operations.export','tenant',actor.tenantId,'success',{ format:'csv',days:report.period.days }); return sendDownload(res,'text/csv; charset=utf-8',`altegro-operations-${report.period.days}d.csv`,`${rows.map((row) => row.map(csvCell).join(',')).join('\n')}\n`); }
+  if (req.method === 'GET' && path === '/api/v1/cenobots/webhooks/status') { if (['robot_user','auditor'].includes(actor.role)) throw httpError(403,'Webhook configuration access is unavailable'); return send(res,200,{ data:cenoBotsWebhookConfiguration() }); }
   if (req.method === 'GET' && path === '/api/v1/workforce/matrix') { const data = workforceMatrix(actor, url.searchParams.get('robotId')); return send(res, 200, { data }); }
   if (req.method === 'GET' && path === '/api/v1/technicians') {
     if (actor.role === 'robot_user') throw httpError(403, 'Technician access is not available to robot accounts');

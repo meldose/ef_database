@@ -31,28 +31,29 @@
       </a>
       <div class="topbar-actions">
         <span class="env-badge"><i></i> Prototype · Phase 1</span>
-        <button class="notification-button" id="notificationsButton" type="button" aria-label="Open operational notifications">Alerts <span id="notificationCount">0</span></button>
+        <button class="notification-button" id="notificationsButton" type="button" aria-label="Open operational notifications" aria-haspopup="dialog">Alerts <span id="notificationCount" aria-live="polite">0</span></button>
         <span id="loggedInUser" class="logged-in-user"></span>
-        <button class="logout-button" id="logoutButton">Log out</button>
+        <button class="logout-button" id="logoutButton" type="button">Log out</button>
         <button class="icon-button" id="refreshButton" title="Refresh data" aria-label="Refresh data">↻</button>
       </div>
     </header>
 
     <main class="shell" id="mainContent" tabindex="-1">
       <nav class="dashboard-tabs" id="dashboardTabs" role="tablist" aria-label="Dashboard sections">
-        <button type="button" role="tab" aria-selected="true" data-dashboard-tab="overview">Overview</button>
-        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="robots">Robots</button>
-        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="operations">Events &amp; Service</button>
-        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="autoxing">AutoXing</button>
-        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="cenobots">CenoBots</button>
-        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="workforce">Technicians</button>
-        <button type="button" role="tab" aria-selected="false" data-dashboard-tab="admin">Administration</button>
+        <button id="overviewTab" type="button" role="tab" aria-selected="true" aria-controls="overviewView" data-dashboard-tab="overview">Overview</button>
+        <button id="robotsTab" type="button" role="tab" aria-selected="false" aria-controls="robotsView" data-dashboard-tab="robots">Robots</button>
+        <button id="operationsTab" type="button" role="tab" aria-selected="false" aria-controls="operationsView" data-dashboard-tab="operations">Events &amp; Service</button>
+        <button id="autoxingTab" type="button" role="tab" aria-selected="false" aria-controls="autoxingWorkspace" data-dashboard-tab="autoxing">AutoXing</button>
+        <button id="cenobotsTab" type="button" role="tab" aria-selected="false" aria-controls="cenobotsWorkspace" data-dashboard-tab="cenobots">CenoBots</button>
+        <button id="workforceTab" type="button" role="tab" aria-selected="false" aria-controls="workforceSection" data-dashboard-tab="workforce">Technicians</button>
+        <button id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsView" data-dashboard-tab="reports">Reports</button>
+        <button id="adminTab" type="button" role="tab" aria-selected="false" aria-controls="adminView" data-dashboard-tab="admin">Administration</button>
       </nav>
-      <section class="hero" data-dashboard-view="overview">
+      <section class="hero" id="overviewView" data-dashboard-view="overview" role="tabpanel" aria-labelledby="overviewTab">
         <div>
-          <p class="eyebrow">Operations center / Demo Customer Tenant</p>
-          <h1>Robot fleet overview</h1>
-          <p class="hero-copy">A manufacturer-neutral view of robots, lifecycle history, events and integrations.</p>
+          <p class="eyebrow" id="roleDashboardEyebrow">Operations center / Demo Customer Tenant</p>
+          <h1 id="roleDashboardTitle">Robot fleet overview</h1>
+          <p class="hero-copy" id="roleDashboardCopy">A manufacturer-neutral view of robots, lifecycle history, events and integrations.</p>
         </div>
         <div class="hero-actions">
           <button class="button secondary" id="exportTenant">Export tenant</button>
@@ -63,6 +64,10 @@
           <button class="button secondary" id="serviceTechniciansButton" type="button">Service Technicians</button>
           <button class="button primary" id="newRobotButton">＋ Register robot</button>
         </div>
+      </section>
+      <section class="role-dashboard panel" id="roleDashboard" data-dashboard-view="overview" aria-labelledby="roleDashboardHeading">
+        <div><p class="eyebrow">Your workspace</p><h2 id="roleDashboardHeading">Priority actions</h2><p id="roleDashboardMessage"></p></div>
+        <div id="roleDashboardActions" class="role-dashboard-actions"></div>
       </section>
       <div id="syncStatus" class="sync-status hidden" role="status" aria-live="polite"></div>
 
@@ -84,7 +89,7 @@
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="maintenance"><span class="metric-label">Maintenance due</span><strong id="metricMaintenanceDue">—</strong><small>Filter maintenance alerts</small></article>
       </section>
 
-      <section class="workspace-grid" data-dashboard-view="robots">
+      <section class="workspace-grid" id="robotsView" data-dashboard-view="robots" role="tabpanel" aria-labelledby="robotsTab">
         <article class="panel registry-panel">
           <div class="panel-header">
             <div><p class="eyebrow">Canonical registry</p><h2>Robots</h2></div>
@@ -113,7 +118,7 @@
       </section>
 
       <section class="lower-grid">
-        <article class="panel" id="eventsPanel" data-dashboard-view="operations">
+        <article class="panel" id="operationsView" data-dashboard-view="operations" role="tabpanel" aria-labelledby="operationsTab">
           <div class="panel-header"><div><p class="eyebrow">Canonical event envelope</p><h2>Recent technical events</h2></div><button class="text-button" id="refreshEvents">Refresh</button></div>
           <div class="event-filters">
             <select id="eventRobotFilter" aria-label="Filter events by robot"><option value="">All robots</option></select>
@@ -129,7 +134,7 @@
           <div id="adaptersList" class="adapter-list"><div class="empty">Loading adapters…</div></div>
         </article>
       </section>
-      <section class="lower-grid" id="autoxingWorkspace" data-dashboard-view="autoxing">
+      <section class="lower-grid" id="autoxingWorkspace" data-dashboard-view="autoxing" role="tabpanel" aria-labelledby="autoxingTab">
         <article class="panel audit-panel" id="autoXingLivePanel">
           <div class="panel-header"><div><p class="eyebrow">Live read-only telemetry</p><h2>AutoXing live fleet</h2></div><div class="panel-header-actions"><span class="auto-refresh-status" id="autoRefreshStatus">Automatic refresh starting…</span><button class="text-button" id="refreshAutoXingOperations" type="button">Refresh</button></div></div>
           <div class="fleet-filter-toolbar"><label>Search<input id="autoXingFleetSearch" type="search" placeholder="Serial, external ID or site" /></label><label>Status<select id="autoXingFleetStatus"><option value="all">All statuses</option><option value="online">Online</option><option value="offline">Offline</option><option value="unknown">Unknown</option></select></label><label>Battery<select id="autoXingFleetBattery"><option value="all">All levels</option><option value="low">Low · ≤20%</option><option value="medium">Medium · 21–60%</option><option value="high">High · &gt;60%</option></select></label><label>Alerts<select id="autoXingFleetAlerts"><option value="all">All robots</option><option value="alerts">With alerts</option><option value="clear">No alerts</option></select></label></div>
@@ -190,7 +195,7 @@
           <div id="resourceExplorer" class="record-list"><div class="empty">Loading businesses, buildings, and maps…</div></div>
         </article>
       </section>
-      <section class="lower-grid" id="cenobotsWorkspace" data-dashboard-view="cenobots">
+      <section class="lower-grid" id="cenobotsWorkspace" data-dashboard-view="cenobots" role="tabpanel" aria-labelledby="cenobotsTab">
         <article class="panel audit-panel">
           <div class="panel-header"><div><p class="eyebrow">Live read-only telemetry</p><h2>CenoBots live fleet</h2></div><div class="panel-header-actions"><span class="auto-refresh-status" id="cenoBotsRefreshStatus">Waiting for fleet data…</span><button class="text-button" id="refreshCenoBotsOperations" type="button">Refresh</button><button class="button primary mini sync-button" id="syncCenoBotsWorkspace" type="button"><span class="button-label">Sync CenoBots</span></button></div></div>
           <div id="cenoBotsSummary" class="resource-metrics cenobots-summary-grid"><div class="empty">Loading CenoBots summary…</div></div>
@@ -230,7 +235,7 @@
           <div id="emailNotificationStatus" class="record-list"><div class="empty">Loading email notification status…</div></div>
         </article>
       </section>
-      <section class="lower-grid" id="workforceSection" data-dashboard-view="workforce">
+      <section class="lower-grid" id="workforceSection" data-dashboard-view="workforce" role="tabpanel" aria-labelledby="workforceTab">
         <article class="panel audit-panel">
           <div class="panel-header"><div><p class="eyebrow">Skills and certificate gate</p><h2>Technician qualification matrix</h2></div><button class="button primary" id="newTechnicianButton" type="button">＋ Add technician</button></div>
           <div class="workforce-toolbar"><label>Robot<select id="workforceRobotFilter"><option value="">All visible robots</option></select></label><label>Eligibility<select id="workforceStatusFilter"><option value="">All eligibility states</option><option value="qualified">Qualified</option><option value="expiring_soon">Expiring soon</option><option value="not_qualified">Not qualified</option><option value="assigned">Assigned</option></select></label><button class="text-button" id="refreshWorkforce" type="button">Refresh</button></div>
@@ -238,7 +243,15 @@
           <div id="workforceMatrixList" class="workforce-list"><div class="empty">Loading technician eligibility…</div></div>
         </article>
       </section>
-      <section class="lower-grid" data-dashboard-view="admin">
+      <section class="lower-grid" id="reportsView" data-dashboard-view="reports" role="tabpanel" aria-labelledby="reportsTab">
+        <article class="panel audit-panel">
+          <div class="panel-header"><div><p class="eyebrow">Operational intelligence</p><h2>Fleet performance report</h2></div><div class="panel-header-actions"><label class="compact-label">Period<select id="reportPeriod"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></select></label><button class="text-button" id="refreshReports" type="button">Refresh</button></div></div>
+          <div id="reportMetrics" class="report-metrics"><div class="empty">Loading operational report…</div></div>
+          <div id="reportTrend" class="report-trend" aria-label="Daily operational report"></div>
+          <div class="report-actions"><button class="button secondary" id="exportReportCsv" type="button">Export CSV</button><button class="button secondary" id="exportReportJson" type="button">Export JSON</button><small>Service-cost reporting will activate when labour and parts pricing is recorded.</small></div>
+        </article>
+      </section>
+      <section class="lower-grid" id="adminView" data-dashboard-view="admin" role="tabpanel" aria-labelledby="adminTab">
         <article class="panel audit-panel">
           <div class="panel-header"><div><p class="eyebrow">Accountability</p><h2>Recent audit activity</h2></div><button class="text-button" id="refreshAudit">Refresh</button></div>
           <div id="auditList" class="record-list"><div class="empty">Loading audit history…</div></div>
@@ -282,15 +295,14 @@
         <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Add to Passport</button></div>
       </form>
     </dialog>
-    <dialog id="robotDialog">
+    <dialog id="robotDialog" aria-labelledby="robotDialogTitle">
       <form method="dialog" id="robotForm">
-        <div class="dialog-header"><div><p class="eyebrow">Registry onboarding</p><h2>Register a robot</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close">×</button></div>
-        <p class="dialog-copy">New manually registered robots begin as <strong>draft</strong> until they are verified.</p>
-        <label>Existing synchronized robot <span class="field-hint">optional · select one to open it</span><select id="existingRobotId"><option value="">＋ New robot</option></select></label>
-        <label>Model<select id="modelId" required><option value="model-autoxing-a1">AutoXing A1 · Cleaning</option><option value="model-cenobots-c1">CenoBots C1 · Cleaning</option><option value="model-mock-m3">Mock OEM M3 · Transport</option></select></label>
-        <label>Serial number<input id="serialNumber" required placeholder="AX-PILOT-016" /><span id="serialNumberHint" class="field-hint">Enter a new unique serial number.</span></label>
-        <div id="robotAccountFields" class="form-grid"><label>Username / email<input id="robotUsername" type="email" required autocomplete="off" placeholder="operator@example.com" /></label><label>Password<input id="robotPassword" type="password" required minlength="12" autocomplete="new-password" placeholder="At least 12 characters" /></label></div>
-        <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" id="registerButton" value="default">Register robot</button></div>
+        <div class="dialog-header"><div><p class="eyebrow">Registry onboarding</p><h2 id="robotDialogTitle">Add a robot</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close robot onboarding">×</button></div>
+        <ol class="wizard-progress" aria-label="Robot onboarding progress"><li class="active" data-wizard-progress="1">1 · Source</li><li data-wizard-progress="2">2 · Identity</li><li data-wizard-progress="3">3 · Access</li></ol>
+        <fieldset class="wizard-step" data-wizard-step="1"><legend>Choose how to onboard</legend><p class="dialog-copy">Open a synchronized robot or register a new provider identity. New registrations remain <strong>draft</strong> until verified.</p><label>Existing synchronized robot <span class="field-hint">optional</span><select id="existingRobotId"><option value="">＋ New robot</option></select></label><label>Provider<select id="onboardingProvider"><option value="autoxing">AutoXing</option><option value="cenobots">CenoBots</option><option value="manual">Manual / other OEM</option></select></label></fieldset>
+        <fieldset class="wizard-step hidden" data-wizard-step="2"><legend>Robot identity and location</legend><label>Model<select id="modelId" required><option value="model-autoxing-a1">AutoXing A1 · Cleaning</option><option value="model-cenobots-c1">CenoBots C1 · Cleaning</option><option value="model-mock-m3">Other OEM M3 · Transport</option></select></label><label>Serial number<input id="serialNumber" required placeholder="AX-PILOT-016" /><span id="serialNumberHint" class="field-hint">Enter a new unique serial number.</span></label><label id="externalIdentityField">Provider robot ID <span class="field-hint">AutoXing ID or CenoBots deviceOpenId</span><input id="onboardingExternalId" maxlength="200" placeholder="Provider robot identifier" /></label><div class="form-grid"><label>Customer organization<select id="onboardingOrganization"><option value="org-demo">Demo Customer GmbH</option><option value="org-ef">EF Systemhaus</option></select></label><label>Service organization<select id="onboardingOperator"><option value="org-service">Demo Robot Care</option><option value="org-ef">EF Systemhaus</option></select></label></div><label>Site<select id="onboardingSite"><option value="site-berlin">Berlin Operations Site</option></select></label></fieldset>
+        <fieldset class="wizard-step hidden" data-wizard-step="3"><legend>Robot login account</legend><p class="dialog-copy">Create a robot-scoped account. It can see only this robot and cannot perform administrative actions.</p><div id="robotAccountFields" class="form-grid"><label>Username / email<input id="robotUsername" type="email" autocomplete="off" placeholder="operator@example.com" /></label><label>Password<input id="robotPassword" type="password" minlength="12" autocomplete="new-password" placeholder="At least 12 characters" /></label></div><div class="onboarding-review" id="onboardingReview" role="status"></div></fieldset>
+        <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button secondary hidden" id="onboardingBack" type="button">Back</button><button class="button primary" id="onboardingNext" type="button">Continue</button><button class="button primary hidden" id="registerButton" value="default">Register robot</button></div>
       </form>
     </dialog>
     <dialog id="credentialsDialog">
@@ -336,11 +348,13 @@
     <dialog id="notificationsDialog" class="notifications-dialog" aria-labelledby="notificationsTitle">
       <form method="dialog">
         <div class="dialog-header"><div><p class="eyebrow">Operations center</p><h2 id="notificationsTitle">Notifications</h2></div><button class="close-button" value="cancel" aria-label="Close notifications">×</button></div>
-        <p class="dialog-copy">Current offline robots, technical errors, service work, certificates, and integration failures.</p>
+        <p class="dialog-copy">Search, acknowledge, snooze, assign or resolve operational alerts.</p>
+        <div class="notification-toolbar"><label>Search<input id="notificationSearch" type="search" placeholder="Robot, alert or technician" /></label><label>Severity<select id="notificationSeverity"><option value="">All severities</option><option value="critical">Critical</option><option value="error">Error</option><option value="warning">Warning</option></select></label><label>Status<select id="notificationStatus"><option value="">All statuses</option><option value="open">Open</option><option value="acknowledged">Acknowledged</option><option value="snoozed">Snoozed</option><option value="resolved">Resolved</option></select></label></div>
         <div id="notificationsList" class="notifications-list"><div class="empty">Loading notifications…</div></div>
         <div class="dialog-actions"><button class="button primary" value="default">Done</button></div>
       </form>
     </dialog>
+    <dialog id="notificationWorkflowDialog" class="detail-dialog" aria-labelledby="notificationWorkflowTitle"><form method="dialog" id="notificationWorkflowForm"><div class="dialog-header"><div><p class="eyebrow">Alert workflow</p><h2 id="notificationWorkflowTitle">Manage notification</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close notification workflow">×</button></div><p class="dialog-copy" id="notificationWorkflowDescription"></p><label>Status<select id="notificationWorkflowStatus"><option value="acknowledged">Acknowledged</option><option value="snoozed">Snoozed</option><option value="resolved">Resolved</option><option value="open">Open</option></select></label><label id="notificationSnoozeField" class="hidden">Snooze until<input id="notificationSnoozeUntil" type="datetime-local" /></label><label>Assign technician<select id="notificationTechnician"><option value="">Not assigned</option></select></label><label>Work note<textarea id="notificationWorkflowNote" rows="4" maxlength="2000" placeholder="Containment, assignment, or resolution note"></textarea></label><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Save workflow</button></div></form></dialog>
     <dialog id="taskDetailDialog" class="detail-dialog" aria-labelledby="taskDetailTitle">
       <form method="dialog"><div class="dialog-header"><div><p class="eyebrow">AutoXing task</p><h2 id="taskDetailTitle">Task details</h2></div><button class="close-button" value="cancel" aria-label="Close task details">×</button></div><div id="taskDetailContent"><div class="empty">Loading task details…</div></div><div class="dialog-actions"><button class="button primary" value="default">Done</button></div></form>
     </dialog>

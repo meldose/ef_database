@@ -38,6 +38,10 @@ The Open API cannot register or attach a robot to an account. If this endpoint r
 
 When `CENOBOTS_LIVE=true`, the Node server invokes the bridge behind the existing **Sync CenoBots** button. The live sync imports device identity, status, battery, position, maintenance, and system-error data into canonical Robots, Passports, and Events. Control operations remain disabled.
 
+## Encrypted webhooks
+
+Altegro receives CZ Robots webhook challenges and events at `POST /api/v1/webhooks/cenobots`. Set the separate `CENOBOTS_WEBHOOK_SECRET` (or its `_FILE` form), expose the endpoint through public HTTPS without redirects, and create/verify the subscription from a CenoBots company-administrator account. The receiver enforces a five-minute timestamp window, decrypts AES-256-GCM envelopes, deduplicates by decrypted event ID, persists receipts, and converts known error, task, maintenance, and door-assistance messages into Robot Passport events. A webhook cannot grant robot access; synchronize or register its authorized `deviceOpenId` first.
+
 ## Robot task wrapper
 
 The wrapper supports an L50 `SWEEP` cleaning mission plus `go-home`, `pause`, `continue`, and `stop`. Every command is a dry-run preview by default and does not contact CenoBots:

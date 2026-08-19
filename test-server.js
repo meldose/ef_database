@@ -1,6 +1,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
@@ -14,6 +15,7 @@ process.env.OBJECT_STORAGE_DRIVER = 'inline';
 process.env.ALTEGRO_SYNC_MODE = 'inline';
 process.env.AUTOXING_LIVE = 'false';
 process.env.CENOBOTS_LIVE = 'false';
+process.env.CENOBOTS_WEBHOOK_SECRET = 'test-webhook-secret';
 process.env.EMAIL_ALERTS_ENABLED = 'true';
 process.env.EMAIL_ALERT_TRANSPORT = 'capture';
 process.env.EMAIL_ALERT_FROM = 'altegro-alerts@example.test';
@@ -40,6 +42,10 @@ async function loginWithPassword(email, password) {
   return { status: response.status, body: await response.json(), headers: response.headers };
 }
 
+function encryptedWebhook(message) {
+  const iv=crypto.randomBytes(12); const key=crypto.createHash('sha256').update(process.env.CENOBOTS_WEBHOOK_SECRET,'utf8').digest(); const cipher=crypto.createCipheriv('aes-256-gcm',key,iv); const ciphertext=Buffer.concat([cipher.update(JSON.stringify(message),'utf8'),cipher.final(),cipher.getAuthTag()]); return { iv:iv.toString('base64url'),encrypt:ciphertext.toString('base64url') };
+}
+
 async function startFakeSmtpServer() {
   const messages=[]; const smtp=net.createServer((socket) => { let buffer=''; let dataMode=false; let message=[]; socket.setEncoding('utf8'); socket.write('220 smtp.test ESMTP\r\n'); socket.on('data',(chunk) => { buffer += chunk; let index; while ((index=buffer.indexOf('\n')) >= 0) { const line=buffer.slice(0,index+1).trimEnd(); buffer=buffer.slice(index+1); if (dataMode) { if (line === '.') { messages.push(message.join('\n')); message=[]; dataMode=false; socket.write('250 queued\r\n'); } else message.push(line); continue; } if (line.startsWith('EHLO')) socket.write('250-smtp.test\r\n250 OK\r\n'); else if (line.startsWith('MAIL FROM:') || line.startsWith('RCPT TO:')) socket.write('250 OK\r\n'); else if (line === 'DATA') { dataMode=true; socket.write('354 End data with <CR><LF>.<CR><LF>\r\n'); } else if (line === 'QUIT') { socket.write('221 Bye\r\n'); socket.end(); } else socket.write('500 Unsupported command\r\n'); } }); });
   await new Promise((resolve,reject) => { smtp.once('error',reject); smtp.listen(0,'127.0.0.1',resolve); });
@@ -62,8 +68,18 @@ async function startFakeSmtpServer() {
     const frontendResponse = await fetch(`http://localhost:${port}/`);
     assert.equal(frontendResponse.status, 200);
     const frontendHtml = await frontendResponse.text();
-    for (const controlId of ['dashboardTabs', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'cenoBotsLiveFleet', 'cenoBotsDiagnostics', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
-    for (const view of ['overview', 'robots', 'operations', 'autoxing', 'cenobots', 'workforce', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
+    for (const controlId of ['dashboardTabs', 'roleDashboard', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'cenoBotsLiveFleet', 'cenoBotsDiagnostics', 'reportMetrics', 'reportTrend', 'notificationSearch', 'notificationWorkflowDialog', 'onboardingProvider', 'onboardingExternalId', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
+    for (const view of ['overview', 'robots', 'operations', 'autoxing', 'cenobots', 'workforce', 'reports', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
+
+    const webhookHeaders={ 'content-type':'application/json','x-webhook-id':'trace-test','x-webhook-timestamp':String(Math.floor(Date.now()/1000)) };
+    let webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/cenobots`,{ method:'POST',headers:webhookHeaders,body:JSON.stringify(encryptedWebhook({ messageType:'challenge',data:{ challenge:'verify-me' } })) });
+    assert.equal(webhookResponse.status,200); assert.equal((await webhookResponse.json()).challenge,'verify-me');
+    const webhookEvent={ messageType:'event',data:{ id:'evt-test-cenobots-error',type:'robot.error.changed',apiVersion:'2026-07-01',occurredAt:Date.now(),device:{ openId:'CB-1001',licensePlate:'CB-DEMO-001' },data:{ codes:[{ code:204801,desc:'Emergency stop button is pressed' }],addedCodes:[204801],removedCodes:[],previousCodes:[] } } };
+    webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/cenobots`,{ method:'POST',headers:webhookHeaders,body:JSON.stringify(encryptedWebhook(webhookEvent)) });
+    assert.equal(webhookResponse.status,200); assert.equal((await webhookResponse.json()).duplicate,false);
+    webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/cenobots`,{ method:'POST',headers:webhookHeaders,body:JSON.stringify(encryptedWebhook(webhookEvent)) });
+    assert.equal(webhookResponse.status,200); assert.equal((await webhookResponse.json()).duplicate,true); assert.equal(state.cenobotsWebhookReceipts.size,1);
+    webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/cenobots`,{ method:'POST',headers:{ ...webhookHeaders,'x-webhook-timestamp':String(Math.floor(Date.now()/1000)-1000) },body:JSON.stringify(encryptedWebhook(webhookEvent)) }); assert.equal(webhookResponse.status,401);
 
     const oldPasswordLogin = await loginWithPassword('admin@demo.altegro.local', 'demo');
     assert.equal(oldPasswordLogin.status, 401);
@@ -373,6 +389,14 @@ async function startFakeSmtpServer() {
     assert.equal(result.status, 200);
     assert.ok(Array.isArray(result.body.data));
     assert.equal(result.body.count, result.body.data.length);
+    assert.ok(Number.isInteger(result.body.activeCount));
+    const managedNotification=result.body.data.find((item) => item.robotId);
+    assert.ok(managedNotification);
+    result=await request(`/api/v1/notifications/${encodeURIComponent(managedNotification.id)}`,{ method:'PATCH',body:JSON.stringify({ status:'acknowledged',note:'Reviewed by automated test.' }) });
+    assert.equal(result.status,200); assert.equal(result.body.data.status,'acknowledged');
+    result=await request('/api/v1/reports/operations?days=30'); assert.equal(result.status,200); assert.equal(result.body.data.period.days,30); assert.ok(Array.isArray(result.body.data.daily)); assert.equal(result.body.data.daily.length,30);
+    const reportExportResponse=await fetch(`http://localhost:${port}/api/v1/reports/operations.csv?days=7`,{ headers:{ authorization:`Bearer ${defaultToken}` } }); assert.equal(reportExportResponse.status,200); assert.match(await reportExportResponse.text(),/date.*events.*errors.*maintenance.*tasks/);
+    result=await request('/api/v1/cenobots/webhooks/status'); assert.equal(result.status,200); assert.equal(result.body.data.configured,true); assert.equal(result.body.data.receiptCount,1);
 
     result = await request('/api/v1/compatibility');
     assert.equal(result.status, 200);
