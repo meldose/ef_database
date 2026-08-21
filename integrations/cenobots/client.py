@@ -128,7 +128,10 @@ class CenoBotsClient:
             body['endTimestamp'] = end_timestamp
         return self._request('POST', '/app/openapi/v1/mission/summary', body=body)
 
-    def _command_request(self, path: str, *, body: dict | None = None):
+    def schedules(self, device_open_id: str):
+        return self._request('GET', f'/app/openapi/v1/schedule/list/{device_open_id}')
+
+    def _command_request(self, path: str, *, method: str = 'POST', body: dict | None = None):
         commands_enabled = self.commands_enabled
         if commands_enabled is None:
             commands_enabled = os.environ.get('CENOBOTS_COMMANDS_ENABLED', '').strip().lower() == 'true'
@@ -136,11 +139,27 @@ class CenoBotsClient:
             raise CenoBotsError(
                 'CenoBots commands are disabled. Set CENOBOTS_COMMANDS_ENABLED=true only when live robot control is intended.'
             )
-        return self._request('POST', path, body=body)
+        return self._request(method, path, body=body)
 
     def create_temporary_mission(self, mission: dict):
         """Start a validated mission payload prepared by the task wrapper."""
         return self._command_request('/app/openapi/v1/mission', body=mission)
+
+    def create_schedule(self, schedule: dict):
+        return self._command_request('/app/openapi/v1/schedule', body=schedule)
+
+    def update_schedule(self, schedule: dict):
+        return self._command_request('/app/openapi/v1/schedule', method='PUT', body=schedule)
+
+    def set_schedule_active(self, schedule_id: int, device_open_id: str, enable: bool):
+        return self._command_request('/app/openapi/v1/schedule/active', body={
+            'id': schedule_id,
+            'deviceOpenId': device_open_id,
+            'enable': bool(enable),
+        })
+
+    def delete_schedule(self, schedule_id: int):
+        return self._command_request(f'/app/openapi/v1/schedule/delete/{schedule_id}', method='DELETE')
 
     def go_home(self, device_open_id: str):
         return self._command_request(f'/app/openapi/v1/mission/home/{device_open_id}')
@@ -274,6 +293,8 @@ if __name__ == '__main__':
             result = client.system_errors(device_open_id)
         elif command == 'maps':
             result = client.maps(device_open_id)
+        elif command == 'schedules':
+            result = client.schedules(device_open_id)
         else:
             raise CenoBotsError(f'Unknown read-only command: {command}')
         print(json.dumps(result, indent=2, ensure_ascii=False))

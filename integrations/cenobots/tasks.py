@@ -22,6 +22,7 @@ except ImportError:  # Allow direct execution: python3 integrations/cenobots/tas
 
 DEVICE_OPEN_ID_PATTERN = re.compile(r'^[A-Za-z0-9_-]{3,128}$')
 INTENSITIES = ('LOW', 'MEDIUM', 'HIGH')
+SCHEDULE_DAYS = ('Mon.', 'Tue.', 'Wed.', 'Thur.', 'Fri.', 'Sat.', 'Sun.')
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,43 @@ def build_control_plan(action: str, device_open_id: str) -> TaskPlan:
     return TaskPlan(action, device_open_id, paths[action].format(device=device_open_id))
 
 
+def build_schedule_plan(
+    device_open_id: str,
+    map_id: int,
+    map_version: str,
+    start_time: str,
+    repeat: list[str],
+    *,
+    clean_everywhere: bool,
+    area_ids: list[str] | None = None,
+    intensity: str = 'MEDIUM',
+    duration: int | None = None,
+    fixed_laps: int = 1,
+    back_point_id: str = '',
+) -> TaskPlan:
+    """Build a recurring SWEEP schedule using the same validation as a mission."""
+    mission = build_clean_plan(
+        device_open_id,
+        map_id,
+        map_version,
+        clean_everywhere=clean_everywhere,
+        area_ids=area_ids,
+        intensity=intensity,
+        duration=duration,
+        fixed_laps=fixed_laps,
+        back_point_id=back_point_id,
+    )
+    normalized_time = start_time.strip().upper()
+    if not re.fullmatch(r'(0?[1-9]|1[0-2]):[0-5][0-9] (AM|PM)', normalized_time):
+        raise CenoBotsError('startTime must use 12-hour format, for example 04:52 PM')
+    days = list(dict.fromkeys(day.strip() for day in repeat if day.strip()))
+    if not days or any(day not in SCHEDULE_DAYS for day in days):
+        raise CenoBotsError('repeat must contain valid CenoBots day values such as Mon. or Fri.')
+    payload = dict(mission.payload or {})
+    payload.update({'startTime': normalized_time, 'repeat': days})
+    return TaskPlan('schedule', mission.device_open_id, '/app/openapi/v1/schedule', payload)
+
+
 def run_plan(
     plan: TaskPlan,
     *,
@@ -138,6 +176,8 @@ def run_plan(
     command_client = client or from_environment()
     if plan.action == 'clean':
         response = command_client.create_temporary_mission(plan.payload or {})
+    elif plan.action == 'schedule':
+        response = command_client.create_schedule(plan.payload or {})
     elif plan.action == 'go-home':
         response = command_client.go_home(plan.device_open_id)
     elif plan.action == 'stop':
@@ -188,6 +228,21 @@ def create_parser() -> argparse.ArgumentParser:
     return_target.add_argument('--stop-after', action='store_true', help='Stop at the end instead of returning to station')
     return_target.add_argument('--back-point-id', default='', help='Return to a custom CenoBots back-point ID')
 
+    schedule = commands.add_parser('schedule', help='Create a recurring L-series SWEEP schedule')
+    add_execution_arguments(schedule)
+    schedule.add_argument('--map-id', required=True, type=int)
+    schedule.add_argument('--map-version', required=True)
+    schedule_scope = schedule.add_mutually_exclusive_group(required=True)
+    schedule_scope.add_argument('--everywhere', action='store_true')
+    schedule_scope.add_argument('--area-id', action='append')
+    schedule.add_argument('--intensity', choices=INTENSITIES, default='MEDIUM')
+    schedule_timing = schedule.add_mutually_exclusive_group()
+    schedule_timing.add_argument('--duration', type=int)
+    schedule_timing.add_argument('--fixed-laps', type=int, default=1)
+    schedule.add_argument('--start-time', required=True)
+    schedule.add_argument('--repeat', action='append', required=True, choices=SCHEDULE_DAYS)
+    schedule.add_argument('--back-point-id', default='')
+
     for action, help_text in (
         ('go-home', 'Send the robot back to its charging station'),
         ('pause', 'Pause the current mission'),
@@ -211,6 +266,20 @@ def plan_from_args(args: argparse.Namespace) -> TaskPlan:
             duration=args.duration,
             fixed_laps=args.fixed_laps,
             back_point_id='-1' if args.stop_after else args.back_point_id,
+        )
+    if args.action == 'schedule':
+        return build_schedule_plan(
+            args.device_open_id,
+            args.map_id,
+            args.map_version,
+            args.start_time,
+            args.repeat,
+            clean_everywhere=args.everywhere,
+            area_ids=args.area_id,
+            intensity=args.intensity,
+            duration=args.duration,
+            fixed_laps=args.fixed_laps,
+            back_point_id=args.back_point_id,
         )
     return build_control_plan(args.action, args.device_open_id)
 

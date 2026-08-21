@@ -68,8 +68,9 @@ async function startFakeSmtpServer() {
     const frontendResponse = await fetch(`http://localhost:${port}/`);
     assert.equal(frontendResponse.status, 200);
     const frontendHtml = await frontendResponse.text();
-    for (const controlId of ['dashboardTabs', 'roleDashboard', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'cenoBotsLiveFleet', 'cenoBotsDiagnostics', 'reportMetrics', 'reportTrend', 'notificationSearch', 'notificationWorkflowDialog', 'onboardingProvider', 'onboardingExternalId', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
-    for (const view of ['overview', 'robots', 'operations', 'autoxing', 'cenobots', 'workforce', 'reports', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
+    for (const controlId of ['dashboardTabs', 'roleDashboard', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'cenoBotsLiveFleet', 'cenoBotsDiagnostics', 'cenoBotsControlSection', 'cenoBotsCommandDialog', 'cenoBotsScheduleDialog', 'reportMetrics', 'reportTrend', 'pdfReportRobot', 'exportMaintenancePdf', 'exportCompliancePdf', 'supportView', 'supportTicketsList', 'supportTicketDialog', 'supportReplyDialog', 'languageSelect', 'notificationSearch', 'notificationWorkflowDialog', 'onboardingProvider', 'onboardingExternalId', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
+    for (const view of ['overview', 'robots', 'operations', 'autoxing', 'cenobots', 'workforce', 'reports', 'support', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
+    assert.match(frontendHtml,/data-i18n="support"/);
 
     const webhookHeaders={ 'content-type':'application/json','x-webhook-id':'trace-test','x-webhook-timestamp':String(Math.floor(Date.now()/1000)) };
     let webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/cenobots`,{ method:'POST',headers:webhookHeaders,body:JSON.stringify(encryptedWebhook({ messageType:'challenge',data:{ challenge:'verify-me' } })) });
@@ -130,6 +131,8 @@ async function startFakeSmtpServer() {
     assert.equal(result.body.data.fleet[0].id, cenobotsRobotId);
     assert.equal(result.body.data.fleet[0].externalId, 'CB-1001');
     assert.equal(result.body.data.diagnostics.liveEnabled, false);
+    assert.equal(result.body.data.control.ready,false);
+    assert.equal(result.body.data.control.canControl,true);
     assert.ok(Array.isArray(result.body.data.alerts));
     state.robots.get(cenobotsRobotId).maintenance = { maintenanceItems:[{ name:'Solution Tank Filter',remainPercent:'19%',overDueHours:null }] };
     state.robots.get(cenobotsRobotId).errors = [{ code:'CB-TEST',message:'Synthetic system error' }];
@@ -137,6 +140,10 @@ async function startFakeSmtpServer() {
     assert.equal(result.body.data.summary.maintenanceDue, 1);
     assert.equal(result.body.data.summary.errors, 1);
     assert.equal(result.body.data.alerts.length, 2);
+    result=await request(`/api/v1/cenobots/robots/${cenobotsRobotId}/commands`,{ method:'POST',body:JSON.stringify({ action:'go-home',execute:false }) }); assert.equal(result.status,200); assert.equal(result.body.data.dryRun,true); assert.match(result.body.data.message,/Preview only/);
+    result=await request(`/api/v1/cenobots/robots/${cenobotsRobotId}/commands`,{ method:'POST',body:JSON.stringify({ action:'schedule',execute:false,mapId:42,mapVersion:'test.map.version',startTime:'04:52 PM',duration:60,intensity:'MEDIUM',cleanEverywhere:true,repeat:['Mon.','Fri.'] }) }); assert.equal(result.status,200); assert.equal(result.body.data.task.payload.repeat.length,2);
+    result=await request(`/api/v1/cenobots/robots/${cenobotsRobotId}/commands`,{ method:'POST',body:JSON.stringify({ action:'go-home',execute:true,confirmation:'CB-DEMO-001' }) }); assert.equal(result.status,503);
+    result=await request(`/api/v1/cenobots/robots/${cenobotsRobotId}/schedules`); assert.equal(result.status,200); assert.equal(result.body.available,false); assert.deepEqual(result.body.data,[]);
 
     result=await request('/api/v1/autoxing/maintenance-schedules',{ method:'POST',body:JSON.stringify({ robotId,title:'Quarterly AutoXing inspection',description:'Inspect sensors and safety systems.',nextDueAt:'2026-07-01T09:00:00.000Z',intervalDays:90,priority:'high',assignedTechnicianId:'technician-lena' }) });
     assert.equal(result.status,201); assert.equal(result.body.data.dueState,'overdue'); assert.equal(result.body.data.technicianName,'Midhun Eldose'); const maintenanceScheduleId=result.body.data.id;
@@ -206,6 +213,10 @@ async function startFakeSmtpServer() {
     result=await requestAs(robotAxSessionToken,'/api/v1/autoxing/maintenance-schedules'); assert.equal(result.status,200); assert.equal(result.body.count,1);
     result=await requestAs(robotAxSessionToken,'/api/v1/autoxing/maintenance-schedules',{ method:'POST',body:JSON.stringify({}) }); assert.equal(result.status,403);
     result=await requestAs(robotAxSessionToken,'/api/v1/autoxing/escalation-rules'); assert.equal(result.status,403);
+    result=await requestAs(robotAxSessionToken,'/api/v1/support/tickets',{ method:'POST',body:JSON.stringify({ robotId,title:'Customer needs assistance',description:'The robot stopped near the loading bay.',category:'technical',severity:'warning' }) }); assert.equal(result.status,201); assert.equal(result.body.data.requesterName,'AX-DEMO-001 User'); const customerSupportTicketId=result.body.data.id;
+    result=await requestAs(robotAxSessionToken,`/api/v1/support/tickets/${customerSupportTicketId}/messages`,{ method:'POST',body:JSON.stringify({ message:'The area is secured and ready for inspection.' }) }); assert.equal(result.status,201); assert.equal(result.body.data.messages.length,2);
+    result=await requestAs(robotAxSessionToken,'/api/v1/support/tickets'); assert.equal(result.status,200); assert.ok(result.body.data.some((ticket) => ticket.id === customerSupportTicketId));
+    let scopedPdf=await fetch(`http://localhost:${port}/api/v1/robots/${robotId}/reports/compliance.pdf`,{ headers:{ authorization:`Bearer ${robotAxSessionToken}` } }); assert.equal(scopedPdf.status,200); assert.match(scopedPdf.headers.get('content-type'),/application\/pdf/); assert.equal(Buffer.from(await scopedPdf.arrayBuffer()).subarray(0,5).toString(),'%PDF-');
 
     state.autoxing.tasks.set('task-ax-scope', { taskId: 'task-ax-scope', raw: { robotId: 'AX-1001', status:'completed', durationSeconds:600, cleanedArea:120, updatedAt:'2026-07-27T14:00:00.000Z' } });
     state.autoxing.tasks.set('task-cb-scope', { taskId: 'task-cb-scope', raw: { robotId: 'CB-1001' } });

@@ -7,17 +7,18 @@
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <a class="skip-link" href="#mainContent">Skip to operations content</a>
+    <a class="skip-link" href="#mainContent" data-i18n="skip">Skip to operations content</a>
+    <label class="language-switch" for="languageSelect"><span data-i18n="language">Language</span><select id="languageSelect" aria-label="Language"><option value="en">English</option><option value="de">Deutsch</option></select></label>
     <section id="loginScreen" class="login-screen">
       <div class="login-card">
         <div class="login-brand"><span class="brand-mark">A</span><div><strong>altegro</strong><small>robot operations platform</small></div></div>
         <p class="eyebrow">Secure platform access</p>
-        <h1>Sign in to Altegro</h1>
-        <p class="login-copy">Access your organization’s robot registry, Passports, events and service history.</p>
+        <h1 data-i18n="signInTitle">Sign in to Altegro</h1>
+        <p class="login-copy" data-i18n="signInCopy">Access your organization’s robot registry, Passports, events and service history.</p>
         <form id="loginForm">
           <label>Email address<input id="loginEmail" type="email" autocomplete="username" required placeholder="admin@demo.altegro.local" /></label>
           <label>Password<input id="loginPassword" type="password" autocomplete="current-password" required placeholder="••••••••" /></label>
-          <button class="button primary login-button" type="submit">Sign in <span>→</span></button>
+          <button class="button primary login-button" type="submit"><span data-i18n="signIn">Sign in</span> <span>→</span></button>
           <p id="loginError" class="login-error" role="alert"></p>
         </form>
       </div>
@@ -31,23 +32,24 @@
       </a>
       <div class="topbar-actions">
         <span class="env-badge"><i></i> Prototype · Phase 1</span>
-        <button class="notification-button" id="notificationsButton" type="button" aria-label="Open operational notifications" aria-haspopup="dialog">Alerts <span id="notificationCount" aria-live="polite">0</span></button>
+        <button class="notification-button" id="notificationsButton" type="button" aria-label="Open operational notifications" aria-haspopup="dialog"><span data-i18n="alerts">Alerts</span> <span id="notificationCount" aria-live="polite">0</span></button>
         <span id="loggedInUser" class="logged-in-user"></span>
-        <button class="logout-button" id="logoutButton" type="button">Log out</button>
+        <button class="logout-button" id="logoutButton" type="button" data-i18n="logout">Log out</button>
         <button class="icon-button" id="refreshButton" title="Refresh data" aria-label="Refresh data">↻</button>
       </div>
     </header>
 
     <main class="shell" id="mainContent" tabindex="-1">
       <nav class="dashboard-tabs" id="dashboardTabs" role="tablist" aria-label="Dashboard sections">
-        <button id="overviewTab" type="button" role="tab" aria-selected="true" aria-controls="overviewView" data-dashboard-tab="overview">Overview</button>
-        <button id="robotsTab" type="button" role="tab" aria-selected="false" aria-controls="robotsView" data-dashboard-tab="robots">Robots</button>
-        <button id="operationsTab" type="button" role="tab" aria-selected="false" aria-controls="operationsView" data-dashboard-tab="operations">Events &amp; Service</button>
+        <button id="overviewTab" type="button" role="tab" aria-selected="true" aria-controls="overviewView" data-dashboard-tab="overview" data-i18n="overview">Overview</button>
+        <button id="robotsTab" type="button" role="tab" aria-selected="false" aria-controls="robotsView" data-dashboard-tab="robots" data-i18n="robots">Robots</button>
+        <button id="operationsTab" type="button" role="tab" aria-selected="false" aria-controls="operationsView" data-dashboard-tab="operations" data-i18n="eventsService">Events &amp; Service</button>
         <button id="autoxingTab" type="button" role="tab" aria-selected="false" aria-controls="autoxingWorkspace" data-dashboard-tab="autoxing">AutoXing</button>
         <button id="cenobotsTab" type="button" role="tab" aria-selected="false" aria-controls="cenobotsWorkspace" data-dashboard-tab="cenobots">CenoBots</button>
-        <button id="workforceTab" type="button" role="tab" aria-selected="false" aria-controls="workforceSection" data-dashboard-tab="workforce">Technicians</button>
-        <button id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsView" data-dashboard-tab="reports">Reports</button>
-        <button id="adminTab" type="button" role="tab" aria-selected="false" aria-controls="adminView" data-dashboard-tab="admin">Administration</button>
+        <button id="workforceTab" type="button" role="tab" aria-selected="false" aria-controls="workforceSection" data-dashboard-tab="workforce" data-i18n="technicians">Technicians</button>
+        <button id="reportsTab" type="button" role="tab" aria-selected="false" aria-controls="reportsView" data-dashboard-tab="reports" data-i18n="reports">Reports</button>
+        <button id="supportTab" type="button" role="tab" aria-selected="false" aria-controls="supportView" data-dashboard-tab="support" data-i18n="support">Support</button>
+        <button id="adminTab" type="button" role="tab" aria-selected="false" aria-controls="adminView" data-dashboard-tab="admin" data-i18n="administration">Administration</button>
       </nav>
       <section class="hero" id="overviewView" data-dashboard-view="overview" role="tabpanel" aria-labelledby="overviewTab">
         <div>
@@ -213,6 +215,14 @@
           <div id="cenoBotsAlerts" class="record-list"><div class="empty">Loading CenoBots alerts…</div></div>
         </article>
       </section>
+      <section class="lower-grid" data-dashboard-view="cenobots" id="cenoBotsControlSection">
+        <article class="panel audit-panel">
+          <div class="panel-header"><div><p class="eyebrow" data-i18n="guardedControl">Guarded robot control</p><h2 data-i18n="missionScheduling">Mission scheduling and controls</h2></div><span id="cenoBotsControlStatus" class="status status-draft">Disabled</span></div>
+          <p class="panel-copy" data-i18n="controlSafety">Commands require an authorized administrator, live provider configuration, and exact robot confirmation.</p>
+          <div class="control-toolbar"><label><span data-i18n="robot">Robot</span><select id="cenoBotsControlRobot"><option value="">Select a CenoBots robot</option></select></label><div class="control-actions"><button class="button secondary" type="button" data-cenobots-command="go-home">Go home</button><button class="button secondary" type="button" data-cenobots-command="pause">Pause</button><button class="button secondary" type="button" data-cenobots-command="continue">Continue</button><button class="button danger" type="button" data-cenobots-command="stop">Stop</button><button class="button primary" id="newCenoBotsSchedule" type="button">＋ Schedule cleaning</button></div></div>
+          <div id="cenoBotsSchedules" class="record-list"><div class="empty">Select a robot to view schedules.</div></div>
+        </article>
+      </section>
       <section class="lower-grid">
         <article class="panel" data-dashboard-view="operations">
           <div class="panel-header"><div><p class="eyebrow">Service link</p><h2>Incident and service workflow</h2></div><button class="text-button" id="refreshServiceCases">Refresh</button></div>
@@ -249,6 +259,14 @@
           <div id="reportMetrics" class="report-metrics"><div class="empty">Loading operational report…</div></div>
           <div id="reportTrend" class="report-trend" aria-label="Daily operational report"></div>
           <div class="report-actions"><button class="button secondary" id="exportReportCsv" type="button">Export CSV</button><button class="button secondary" id="exportReportJson" type="button">Export JSON</button><small>Service-cost reporting will activate when labour and parts pricing is recorded.</small></div>
+          <div class="pdf-report-actions"><label><span data-i18n="robotReport">Robot report</span><select id="pdfReportRobot"><option value="">Select a robot</option></select></label><button class="button secondary" id="exportMaintenancePdf" type="button" data-i18n="maintenancePdf">Maintenance PDF</button><button class="button secondary" id="exportCompliancePdf" type="button" data-i18n="compliancePdf">Compliance PDF</button></div>
+        </article>
+      </section>
+      <section class="lower-grid" id="supportView" data-dashboard-view="support" role="tabpanel" aria-labelledby="supportTab">
+        <article class="panel audit-panel">
+          <div class="panel-header"><div><p class="eyebrow" data-i18n="customerCare">Customer care</p><h2 data-i18n="supportPortal">Support ticket portal</h2></div><div class="panel-header-actions"><button class="text-button" id="refreshSupportTickets" type="button" data-i18n="refresh">Refresh</button><button class="button primary mini" id="newSupportTicket" type="button" data-i18n="newTicket">＋ New ticket</button></div></div>
+          <div class="support-toolbar"><label><span data-i18n="status">Status</span><select id="supportStatusFilter"><option value="">All statuses</option><option value="open">Open</option><option value="in_progress">In progress</option><option value="waiting">Waiting</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label></div>
+          <div id="supportTicketsList" class="support-ticket-list"><div class="empty">Loading support tickets…</div></div>
         </article>
       </section>
       <section class="lower-grid" id="adminView" data-dashboard-view="admin" role="tabpanel" aria-labelledby="adminTab">
@@ -366,6 +384,18 @@
     </dialog>
     <dialog id="escalationRuleDialog" aria-labelledby="escalationRuleTitle">
       <form method="dialog" id="escalationRuleForm"><div class="dialog-header"><div><p class="eyebrow">Automated response</p><h2 id="escalationRuleTitle">Add escalation rule</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close escalation rule">×</button></div><label>Rule name<input id="escalationRuleName" required maxlength="160" placeholder="Critical alert response" /></label><div class="form-grid"><label>Alert type<select id="escalationAlertType"><option value="any">Any alert</option><option value="offline">Robot offline</option><option value="low-battery">Low battery</option><option value="emergency-stop">Emergency stop</option><option value="obstruction">Obstruction</option><option value="provider-errors">Provider errors</option><option value="maintenance_due">Maintenance due</option><option value="integration_warning">Integration warning</option></select></label><label>Minimum severity<select id="escalationSeverity"><option value="error">Error</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="info">Info</option></select></label></div><div class="form-grid"><label>Escalate after minutes<input id="escalationAfterMinutes" type="number" min="0" max="43200" value="15" required /></label><label>Action<select id="escalationAction"><option value="email_and_service_case">Email + service case</option><option value="email">Email only</option><option value="service_case">Service case only</option></select></label></div><label>Preferred technician<select id="escalationTechnician"><option value="">Assign qualified technician later</option></select></label><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Create rule</button></div></form>
+    </dialog>
+    <dialog id="cenoBotsCommandDialog" aria-labelledby="cenoBotsCommandTitle">
+      <form method="dialog" id="cenoBotsCommandForm"><div class="dialog-header"><div><p class="eyebrow">CenoBots safety gate</p><h2 id="cenoBotsCommandTitle">Confirm robot command</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close CenoBots command">×</button></div><div id="cenoBotsCommandSummary" class="safety-warning"></div><label>Type the robot serial number to confirm<input id="cenoBotsCommandConfirmation" required autocomplete="off" /></label><input id="cenoBotsCommandAction" type="hidden" /><input id="cenoBotsCommandRobotId" type="hidden" /><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button danger" value="default">Send live command</button></div></form>
+    </dialog>
+    <dialog id="cenoBotsScheduleDialog" aria-labelledby="cenoBotsScheduleTitle">
+      <form method="dialog" id="cenoBotsScheduleForm"><div class="dialog-header"><div><p class="eyebrow">CenoBots Open API</p><h2 id="cenoBotsScheduleTitle">Schedule cleaning</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close CenoBots schedule">×</button></div><label>Robot<select id="cenoBotsScheduleRobot" required></select></label><div class="form-grid"><label>Map ID<input id="cenoBotsScheduleMapId" type="number" min="1" required /></label><label>Map version<input id="cenoBotsScheduleMapVersion" required /></label></div><div class="form-grid"><label>Start time<input id="cenoBotsScheduleStart" required placeholder="04:52 PM" pattern="(0?[1-9]|1[0-2]):[0-5][0-9] (AM|PM)" /></label><label>Duration minutes<input id="cenoBotsScheduleDuration" type="number" min="1" max="1440" value="60" required /></label></div><div class="form-grid"><label>Intensity<select id="cenoBotsScheduleIntensity"><option value="LOW">Low</option><option value="MEDIUM" selected>Medium</option><option value="HIGH">High</option></select></label><label class="checkbox-label"><input id="cenoBotsScheduleEverywhere" type="checkbox" checked /> Clean entire map</label></div><label id="cenoBotsScheduleAreaField" class="hidden">Area IDs, comma separated<input id="cenoBotsScheduleAreas" placeholder="area-id-1, area-id-2" /></label><fieldset class="day-picker"><legend>Repeat days</legend><label><input type="checkbox" name="cenoBotsRepeat" value="Mon." /> Mon.</label><label><input type="checkbox" name="cenoBotsRepeat" value="Tue." /> Tue.</label><label><input type="checkbox" name="cenoBotsRepeat" value="Wed." /> Wed.</label><label><input type="checkbox" name="cenoBotsRepeat" value="Thur." /> Thur.</label><label><input type="checkbox" name="cenoBotsRepeat" value="Fri." /> Fri.</label><label><input type="checkbox" name="cenoBotsRepeat" value="Sat." /> Sat.</label><label><input type="checkbox" name="cenoBotsRepeat" value="Sun." /> Sun.</label></fieldset><div class="safety-warning">The schedule is sent to the physical robot. Confirm the target and map before continuing.</div><label>Type the robot serial number to confirm<input id="cenoBotsScheduleConfirmation" required autocomplete="off" /></label><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Create live schedule</button></div></form>
+    </dialog>
+    <dialog id="supportTicketDialog" aria-labelledby="supportTicketTitle">
+      <form method="dialog" id="supportTicketForm"><div class="dialog-header"><div><p class="eyebrow">Altegro support</p><h2 id="supportTicketTitle">Open a support ticket</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close support ticket">×</button></div><label>Robot<select id="supportTicketRobot" required></select></label><div class="form-grid"><label>Category<select id="supportTicketCategory"><option value="technical">Technical problem</option><option value="maintenance">Maintenance</option><option value="integration">Integration</option><option value="account">Account</option><option value="other">Other</option></select></label><label>Priority<select id="supportTicketSeverity"><option value="info">Low</option><option value="warning" selected>Normal</option><option value="error">High</option><option value="critical">Urgent</option></select></label></div><label>Title<input id="supportTicketSubject" required maxlength="160" placeholder="Describe the problem briefly" /></label><label>Description<textarea id="supportTicketDescription" required maxlength="4000" rows="6" placeholder="What happened, when did it start, and what have you already checked?"></textarea></label><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Submit ticket</button></div></form>
+    </dialog>
+    <dialog id="supportReplyDialog" aria-labelledby="supportReplyTitle">
+      <form method="dialog" id="supportReplyForm"><div class="dialog-header"><div><p class="eyebrow">Support conversation</p><h2 id="supportReplyTitle">Ticket update</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close support reply">×</button></div><div id="supportReplyHistory" class="support-thread"></div><label>Add message<textarea id="supportReplyMessage" required maxlength="4000" rows="5"></textarea></label><input id="supportReplyTicketId" type="hidden" /><label id="supportReplyStatusField" class="hidden">Status<select id="supportReplyStatus"><option value="open">Open</option><option value="in_progress">In progress</option><option value="waiting">Waiting</option><option value="resolved">Resolved</option><option value="closed">Closed</option></select></label><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Send update</button></div></form>
     </dialog>
     <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
     <script src="/app.js"></script>

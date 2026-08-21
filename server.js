@@ -57,6 +57,8 @@ const publicDir = pathUtil.join(__dirname, 'public');
 const execFileAsync = promisify(execFile);
 const AUTOXING_BRIDGE = pathUtil.join(__dirname, 'integrations', 'autoxing_bridge.py');
 const CENOBOTS_BRIDGE = pathUtil.join(__dirname, 'integrations', 'cenobots_bridge.py');
+const CENOBOTS_TASKS = pathUtil.join(__dirname, 'integrations', 'cenobots', 'tasks.py');
+const CENOBOTS_CLIENT = pathUtil.join(__dirname, 'integrations', 'cenobots', 'client.py');
 const AUTOXING_REPO = process.env.AUTOXING_REPO_PATH || pathUtil.resolve(__dirname, '..', 'autoxing');
 const AUTOXING_LIB = process.env.AUTOXING_LIB_PATH || pathUtil.join(AUTOXING_REPO, 'lib');
 const autoXingLiveEnabled = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_LIVE || '').toLowerCase());
@@ -444,7 +446,7 @@ function seed() {
   });
   state.adapters.set('cenobots', {
     provider: 'cenobots', version: cenoBotsLiveEnabled() ? 'open-api-v1.0.16' : 'mock-1.0.0', status: cenoBotsLiveEnabled() ? 'live-bridge-enabled' : 'mock-only', integration: 'integrations/cenobots_bridge.py',
-    capabilities: { read: ['identity', 'status', 'battery', 'position', 'service_history', 'system_errors'], event: ['online', 'offline', 'maintenance', 'error'], command: [] },
+    capabilities: { read: ['identity', 'status', 'battery', 'position', 'service_history', 'system_errors'], event: ['online', 'offline', 'maintenance', 'error'], command: enabled(process.env.CENOBOTS_COMMANDS_ENABLED) ? ['schedule','clean','go-home','pause','continue','stop'] : [] },
     sync: () => ({ externalId: 'CB-1001', modelId: 'model-cenobots-c1', serialNumber: 'CB-DEMO-001', status: 'active', battery: 64, eventType: 'maintenance' })
   });
   state.adapters.set('mock-oem', {
@@ -595,6 +597,55 @@ async function runCenoBotsBridge(command = 'snapshot') {
     try { providerMessage = JSON.parse(String(error.stdout || '').trim()).error || ''; } catch {}
     throw httpError(503, `CenoBots API unavailable: ${providerMessage || error.message}`, { provider:'cenobots' });
   }
+}
+
+function cenoBotsControlConfiguration() {
+  const credentialsConfigured=Boolean(secretEnvValue('CENOBOTS_ACCESS_KEY') && secretEnvValue('CENOBOTS_SECRET_KEY'));
+  const commandsEnabled=enabled(process.env.CENOBOTS_COMMANDS_ENABLED);
+  return { liveEnabled:cenoBotsLiveEnabled(),commandsEnabled,credentialsConfigured,ready:cenoBotsLiveEnabled() && commandsEnabled && credentialsConfigured,safetyConfirmation:'Exact robot serial number required for every live command.' };
+}
+
+async function runCenoBotsTask(action,robot,body={},execute=false) {
+  const identity=robot.externalIdentities?.find((item) => item.system === 'cenobots');
+  if (!identity) throw httpError(404,'Robot is not linked to CenoBots');
+  const args=[CENOBOTS_TASKS,action,'--device-open-id',String(identity.externalId)];
+  if (['clean','schedule'].includes(action)) {
+    const mapId=Number(body.mapId ?? robot.providerMapId); const mapVersion=String(body.mapVersion ?? robot.providerMapVersion ?? '').trim();
+    args.push('--map-id',String(mapId),'--map-version',mapVersion,body.cleanEverywhere === false ? '--area-id' : '--everywhere');
+    if (body.cleanEverywhere === false) {
+      args.pop();
+      const areas=Array.isArray(body.areaIds) ? body.areaIds : String(body.areaIds || '').split(',');
+      for (const area of areas.map((item) => String(item).trim()).filter(Boolean)) args.push('--area-id',area);
+    }
+    args.push('--intensity',String(body.intensity || 'MEDIUM').toUpperCase());
+    if (body.duration) args.push('--duration',String(Number(body.duration))); else args.push('--fixed-laps',String(Number(body.fixedLaps || 1)));
+    if (body.backPointId) args.push('--back-point-id',String(body.backPointId));
+    if (action === 'schedule') {
+      args.push('--start-time',String(body.startTime || ''));
+      for (const day of Array.isArray(body.repeat) ? body.repeat : []) args.push('--repeat',String(day));
+    }
+  }
+  if (execute) args.push('--execute','--confirm-device',String(identity.externalId));
+  const env={ ...process.env }; for (const name of ['CENOBOTS_ACCESS_KEY','CENOBOTS_SECRET_KEY']) { const value=secretEnvValue(name); if (value) env[name]=value; }
+  try {
+    const result=await execFileAsync(process.env.PYTHON_BIN || 'python3',args,{ cwd:__dirname,env,timeout:Math.max(20000,Number(process.env.CENOBOTS_COMMAND_TIMEOUT_MS || 60000)),maxBuffer:4*1024*1024 });
+    const payload=JSON.parse(result.stdout.trim()); if (!payload.ok) throw new Error(payload.error || 'CenoBots rejected the task'); return payload;
+  } catch(error) {
+    if (error.status) throw error;
+    let message=''; try { message=JSON.parse(String(error.stdout || '').trim()).error || ''; } catch {}
+    throw httpError(502,`CenoBots command failed: ${message || error.message}`);
+  }
+}
+
+async function listCenoBotsSchedules(robot) {
+  const identity=robot.externalIdentities?.find((item) => item.system === 'cenobots'); if (!identity) throw httpError(404,'Robot is not linked to CenoBots');
+  const config=cenoBotsControlConfiguration(); if (!config.liveEnabled || !config.credentialsConfigured) return { data:[],available:false,reason:'Live CenoBots credentials are not configured.' };
+  const env={ ...process.env }; for (const name of ['CENOBOTS_ACCESS_KEY','CENOBOTS_SECRET_KEY']) { const value=secretEnvValue(name); if (value) env[name]=value; }
+  try {
+    const result=await execFileAsync(process.env.PYTHON_BIN || 'python3',[CENOBOTS_CLIENT,'schedules',String(identity.externalId)],{ cwd:__dirname,env,timeout:Math.max(20000,Number(process.env.CENOBOTS_COMMAND_TIMEOUT_MS || 60000)),maxBuffer:4*1024*1024 });
+    const response=JSON.parse(result.stdout.trim()); if (response.success !== true || ![0,200].includes(response.code)) throw new Error(response.info || 'Schedule list failed');
+    return { data:Array.isArray(response.data) ? response.data : [],available:true };
+  } catch(error) { throw httpError(502,`Could not load CenoBots schedules: ${error.message}`); }
 }
 
 function meaningful(value) {
@@ -756,7 +807,7 @@ function cenoBotsOperations(actor) {
     return { id:robot.id,serialNumber:robot.serialNumber,externalId,online:robot.online,battery:robot.battery,charging:robot.charging,position:clone(robot.position || null),speed:robot.speed ?? null,emergencyStop:robot.emergencyStop ?? null,manualMode:robot.manualMode ?? null,docked:robot.docked ?? null,currentTask:clone(robot.providerTask || null),providerVersion:robot.providerVersion || null,buildingName:robot.providerBuildingName || null,mapId:robot.providerMapId || null,mapName:robot.providerMapName || null,mapVersion:robot.providerMapVersion || null,maintenanceItems:clone(maintenanceItems),maintenanceDueCount:maintenanceDue.length,errorCount:errorItems.length,updatedAt:robot.updatedAt };
   });
   const adapter=state.adapters.get('cenobots') || {}; const policy=managedSecretStatus().providers.find((item) => item.provider === 'cenobots') || null;
-  return { summary:{ total:fleet.length,online:fleet.filter((item) => item.online === true).length,offline:fleet.filter((item) => item.online === false).length,charging:fleet.filter((item) => item.charging === true).length,docked:fleet.filter((item) => item.docked === true).length,maintenanceDue:fleet.reduce((sum,item) => sum+item.maintenanceDueCount,0),errors:fleet.reduce((sum,item) => sum+item.errorCount,0) },fleet,alerts:alerts.sort((a,b) => Date.parse(b.occurredAt || 0)-Date.parse(a.occurredAt || 0)),diagnostics:{ liveEnabled:cenoBotsLiveEnabled(),status:adapter.status,lastSyncAt:adapter.lastSyncAt,lastSyncStatus:adapter.lastSyncStatus,lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncCount:adapter.lastSyncCount,lastSyncWarnings:adapter.lastSyncWarnings || 0,minimumRequestIntervalSeconds:Number(process.env.CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS || 1.05),secretPolicy:policy,webhook:cenoBotsWebhookConfiguration(),syncHistory:clone(adapter.syncHistory || []) },generatedAt:timestamp() };
+  return { summary:{ total:fleet.length,online:fleet.filter((item) => item.online === true).length,offline:fleet.filter((item) => item.online === false).length,charging:fleet.filter((item) => item.charging === true).length,docked:fleet.filter((item) => item.docked === true).length,maintenanceDue:fleet.reduce((sum,item) => sum+item.maintenanceDueCount,0),errors:fleet.reduce((sum,item) => sum+item.errorCount,0) },fleet,alerts:alerts.sort((a,b) => Date.parse(b.occurredAt || 0)-Date.parse(a.occurredAt || 0)),control:{ ...cenoBotsControlConfiguration(),canControl:canControlCenoBots(actor) },diagnostics:{ liveEnabled:cenoBotsLiveEnabled(),status:adapter.status,lastSyncAt:adapter.lastSyncAt,lastSyncStatus:adapter.lastSyncStatus,lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncCount:adapter.lastSyncCount,lastSyncWarnings:adapter.lastSyncWarnings || 0,minimumRequestIntervalSeconds:Number(process.env.CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS || 1.05),secretPolicy:policy,webhook:cenoBotsWebhookConfiguration(),syncHistory:clone(adapter.syncHistory || []) },generatedAt:timestamp() };
 }
 
 function autoXingDiagnosticReport(actor,robot) {
@@ -881,7 +932,7 @@ async function syncCenoBotsLive(actor) {
   }
   const resourceErrors = bridge.resourceErrors || bridge.warnings || [];
   recordAdapterSync(adapter, { status:'success', startedAt:syncStartedAt, count:synced.length, warnings:resourceErrors.length, trigger:'manual' });
-  return { provider:'cenobots', adapterVersion:'open-api-v1.0.16', source:bridge.wrapper || 'integrations/cenobots/client.py', robots:synced, count:synced.length, resources:clone(bridge.resources || {}), resourceErrors:clone(resourceErrors), commandCapabilitiesEnabled:false };
+  return { provider:'cenobots', adapterVersion:'open-api-v1.0.16', source:bridge.wrapper || 'integrations/cenobots/client.py', robots:synced, count:synced.length, resources:clone(bridge.resources || {}), resourceErrors:clone(resourceErrors), commandCapabilitiesEnabled:cenoBotsControlConfiguration().ready };
 }
 
 async function executeProviderSync(provider,actor,trigger='manual') {
@@ -968,6 +1019,14 @@ function canExport(actor) {
   return ['owner', 'platform_admin', 'data_admin', 'support_admin', 'auditor'].includes(actor.role);
 }
 
+function canControlCenoBots(actor) {
+  return ['platform_admin','support_admin'].includes(actor.role);
+}
+
+function canUseSupportPortal(actor) {
+  return actor.role !== 'auditor';
+}
+
 function actorRobotSerials(actor) {
   if (Array.isArray(actor.robotSerialNumbers) && actor.robotSerialNumbers.length) return actor.robotSerialNumbers;
   return actor.robotSerialNumber ? [actor.robotSerialNumber] : [];
@@ -1001,6 +1060,11 @@ function visibleRobotIds(actor) {
 function serviceCasesForActor(actor) {
   const robotIds = visibleRobotIds(actor);
   return [...state.serviceCases.values()].filter((item) => robotIds.has(item.robotId));
+}
+
+function supportTicketView(ticket) {
+  const robot=state.robots.get(ticket.robotId);
+  return { ...clone(ticket),robotSerialNumber:robot?.serialNumber || null,category:ticket.category || 'technical',requesterName:ticket.requesterName || null,messages:Array.isArray(ticket.messages) ? clone(ticket.messages) : [] };
 }
 
 function canManageWorkforce(actor) {
@@ -1161,6 +1225,61 @@ function operationalReport(actor,days=30) {
   const daily=[]; for (let offset=days-1;offset>=0;offset-=1) { const day=new Date(); day.setUTCHours(0,0,0,0); day.setUTCDate(day.getUTCDate()-offset); const next=new Date(day); next.setUTCDate(next.getUTCDate()+1); const dayEvents=events.filter((item) => Date.parse(item.occurredAt) >= day.getTime() && Date.parse(item.occurredAt) < next.getTime()); daily.push({ date:day.toISOString().slice(0,10),events:dayEvents.length,errors:dayEvents.filter((item) => ['error','critical'].includes(item.severity)).length,maintenance:dayEvents.filter((item) => item.eventType.includes('maintenance')).length,tasks:periodTasks.filter((item) => item.occurredAt && Date.parse(item.occurredAt) >= day.getTime() && Date.parse(item.occurredAt) < next.getTime()).length }); }
   const providerBreakdown=['autoxing','cenobots','manual'].map((provider) => ({ provider,count:robots.filter((robot) => provider === 'manual' ? !(robot.externalIdentities || []).length : robot.externalIdentities?.some((identity) => identity.system === provider)).length }));
   return { period:{ days,from:new Date(since).toISOString(),to:timestamp() },fleet:{ total:robots.length,online:robots.filter((item) => item.online === true).length,offline:robots.filter((item) => item.online === false).length,availabilityPercent:robots.length ? Math.round(robots.filter((item) => item.online === true).length/robots.length*100) : null,averageBattery:batteryValues.length ? Math.round(batteryValues.reduce((sum,value) => sum+value,0)/batteryValues.length) : null,providers:providerBreakdown },tasks:{ total:periodTasks.length,completed,failed,running:periodTasks.filter((item) => item.running).length,successRate:completed+failed ? Math.round(completed/(completed+failed)*100) : null,cleanedArea:Math.round(periodTasks.map((item) => item.cleanedArea).filter(Number.isFinite).reduce((sum,value) => sum+value,0)),averageDurationMinutes:(() => { const values=periodTasks.map((item) => item.durationMinutes).filter(Number.isFinite); return values.length ? Math.round(values.reduce((sum,value) => sum+value,0)/values.length) : null; })() },service:{ casesOpened:serviceCases.length,casesClosed:serviceCases.filter((item) => item.status === 'closed').length,schedules:schedules.length,overdue:schedules.map(maintenanceScheduleView).filter((item) => item.dueState === 'overdue').length,costTrackingAvailable:false },events:{ total:events.length,critical:events.filter((item) => item.severity === 'critical').length,errors:events.filter((item) => item.severity === 'error').length },daily,generatedAt:timestamp() };
+}
+
+function pdfText(value) {
+  return String(value ?? '').normalize('NFKD').replace(/[^\x20-\x7e]/g,'?').replaceAll('\\','\\\\').replaceAll('(','\\(').replaceAll(')','\\)');
+}
+
+function wrapReportLine(value,width=92) {
+  const words=String(value ?? '').replace(/\s+/g,' ').trim().split(' '); const lines=[]; let current='';
+  for (const word of words) { if (!word) continue; if (`${current} ${word}`.trim().length > width && current) { lines.push(current); current=word; } else current=`${current} ${word}`.trim(); }
+  if (current || !lines.length) lines.push(current); return lines;
+}
+
+function simplePdf(title,reportLines) {
+  const lines=[title,'Generated by Altegro',...reportLines].flatMap((line) => wrapReportLine(line)); const pageLines=[];
+  for (let index=0;index<lines.length;index+=42) pageLines.push(lines.slice(index,index+42));
+  const objects=[null]; const pageIds=pageLines.map((_,index) => 4+index*2);
+  objects[1]='<< /Type /Catalog /Pages 2 0 R >>';
+  objects[2]=`<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageIds.length} >>`;
+  objects[3]='<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>';
+  pageLines.forEach((page,index) => {
+    const pageId=pageIds[index]; const contentId=pageId+1; const commands=['BT','/F1 11 Tf','50 792 Td','14 TL'];
+    page.forEach((line,lineIndex) => { if (lineIndex) commands.push('T*'); commands.push(`(${pdfText(line)}) Tj`); }); commands.push('ET');
+    const stream=commands.join('\n'); objects[pageId]=`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentId} 0 R >>`; objects[contentId]=`<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`;
+  });
+  let output='%PDF-1.4\n'; const offsets=[0]; for (let id=1;id<objects.length;id+=1) { offsets[id]=Buffer.byteLength(output); output += `${id} 0 obj\n${objects[id]}\nendobj\n`; }
+  const xref=Buffer.byteLength(output); output += `xref\n0 ${objects.length}\n0000000000 65535 f \n`; for (let id=1;id<objects.length;id+=1) output += `${String(offsets[id]).padStart(10,'0')} 00000 n \n`;
+  output += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`; return Buffer.from(output,'ascii');
+}
+
+function robotPdfReport(actor,robot,type) {
+  const passport=getPassport(robot.id); const model=state.models.get(robot.modelId); const site=state.sites.get(robot.siteId); const lines=[
+    `Report type: ${type === 'maintenance' ? 'Maintenance report' : 'Compliance report'}`,
+    `Generated: ${timestamp()}`,
+    `Generated by: ${actor.name} (${actor.role})`,
+    '',`Robot: ${robot.serialNumber}`,
+    `Manufacturer / model: ${model?.manufacturer || '-'} ${model?.model || robot.modelId}`,
+    `Site: ${site?.name || robot.siteId}`,
+    `Status: ${robot.status}; online: ${robot.online ?? 'unknown'}; battery: ${robot.battery ?? 'unknown'}`,
+    `Passport completeness: ${passport.completeness?.percentage ?? 0}%`,''
+  ];
+  if (type === 'compliance') {
+    lines.push(`Certificates (${passport.certificates.length})`);
+    for (const item of passport.certificates) lines.push(`- ${item.title}; issuer ${item.issuer || '-'}; valid until ${item.validUntil || '-'}; status ${item.status || '-'}`);
+    lines.push('',`Documents (${passport.documents.length})`); for (const item of passport.documents) lines.push(`- ${item.title}; type ${item.documentType || 'general'}; version ${item.version || '-'}`);
+    lines.push('',`Deployments (${passport.deployments.length})`); for (const item of passport.deployments) lines.push(`- ${item.title}; version ${item.version || '-'}; status ${item.status || '-'}`);
+    lines.push('',`Qualified assignments (${passport.workforce?.assignedTechnicians?.length || 0})`); for (const item of passport.workforce?.assignedTechnicians || []) lines.push(`- ${item.technician?.name || item.technicianId}; eligibility ${item.eligibility?.status || '-'}`);
+  } else {
+    const providerItems=Array.isArray(robot.maintenance?.maintenanceItems) ? robot.maintenance.maintenanceItems : []; const schedules=[...state.maintenanceSchedules.values()].filter((item) => item.robotId === robot.id).map(maintenanceScheduleView); const cases=serviceCasesForActor(actor).filter((item) => item.robotId === robot.id);
+    lines.push(`Provider maintenance items (${providerItems.length})`); for (const item of providerItems) lines.push(`- ${item.name || 'Item'}; remaining ${item.remainPercent ?? item.remainingPercentage ?? '-'}; hours ${item.remainHours ?? '-'}; overdue ${item.overDueHours ?? 0}`);
+    lines.push('',`Maintenance schedules (${schedules.length})`); for (const item of schedules) lines.push(`- ${item.title}; next ${item.nextDueAt}; state ${item.dueState}; technician ${item.technicianName || 'unassigned'}`);
+    lines.push('',`Service history (${cases.length})`); for (const item of cases) lines.push(`- ${item.externalId}; ${item.title}; ${item.status}; opened ${item.createdAt}; action ${item.action || '-'}`);
+    const maintenanceEvents=state.events.filter((item) => item.robotId === robot.id && String(item.eventType).includes('maintenance')).slice(-30); lines.push('',`Maintenance events (${maintenanceEvents.length})`); for (const item of maintenanceEvents) lines.push(`- ${item.occurredAt}; ${item.title}; ${item.description || ''}`);
+  }
+  lines.push('','Integrity note: This report is generated from the Altegro Robot Passport and audit-scoped operational data.');
+  return simplePdf(`Altegro ${type === 'maintenance' ? 'Maintenance' : 'Compliance'} Report`,lines);
 }
 
 function readBody(req) {
@@ -1458,6 +1577,24 @@ async function handle(req, res) {
     return send(res, 201, { data: record });
   }
   if (req.method === 'GET' && path === '/api/v1/service-cases') return send(res, 200, { data: serviceCasesForActor(actor), count: serviceCasesForActor(actor).length });
+  if (req.method === 'GET' && path === '/api/v1/support/tickets') {
+    const data=serviceCasesForActor(actor).map(supportTicketView).sort((a,b) => Date.parse(b.updatedAt)-Date.parse(a.updatedAt)); return send(res,200,{ data,count:data.length,permissions:{ create:canUseSupportPortal(actor),reply:canUseSupportPortal(actor),manage:canWrite(actor) } });
+  }
+  if (req.method === 'POST' && path === '/api/v1/support/tickets') {
+    if (!canUseSupportPortal(actor)) throw httpError(403,'Support ticket creation is unavailable');
+    const robot=state.robots.get(body.robotId); if (!robot || !visibleToActor(actor,robot)) throw httpError(404,'Robot not found');
+    const title=String(body.title || '').trim().slice(0,160); const description=String(body.description || '').trim().slice(0,4000); if (!title || !description) throw httpError(400,'Title and description are required');
+    const category=String(body.category || 'technical'); if (!['technical','maintenance','integration','account','other'].includes(category)) throw httpError(400,'Invalid support category'); const severity=String(body.severity || 'warning'); if (!['info','warning','error','critical'].includes(severity)) throw httpError(400,'Invalid support priority');
+    const externalId=`SUP-${new Date().toISOString().slice(0,10).replaceAll('-','')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`; const createdAt=timestamp(); const ticket={ id:ids(),robotId:robot.id,tenantId:robot.tenantId,provider:'altegro-support',externalId,title,description,severity,status:'open',category,requesterId:actor.id,requesterName:actor.name,cause:null,action:null,parts:[],assignedTo:null,messages:[{ id:ids(),authorId:actor.id,authorName:actor.name,authorRole:actor.role,message:description,createdAt }],createdAt,updatedAt:createdAt,closedAt:null };
+    state.serviceCases.set(`${ticket.provider}:${externalId}`,ticket); appendPassportEntry(robot.id,{ type:'support_ticket_opened',source:'altegro-support',data:{ serviceCaseId:ticket.id,externalId,title,category,severity } },actor); upsertEvent(robot.id,{ eventType:'support_ticket',sourceSystem:'altegro-support',sourceEventId:externalId,severity,title,description,payload:{ serviceCaseId:ticket.id,category } },actor); appendOutbox('support.ticket.opened','service_case',ticket.id,ticket); recordAudit(actor,'support.ticket.create','robot',robot.id,'success',{ ticketId:ticket.id,externalId }); return send(res,201,{ data:supportTicketView(ticket) });
+  }
+  const supportMessage=path.match(/^\/api\/v1\/support\/tickets\/([^/]+)\/messages$/);
+  if (supportMessage && req.method === 'POST') {
+    if (!canUseSupportPortal(actor)) throw httpError(403,'Support replies are unavailable'); const ticket=[...state.serviceCases.values()].find((item) => item.id === decodeURIComponent(supportMessage[1])); const robot=ticket ? state.robots.get(ticket.robotId) : null; if (!ticket || !robot || !visibleToActor(actor,robot)) throw httpError(404,'Support ticket not found');
+    const message=String(body.message || '').trim().slice(0,4000); if (!message) throw httpError(400,'A reply message is required'); const update={ id:ids(),authorId:actor.id,authorName:actor.name,authorRole:actor.role,message,createdAt:timestamp() }; ticket.messages=[...(ticket.messages || []),update]; ticket.updatedAt=update.createdAt;
+    if (body.status !== undefined) { if (!canWrite(actor)) throw httpError(403,'Only service staff can change ticket status'); if (!['open','in_progress','waiting','resolved','closed'].includes(body.status)) throw httpError(400,'Invalid support-ticket status'); ticket.status=body.status; if (body.status === 'closed') ticket.closedAt=timestamp(); }
+    appendPassportEntry(robot.id,{ type:'support_ticket_updated',source:'altegro-support',data:{ serviceCaseId:ticket.id,externalId:ticket.externalId,messageId:update.id,status:ticket.status } },actor); appendOutbox('support.ticket.updated','service_case',ticket.id,{ messageId:update.id,status:ticket.status }); recordAudit(actor,'support.ticket.reply','robot',robot.id,'success',{ ticketId:ticket.id,status:ticket.status }); return send(res,201,{ data:supportTicketView(ticket) });
+  }
   if (req.method === 'GET' && path === '/api/v1/outbox') {
     if (!['platform_admin', 'data_admin'].includes(actor.role)) throw httpError(403, 'Outbox administration permission required');
     return send(res, 200, { data: state.outbox, count: state.outbox.length, warning: 'Locally durable prototype Outbox; PostgreSQL transactionality and a publisher worker are still required.' });
@@ -1505,6 +1642,26 @@ async function handle(req, res) {
   }
   if (req.method === 'GET' && path === '/api/v1/autoxing/operations') return send(res, 200, { data:autoXingOperations(actor) });
   if (req.method === 'GET' && path === '/api/v1/cenobots/operations') return send(res, 200, { data:cenoBotsOperations(actor) });
+  const cenoBotsSchedules=path.match(/^\/api\/v1\/cenobots\/robots\/([^/]+)\/schedules$/);
+  if (cenoBotsSchedules && req.method === 'GET') {
+    const robot=state.robots.get(decodeURIComponent(cenoBotsSchedules[1])); if (!robot || !visibleToActor(actor,robot)) throw httpError(404,'CenoBots robot not found');
+    const result=await listCenoBotsSchedules(robot); return send(res,200,{ ...result,control:cenoBotsControlConfiguration() });
+  }
+  const cenoBotsCommand=path.match(/^\/api\/v1\/cenobots\/robots\/([^/]+)\/commands$/);
+  if (cenoBotsCommand && req.method === 'POST') {
+    const robot=state.robots.get(decodeURIComponent(cenoBotsCommand[1])); if (!robot || !visibleToActor(actor,robot) || !robot.externalIdentities?.some((item) => item.system === 'cenobots')) throw httpError(404,'CenoBots robot not found');
+    if (!canControlCenoBots(actor)) { recordAudit(actor,'cenobots.command','robot',robot.id,'rejected',{ reason:'permission' }); throw httpError(403,'CenoBots control requires platform or support administration permission'); }
+    const action=String(body.action || ''); const allowed=['clean','schedule','go-home','pause','continue','stop']; if (!allowed.includes(action)) throw httpError(400,'Unsupported CenoBots command'); const execute=body.execute === true;
+    if (execute) {
+      const config=cenoBotsControlConfiguration(); if (!config.ready) { recordAudit(actor,'cenobots.command','robot',robot.id,'rejected',{ action,reason:'disabled' }); throw httpError(503,'Live CenoBots control is disabled or credentials are incomplete'); }
+      if (String(body.confirmation || '') !== robot.serialNumber) { recordAudit(actor,'cenobots.command','robot',robot.id,'rejected',{ action,reason:'confirmation' }); throw httpError(400,`Type ${robot.serialNumber} exactly to confirm this live command`); }
+      if (action !== 'schedule' && robot.online !== true) throw httpError(409,'The robot must be online before a live command can be sent');
+      if (['clean','go-home'].includes(action) && (robot.emergencyStop === true || robot.manualMode === true)) throw httpError(409,'Clear emergency-stop and manual mode before sending this command');
+    }
+    const result=await runCenoBotsTask(action,robot,body,execute); recordAudit(actor,`cenobots.${action}`,'robot',robot.id,'success',{ execute,dryRun:result.dryRun,providerRequestId:result.result?.rid || null });
+    if (execute) { appendPassportEntry(robot.id,{ type:action === 'schedule' ? 'provider_schedule_created' : 'provider_command',source:'cenobots',data:{ action,providerRequestId:result.result?.rid || null,task:result.task } },actor); upsertEvent(robot.id,{ eventType:action === 'schedule' ? 'schedule_created' : 'robot_command',sourceSystem:'cenobots',sourceEventId:`command:${action}:${result.result?.rid || ids()}`,severity:'info',title:`CenoBots ${action.replaceAll('-',' ')} accepted`,description:`Live command requested by ${actor.name}.`,payload:{ action,providerRequestId:result.result?.rid || null } },actor); }
+    return send(res,execute ? 202 : 200,{ data:result,robot:{ id:robot.id,serialNumber:robot.serialNumber },control:cenoBotsControlConfiguration() });
+  }
   if (req.method === 'GET' && path === '/api/v1/autoxing/maintenance-schedules') {
     const robotIds=visibleRobotIds(actor); const schedules=[...state.maintenanceSchedules.values()].filter((schedule) => robotIds.has(schedule.robotId)).map(maintenanceScheduleView).sort((a,b) => Date.parse(a.nextDueAt)-Date.parse(b.nextDueAt)); return send(res,200,{ data:schedules,count:schedules.length,permissions:{ manage:canWrite(actor) } });
   }
@@ -1709,6 +1866,10 @@ async function handle(req, res) {
     const item = state.robots.get(robotExport.id); if (!item || !visibleToActor(actor, item)) throw httpError(404, 'Robot not found');
     recordAudit(actor, 'export.robot.json', 'robot', item.id);
     return sendDownload(res, 'application/json; charset=utf-8', `altegro-passport-${item.serialNumber}.json`, JSON.stringify({ schemaVersion: '1.0.0', exportedAt: timestamp(), passport: getPassport(item.id) }, null, 2));
+  }
+  const robotPdf=path.match(/^\/api\/v1\/robots\/([^/]+)\/reports\/(maintenance|compliance)\.pdf$/);
+  if (robotPdf && req.method === 'GET') {
+    const item=state.robots.get(decodeURIComponent(robotPdf[1])); if (!item || !visibleToActor(actor,item)) throw httpError(404,'Robot not found'); const reportType=robotPdf[2]; const report=robotPdfReport(actor,item,reportType); recordAudit(actor,`report.${reportType}.pdf`,'robot',item.id,'success',{ bytes:report.length }); return sendDownload(res,'application/pdf',`altegro-${reportType}-${item.serialNumber}.pdf`,report);
   }
   const lifecycleRecords = route(req.method, path, /^\/api\/v1\/robots\/([^/]+)\/lifecycle-records$/);
   if (lifecycleRecords && req.method === 'POST') {

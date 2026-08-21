@@ -36,7 +36,7 @@ It calls `GET /app/openapi/v1/device/deviceOpenIds`, prints the available `devic
 
 The Open API cannot register or attach a robot to an account. If this endpoint returns an empty list, assign the robot to the same API account in the CenoBots operation platform (or ask CenoBots support to bind it), confirm that the API keys and robot use the same regional host, and run the helper again. `CENOBOTS_ROBOT_OPEN_ID` and the optional comma-separated `CENOBOTS_ROBOT_OPEN_IDS` are fallback IDs for querying already-authorized robots; they cannot grant account access.
 
-When `CENOBOTS_LIVE=true`, the Node server invokes the bridge behind the existing **Sync CenoBots** button. The live sync imports device identity, status, battery, position, maintenance, and system-error data into canonical Robots, Passports, and Events. Control operations remain disabled.
+When `CENOBOTS_LIVE=true`, the Node server invokes the bridge behind the existing **Sync CenoBots** button. The live sync imports device identity, status, battery, position, maintenance, and system-error data into canonical Robots, Passports, and Events. Live controls remain disabled unless the separate command safety gate is explicitly enabled.
 
 ## Encrypted webhooks
 
@@ -44,7 +44,7 @@ Altegro receives CZ Robots webhook challenges and events at `POST /api/v1/webhoo
 
 ## Robot task wrapper
 
-The wrapper supports an L50 `SWEEP` cleaning mission plus `go-home`, `pause`, `continue`, and `stop`. Every command is a dry-run preview by default and does not contact CenoBots:
+The wrapper supports an L-series `SWEEP` cleaning mission, recurring schedules, `go-home`, `pause`, `continue`, and `stop`. Every command is a dry-run preview by default and does not contact CenoBots:
 
 ```bash
 python3 integrations/cenobots/tasks.py clean \
@@ -57,6 +57,8 @@ python3 integrations/cenobots/tasks.py clean \
 python3 integrations/cenobots/tasks.py go-home \
   --device-open-id AUGCEMZK85
 ```
+
+The Altegro CenoBots tab exposes the same safety gate to platform and support administrators. Every live operation requires `CENOBOTS_LIVE=true`, `CENOBOTS_COMMANDS_ENABLED=true`, complete credentials, an online/safe robot where applicable, and the exact robot serial number typed into the confirmation dialog. Accepted operations are recorded in the Robot Passport and audit log.
 
 Area cleaning uses one or more `--area-id` arguments instead of `--everywhere`. Cleaning returns to the station by default; use `--stop-after` to stop at the end or `--back-point-id ID` for a configured custom return point.
 

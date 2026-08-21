@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from integrations.cenobots.client import CenoBotsClient, CenoBotsError
-from integrations.cenobots.tasks import build_clean_plan, build_control_plan, run_plan
+from integrations.cenobots.tasks import build_clean_plan, build_control_plan, build_schedule_plan, run_plan
 
 
 class CenoBotsTaskTests(unittest.TestCase):
@@ -59,6 +59,23 @@ class CenoBotsTaskTests(unittest.TestCase):
         self.assertTrue(result['dryRun'])
         self.assertIn('No API request was sent', result['message'])
         client.go_home.assert_not_called()
+
+    def test_schedule_uses_documented_day_and_time_formats(self):
+        plan = build_schedule_plan(
+            'AUGCEMZK85', 42, 'map.version', '04:52 pm', ['Mon.', 'Fri.'],
+            clean_everywhere=True, duration=60,
+        )
+        self.assertEqual(plan.endpoint, '/app/openapi/v1/schedule')
+        self.assertEqual(plan.payload['startTime'], '04:52 PM')
+        self.assertEqual(plan.payload['repeat'], ['Mon.', 'Fri.'])
+        self.assertEqual(plan.payload['sweepMode'], 'SWEEP')
+
+    def test_schedule_rejects_undocumented_day_format(self):
+        with self.assertRaisesRegex(CenoBotsError, 'valid CenoBots day'):
+            build_schedule_plan(
+                'AUGCEMZK85', 42, 'map.version', '04:52 PM', ['Monday'],
+                clean_everywhere=True,
+            )
 
     def test_live_run_requires_exact_device_confirmation(self):
         client = Mock(spec=CenoBotsClient)

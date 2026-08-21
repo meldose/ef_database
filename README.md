@@ -248,15 +248,17 @@ The Python environment must have the wrapper dependencies installed. If credenti
 
 ## CenoBots Open API integration
 
-The CenoBots adapter supports read-only live synchronization through Open API v1.0.16. Put the region host and credentials in the ignored root `.env`, set `CENOBOTS_LIVE=true`, and start the server normally. The server loads `.env` automatically and invokes `integrations/cenobots_bridge.py`, which converts provider responses into the same canonical robot boundary used by the AutoXing integration.
+The CenoBots adapter supports live synchronization through Open API v1.0.16. Put the region host and credentials in the ignored root `.env`, set `CENOBOTS_LIVE=true`, and start the server normally. The server loads `.env` automatically and invokes `integrations/cenobots_bridge.py`, which converts provider responses into the same canonical robot boundary used by the AutoXing integration.
 
-Use **Sync all robots**, the provider-specific **Sync CenoBots** button, or call `POST /api/v1/adapters/cenobots/sync`. The adapter discovers permitted device open IDs and imports robot information, online state, battery, position, mission status, maintenance details, and system errors. It never exposes mission or robot-control operations.
+Use **Sync all robots**, the provider-specific **Sync CenoBots** button, or call `POST /api/v1/adapters/cenobots/sync`. The adapter discovers permitted device open IDs and imports robot information, online state, battery, position, mission status, maintenance details, and system errors. Mission scheduling and go-home/pause/continue/stop controls are separately restricted to platform/support administrators and remain disabled unless `CENOBOTS_COMMANDS_ENABLED=true`. Every live action requires exact robot confirmation and creates Passport/audit evidence.
 
 CenoBots has its own dashboard tab with fleet totals, online/offline and charging KPIs, searchable live robot cards, version/map/mission status, maintenance and system-error attention items, and connector synchronization diagnostics. The tenant-scoped data is supplied by `GET /api/v1/cenobots/operations`.
 
 The encrypted CenoBots webhook receiver is `POST /api/v1/webhooks/cenobots`. Configure the separate `CENOBOTS_WEBHOOK_SECRET`, publish the callback over HTTPS, and verify it in the CZ Robots company-administrator portal. Error, task, maintenance, and door-assistance messages are freshness-checked, AES-GCM authenticated, deduplicated, persisted, and added to the matching Robot Passport. The CenoBots workspace displays webhook readiness and receipt activity.
 
-The browser includes a three-step robot onboarding wizard, searchable and actionable notification workflows, role-focused landing dashboards, and operational reports with JSON/CSV export. Reports cover current fleet availability and battery, task success and cleaned area, service cases, maintenance, event severity, provider distribution, and daily trends. Labour and parts pricing remains explicitly unavailable until cost fields are captured.
+The browser includes a three-step robot onboarding wizard, searchable and actionable notification workflows, role-focused landing dashboards, English/German navigation, and operational reports with JSON/CSV export. Robot-specific maintenance and compliance reports download as PDFs. The Support tab lets customer and robot accounts open tickets, follow the conversation, and add updates while service staff manage ticket status. Labour and parts pricing remains explicitly unavailable until cost fields are captured.
+
+Run `npm run test:e2e` for the automated browser-facing customer journey and performance budgets. It verifies login, static assets, support-ticket creation/replies, PDF download, concurrent API responses, a 1.5-second p95 response budget, and JavaScript/CSS size budgets. The same check is included in `npm test`.
 
 CenoBots limits this account to less than one request per second, so calls are paced by `CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS` (default `1.05`). Optional map, area, and mission-history collection is enabled with `CENOBOTS_RESOURCE_SYNC=true`; it is off by default to keep normal fleet synchronization fast.
 
@@ -320,7 +322,10 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - Platform robot-account administration without password disclosure
 - Robot Registry CSV export from the dashboard
 - Role-controlled compatibility record editor
-- Responsive six-tab dashboard with keyboard navigation and remembered selection
+- Responsive role-scoped dashboard with keyboard navigation and remembered selection
+- English/German language switch, customer support portal, and PDF maintenance/compliance exports
+- Safety-gated CenoBots schedules and mission controls with exact-target confirmation
+- Automated end-to-end workflow and performance budgets
 - Technician skill/certificate matching with enforced robot assignment eligibility
 - Workforce assignment evidence in Robot Passports, audit history, notifications, and Outbox
 
