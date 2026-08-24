@@ -88,6 +88,7 @@ function managedSecretStatus() {
     { name:'cenobots', enabled:cenoBotsLiveEnabled(), names:['CENOBOTS_ACCESS_KEY','CENOBOTS_SECRET_KEY'] },
     { name:'cenobots-webhook', enabled:Boolean(process.env.CENOBOTS_WEBHOOK_SECRET || process.env.CENOBOTS_WEBHOOK_SECRET_FILE), names:['CENOBOTS_WEBHOOK_SECRET'] },
     { name:'email', enabled:enabled(process.env.EMAIL_ALERTS_ENABLED) && Boolean(process.env.EMAIL_SMTP_USERNAME), names:['EMAIL_SMTP_PASSWORD'] },
+    { name:'sms', enabled:enabled(process.env.SMS_ALERTS_ENABLED) && Boolean(process.env.SMS_ALERT_WEBHOOK_TOKEN || process.env.SMS_ALERT_WEBHOOK_TOKEN_FILE), names:['SMS_ALERT_WEBHOOK_TOKEN'] },
     { name:'postgres',enabled:postgresPersistenceEnabled(),names:['PGPASSWORD'] },
     { name:'object-storage',enabled:OBJECT_STORAGE_DRIVER === 's3' && Boolean(process.env.OBJECT_STORAGE_ENDPOINT),names:['OBJECT_STORAGE_ACCESS_KEY','OBJECT_STORAGE_SECRET_KEY'] }
   ];
@@ -106,6 +107,13 @@ function assertProductionSecretConfiguration() {
   if (report.requireManaged && !report.valid) throw new Error('Production secret policy failed. Live providers must use complete managed secret-file configuration.');
   const email=emailAlertConfiguration();
   if (email.enabled && !email.configured) throw new Error(`Email alert configuration failed: ${email.configurationError}`);
+  const sms=smsAlertConfiguration();
+  if (sms.enabled && !sms.configured) throw new Error(`SMS alert configuration failed: ${sms.configurationError}`);
+  if (process.env.NODE_ENV === 'production') {
+    if (!enabled(process.env.COOKIE_SECURE)) throw new Error('COOKIE_SECURE=true is required in production');
+    if (!String(process.env.ALTEGRO_ALLOWED_HOSTS || '').trim()) throw new Error('ALTEGRO_ALLOWED_HOSTS is required in production');
+    if (!String(process.env.ALTEGRO_ALLOWED_ORIGINS || '').trim()) throw new Error('ALTEGRO_ALLOWED_ORIGINS is required in production');
+  }
 }
 
 function emailAddress(value) {
@@ -199,6 +207,53 @@ function emailDeliverySummary() {
   const config=emailAlertConfiguration(); const deliveries=state.emailDeliveries.slice().reverse().slice(0,30).map((item) => ({ id:item.id,type:item.type,severity:item.severity,title:item.title,robotId:item.robotId,robotSerialNumber:item.robotSerialNumber,recipientCount:item.recipients.length,status:item.status,attempts:item.attempts,lastError:item.lastError,createdAt:item.createdAt,sentAt:item.sentAt }));
   return { configuration:{ enabled:config.enabled,configured:config.configured,configurationError:config.configurationError,transport:config.transport,hostConfigured:config.hostConfigured,port:config.port,secure:config.secure,authenticationConfigured:config.authenticationConfigured,fromConfigured:config.fromConfigured,recipientCount:config.recipientCount,minimumSeverity:config.minimumSeverity,cooldownMinutes:config.cooldownMinutes },counts:{ total:state.emailDeliveries.length,pending:state.emailDeliveries.filter((item) => item.status === 'pending').length,sent:state.emailDeliveries.filter((item) => item.status === 'sent').length,failed:state.emailDeliveries.filter((item) => item.status === 'failed').length },deliveries };
 }
+
+function smsRecipient(value) {
+  const recipient=String(value || '').replace(/[\s()-]/g,'');
+  return /^\+[1-9]\d{7,14}$/.test(recipient) ? recipient : null;
+}
+
+function smsAlertConfiguration() {
+  const isEnabled=enabled(process.env.SMS_ALERTS_ENABLED); const transport=String(process.env.SMS_ALERT_TRANSPORT || 'webhook').toLowerCase();
+  const recipients=String(process.env.SMS_ALERT_RECIPIENTS || '').split(',').map(smsRecipient).filter(Boolean); const webhookUrl=String(process.env.SMS_ALERT_WEBHOOK_URL || '').trim(); const tokenConfigured=Boolean(process.env.SMS_ALERT_WEBHOOK_TOKEN || process.env.SMS_ALERT_WEBHOOK_TOKEN_FILE);
+  const minimumSeverity=['info','warning','error','critical'].includes(process.env.SMS_ALERT_MIN_SEVERITY) ? process.env.SMS_ALERT_MIN_SEVERITY : 'critical'; let configurationError=null;
+  if (isEnabled && !['webhook','capture'].includes(transport)) configurationError='SMS_ALERT_TRANSPORT must be webhook or capture';
+  else if (isEnabled && transport === 'capture' && process.env.NODE_ENV === 'production') configurationError='capture transport is not allowed in production';
+  else if (isEnabled && !recipients.length) configurationError='SMS_ALERT_RECIPIENTS must contain at least one E.164 phone number';
+  else if (isEnabled && transport === 'webhook' && !webhookUrl) configurationError='SMS_ALERT_WEBHOOK_URL is required';
+  else if (isEnabled && transport === 'webhook') {
+    try { const parsed=new URL(webhookUrl); if (process.env.NODE_ENV === 'production' && parsed.protocol !== 'https:') configurationError='SMS_ALERT_WEBHOOK_URL must use HTTPS in production'; else if (!['http:','https:'].includes(parsed.protocol)) configurationError='SMS_ALERT_WEBHOOK_URL must use HTTP or HTTPS'; }
+    catch { configurationError='SMS_ALERT_WEBHOOK_URL must be a valid URL'; }
+  }
+  return { enabled:isEnabled,configured:!isEnabled || !configurationError,configurationError,transport,webhookConfigured:Boolean(webhookUrl),tokenConfigured,recipientCount:recipients.length,minimumSeverity,cooldownMinutes:Math.max(1,Number(process.env.SMS_ALERT_COOLDOWN_MINUTES || 60)),recipients,webhookUrl };
+}
+
+function createSmsDelivery(notification) {
+  const config=smsAlertConfiguration(); const delivery={ id:ids(),notificationKey:String(notification.notificationKey),type:notification.type || 'operational_alert',severity:notification.severity || 'critical',title:String(notification.title || 'Altegro alert').slice(0,120),message:String(notification.message || '').slice(0,1000),robotId:notification.robotId || null,robotSerialNumber:notification.robotSerialNumber || null,recipients:[...config.recipients],status:'pending',attempts:0,lastError:null,createdAt:timestamp(),occurredAt:notification.occurredAt || timestamp(),sentAt:null,nextAttemptAt:null };
+  state.smsDeliveries.push(delivery); state.smsDeliveries=state.smsDeliveries.slice(-200); schedulePersist(); return delivery;
+}
+
+async function deliverSmsNotification(delivery) {
+  const config=smsAlertConfiguration(); if (!config.enabled || !config.configured) throw new Error(config.configurationError || 'SMS alerts are disabled'); delivery.status='sending'; delivery.attempts+=1; delivery.lastError=null;
+  try {
+    if (config.transport === 'webhook') { const headers={ 'content-type':'application/json' }; const token=secretEnvValue('SMS_ALERT_WEBHOOK_TOKEN'); if (token) headers.authorization=`Bearer ${token}`; const response=await fetch(config.webhookUrl,{ method:'POST',headers,body:JSON.stringify({ recipients:delivery.recipients,message:`[Altegro ${delivery.severity.toUpperCase()}] ${delivery.title}: ${delivery.message}`.slice(0,1500),notificationId:delivery.notificationKey,robotSerialNumber:delivery.robotSerialNumber }),signal:AbortSignal.timeout(Math.max(1000,Number(process.env.SMS_ALERT_TIMEOUT_MS || 10000))) }); if (!response.ok) throw new Error(`SMS webhook returned HTTP ${response.status}`); }
+    delivery.status='sent'; delivery.sentAt=timestamp(); delivery.nextAttemptAt=null;
+  } catch(error) { delivery.status='failed'; delivery.lastError=String(error.message || error).slice(0,500); delivery.nextAttemptAt=new Date(Date.now()+Math.min(15,delivery.attempts*5)*60000).toISOString(); throw error; }
+  finally { schedulePersist(); }
+  return delivery;
+}
+
+function queueSmsAlert(notification,{ force=false }={}) {
+  const config=smsAlertConfiguration(); if (!config.enabled || !config.configured) return null; const severityRank={ info:0,warning:1,error:2,critical:3 }; if (!force && (severityRank[notification.severity] ?? 0) < severityRank[config.minimumSeverity]) return null;
+  const cutoff=Date.now()-config.cooldownMinutes*60000; const duplicate=state.smsDeliveries.find((item) => item.notificationKey === notification.notificationKey && Date.parse(item.createdAt) >= cutoff && ['pending','sending','sent'].includes(item.status)); if (duplicate) return duplicate; const delivery=createSmsDelivery(notification); setImmediate(() => deliverSmsNotification(delivery).catch(() => {})); return delivery;
+}
+
+function queueOperationalAlert(notification,options={}) { return { email:queueEmailAlert(notification,options),sms:queueSmsAlert(notification,options) }; }
+
+function smsDeliverySummary() {
+  const config=smsAlertConfiguration(); const deliveries=state.smsDeliveries.slice().reverse().slice(0,30).map((item) => ({ id:item.id,type:item.type,severity:item.severity,title:item.title,robotId:item.robotId,robotSerialNumber:item.robotSerialNumber,recipientCount:item.recipients.length,status:item.status,attempts:item.attempts,lastError:item.lastError,createdAt:item.createdAt,sentAt:item.sentAt }));
+  return { configuration:{ enabled:config.enabled,configured:config.configured,configurationError:config.configurationError,transport:config.transport,webhookConfigured:config.webhookConfigured,tokenConfigured:config.tokenConfigured,recipientCount:config.recipientCount,minimumSeverity:config.minimumSeverity,cooldownMinutes:config.cooldownMinutes },counts:{ total:state.smsDeliveries.length,pending:state.smsDeliveries.filter((item) => item.status === 'pending').length,sent:state.smsDeliveries.filter((item) => item.status === 'sent').length,failed:state.smsDeliveries.filter((item) => item.status === 'failed').length },deliveries };
+}
 const authenticatedSessions = new Map();
 let persistenceTimer = null;
 
@@ -215,11 +270,14 @@ const state = {
   robotAssignments: new Map(),
   alertWorkflows: new Map(),
   notificationWorkflows: new Map(),
+  notificationReads: new Map(),
   cenobotsWebhookReceipts: new Map(),
   maintenanceSchedules: new Map(),
   alertEscalationRules: new Map(),
   alertEscalations: new Map(),
   emailDeliveries: [],
+  smsDeliveries: [],
+  trackingSamples: new Map(),
   documents: [],
   certificates: [],
   deployments: [],
@@ -287,8 +345,8 @@ function persistedSnapshot() {
     sessions: mapEntries(authenticatedSessions).filter(([, session]) => session.expiresAt > Date.now()),
     state: {
       tenants: mapEntries(state.tenants), organizations: mapEntries(state.organizations), sites: mapEntries(state.sites), models: mapEntries(state.models), robots: mapEntries(state.robots),
-      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), notificationWorkflows:mapEntries(state.notificationWorkflows), cenobotsWebhookReceipts:mapEntries(state.cenobotsWebhookReceipts), maintenanceSchedules:mapEntries(state.maintenanceSchedules), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
-      deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox, emailDeliveries:state.emailDeliveries,
+      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), notificationWorkflows:mapEntries(state.notificationWorkflows), notificationReads:mapEntries(state.notificationReads), cenobotsWebhookReceipts:mapEntries(state.cenobotsWebhookReceipts), maintenanceSchedules:mapEntries(state.maintenanceSchedules), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
+      deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox, emailDeliveries:state.emailDeliveries, smsDeliveries:state.smsDeliveries, trackingSamples:mapEntries(state.trackingSamples),
       autoxing: { ...state.autoxing, pois: mapEntries(state.autoxing.pois), areas: mapEntries(state.autoxing.areas), maps: mapEntries(state.autoxing.maps), tasks: mapEntries(state.autoxing.tasks) },
       adapterRuntime: mapEntries(state.adapters).map(([provider, adapter]) => [provider, { lastSyncAt: adapter.lastSyncAt || null, lastSyncStatus: adapter.lastSyncStatus || 'never', lastError: adapter.lastError || null, lastSyncDurationMs:adapter.lastSyncDurationMs || null, lastSyncCount:adapter.lastSyncCount ?? null, lastSyncWarnings:adapter.lastSyncWarnings || 0, syncHistory:clone(adapter.syncHistory || []) }])
     }
@@ -329,8 +387,8 @@ function hydratePersistedState(saved) {
   for (const [token,user] of Object.entries(saved.users || {})) demoUsers[token]=user;
   initializeCredentialHashes();
   replaceMap(authenticatedSessions,(saved.sessions || []).filter(([,session]) => session.expiresAt > Date.now()));
-  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','notificationWorkflows','cenobotsWebhookReceipts','maintenanceSchedules','alertEscalationRules','alertEscalations']) replaceMap(state[name],saved.state[name]);
-  for (const name of ['documents','certificates','deployments','compatibilityRecords','events','audit','outbox','emailDeliveries']) if (Array.isArray(saved.state[name])) state[name]=saved.state[name];
+  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','notificationWorkflows','notificationReads','cenobotsWebhookReceipts','maintenanceSchedules','alertEscalationRules','alertEscalations','trackingSamples']) replaceMap(state[name],saved.state[name]);
+  for (const name of ['documents','certificates','deployments','compatibilityRecords','events','audit','outbox','emailDeliveries','smsDeliveries']) if (Array.isArray(saved.state[name])) state[name]=saved.state[name];
   const autoXing=saved.state.autoxing || {};
   state.autoxing.businesses=autoXing.businesses || []; state.autoxing.buildings=autoXing.buildings || []; state.autoxing.lastSyncAt=autoXing.lastSyncAt || null; state.autoxing.resourceErrors=autoXing.resourceErrors || [];
   for (const name of ['pois','areas','maps','tasks']) replaceMap(state.autoxing[name],autoXing[name]);
@@ -515,7 +573,7 @@ function upsertEvent(robotId, event, actor = { id: 'system', name: 'System' }) {
   const fullEvent = { eventId: ids(), eventType: event.eventType, schemaVersion: '1.0.0', tenantId: state.robots.get(robotId).tenantId, robotId, sourceSystem: event.sourceSystem, sourceEventId: event.sourceEventId, occurredAt: event.occurredAt || timestamp(), ingestedAt: timestamp(), severity: event.severity || 'info', title: event.title || event.eventType, description: event.description || '', attachment: event.attachment || null, payload: event.payload || {}, correlationId: ids() };
   state.events.push(fullEvent);
   appendPassportEntry(robotId, { type: 'technical_event', source: event.sourceSystem, data: fullEvent }, actor);
-  const robot=state.robots.get(robotId); queueEmailAlert({ notificationKey:`event:${fullEvent.eventId}`,type:'technical_event',severity:fullEvent.severity,title:fullEvent.title,message:fullEvent.description || fullEvent.eventType,robotId,robotSerialNumber:robot?.serialNumber,occurredAt:fullEvent.occurredAt });
+  const robot=state.robots.get(robotId); queueOperationalAlert({ notificationKey:`event:${fullEvent.eventId}`,type:'technical_event',severity:fullEvent.severity,title:fullEvent.title,message:fullEvent.description || fullEvent.eventType,robotId,robotSerialNumber:robot?.serialNumber,occurredAt:fullEvent.occurredAt });
   return fullEvent;
 }
 
@@ -524,7 +582,7 @@ function recordAdapterSync(adapter, { status, startedAt, count = 0, warnings = 0
   const completedAt = timestamp(); const durationMs = Math.max(0, Date.now() - startedAt);
   adapter.lastSyncAt = completedAt; adapter.lastSyncStatus = status; adapter.lastError = error; adapter.lastSyncDurationMs = durationMs; adapter.lastSyncCount = count; adapter.lastSyncWarnings = warnings;
   adapter.syncHistory = [...(adapter.syncHistory || []), { id:ids(), status, startedAt:new Date(startedAt).toISOString(), completedAt, durationMs, count, warnings, trigger }].slice(-20);
-  if (status === 'error') { const digest=crypto.createHash('sha256').update(String(error || 'unknown')).digest('hex').slice(0,16); queueEmailAlert({ notificationKey:`adapter:${adapter.provider}:${digest}`,type:'integration_error',severity:'error',title:`${adapter.provider} synchronization failed`,message:'The provider synchronization failed. Retry from Altegro and inspect the protected server log if the error remains.',occurredAt:completedAt }); }
+  if (status === 'error') { const digest=crypto.createHash('sha256').update(String(error || 'unknown')).digest('hex').slice(0,16); queueOperationalAlert({ notificationKey:`adapter:${adapter.provider}:${digest}`,type:'integration_error',severity:'error',title:`${adapter.provider} synchronization failed`,message:'The provider synchronization failed. Retry from Altegro and inspect the protected server log if the error remains.',occurredAt:completedAt }); }
 }
 
 function syncAdapter(provider, actorId = 'system') {
@@ -888,6 +946,7 @@ async function syncAutoXingLive(actor) {
     if (externalRobot.emergencyStop === true) upsertEvent(robot.id, { eventType: 'emergency_stop', sourceSystem: 'autoxing', sourceEventId: `${externalId}:emergency-stop:true`, title: 'AutoXing emergency stop active', description: 'The emergency-stop state is active according to AutoXing.', severity: 'critical', payload: { emergencyStop: true, statusDetails: externalRobot.statusDetails } }, actor);
     if (externalRobot.obstruction === true) upsertEvent(robot.id, { eventType: 'obstruction', sourceSystem: 'autoxing', sourceEventId: `${externalId}:obstruction:true`, title: 'AutoXing obstruction detected', description: 'The robot reports an obstruction according to AutoXing.', severity: 'warning', payload: { obstruction: true, statusDetails: externalRobot.statusDetails } }, actor);
     if (externalRobot.stateError) upsertEvent(robot.id, { eventType: 'error', sourceSystem: 'autoxing', sourceEventId: `${externalId}:state-error:${externalRobot.stateError}`, title: 'AutoXing status read failed', description: externalRobot.stateError, severity: 'warning', payload: { stateError: externalRobot.stateError } }, actor);
+    captureTrackingSample(robot,robot.updatedAt);
     synced.push(getPassport(robot.id));
   }
   storeAutoXingResources(bridge.resources, bridge.resourceErrors);
@@ -928,6 +987,7 @@ async function syncCenoBotsLive(actor) {
       const maintenanceDigest = crypto.createHash('sha256').update(JSON.stringify(maintenanceItems)).digest('hex').slice(0, 16);
       upsertEvent(robot.id, { eventType:'maintenance_due', sourceSystem:'cenobots', sourceEventId:`${externalId}:maintenance:${maintenanceDigest}`, title:'CenoBots maintenance due', description:'One or more CenoBots maintenance items are overdue.', severity:'warning', payload:{ maintenanceItems } }, actor);
     }
+    captureTrackingSample(robot,robot.updatedAt);
     synced.push(getPassport(robot.id));
   }
   const resourceErrors = bridge.resourceErrors || bridge.warnings || [];
@@ -1057,6 +1117,28 @@ function visibleRobotIds(actor) {
   return new Set([...state.robots.values()].filter((robot) => visibleToActor(actor, robot)).map((robot) => robot.id));
 }
 
+function robotProvider(robot) {
+  return robot.externalIdentities?.find((identity) => ['autoxing','cenobots'].includes(identity.system))?.system || 'manual';
+}
+
+function normalizedPosition(position) {
+  if (!position || typeof position !== 'object') return null; const x=Number(position.x ?? position.posX ?? position.longitude); const y=Number(position.y ?? position.posY ?? position.latitude); const yaw=Number(position.yaw ?? position.angle ?? position.heading);
+  return Number.isFinite(x) && Number.isFinite(y) ? { x,y,yaw:Number.isFinite(yaw) ? yaw : null } : null;
+}
+
+function captureTrackingSample(robot,sampledAt=timestamp()) {
+  const position=normalizedPosition(robot.position); if (!position) return null; const samples=state.trackingSamples.get(robot.id) || []; const previous=samples[samples.length-1];
+  if (previous && previous.sampledAt === sampledAt) return previous; const sample={ ...position,speed:Number.isFinite(Number(robot.speed)) ? Number(robot.speed) : null,battery:Number.isFinite(Number(robot.battery)) ? Number(robot.battery) : null,online:robot.online ?? null,sampledAt };
+  if (!previous || previous.x !== sample.x || previous.y !== sample.y || previous.online !== sample.online || Date.parse(sample.sampledAt)-Date.parse(previous.sampledAt) >= 60000) { samples.push(sample); state.trackingSamples.set(robot.id,samples.slice(-120)); }
+  return sample;
+}
+
+function fleetTrackingSnapshot(actor) {
+  const robots=[...state.robots.values()].filter((robot) => visibleToActor(actor,robot)); const now=Date.now();
+  const fleet=robots.map((robot) => { const position=normalizedPosition(robot.position); const trail=(state.trackingSamples.get(robot.id) || []).slice(-20); const updatedAt=robot.updatedAt || robot.createdAt; const ageSeconds=Math.max(0,Math.floor((now-Date.parse(updatedAt || timestamp()))/1000)); return { id:robot.id,serialNumber:robot.serialNumber,provider:robotProvider(robot),siteId:robot.siteId,online:robot.online ?? null,battery:Number.isFinite(Number(robot.battery)) ? Number(robot.battery) : null,charging:robot.charging ?? null,speed:Number.isFinite(Number(robot.speed)) ? Number(robot.speed) : null,position,heading:position?.yaw ?? null,currentTask:clone(robot.providerTask || null),updatedAt,ageSeconds,stale:ageSeconds > Math.max(60,Number(process.env.TRACKING_STALE_AFTER_SECONDS || 180)),trail:clone(trail) }; });
+  return { summary:{ total:fleet.length,online:fleet.filter((item) => item.online === true).length,moving:fleet.filter((item) => Number(item.speed) > 0.05).length,located:fleet.filter((item) => item.position).length,stale:fleet.filter((item) => item.stale).length },fleet,refreshIntervalMs:Math.max(5000,Number(process.env.TRACKING_BROWSER_REFRESH_MS || 10000)),generatedAt:timestamp() };
+}
+
 function serviceCasesForActor(actor) {
   const robotIds = visibleRobotIds(actor);
   return [...state.serviceCases.values()].filter((item) => robotIds.has(item.robotId));
@@ -1097,6 +1179,11 @@ function technicianEligibility(technician, robot) {
   return { status, eligible: status !== 'not_qualified', requirements, missingSkills, missingCertificates, expiringCertificates };
 }
 
+function technicianAvailabilityView(technician) {
+  const activeAssignments=[...state.robotAssignments.values()].filter((item) => item.technicianId === technician.id && item.status === 'active'); const availability=technician.availability || {}; const dailyCapacityHours=Math.max(1,Math.min(24,Number(availability.dailyCapacityHours || 8))); const estimatedHours=activeAssignments.length*2;
+  return { status:availability.status || 'available',availableFrom:availability.availableFrom || null,availableUntil:availability.availableUntil || null,workingDays:Array.isArray(availability.workingDays) && availability.workingDays.length ? availability.workingDays : ['Mon.','Tue.','Wed.','Thur.','Fri.'],dailyCapacityHours,timezone:availability.timezone || 'Europe/Berlin',notes:availability.notes || '',activeAssignments:activeAssignments.length,estimatedHours,capacityPercent:Math.min(100,Math.round(estimatedHours/dailyCapacityHours*100)) };
+}
+
 function workforceMatrix(actor, robotId = null) {
   if (actor.role === 'robot_user') throw httpError(403, 'Workforce qualification access is not available to robot accounts');
   let robots = [...state.robots.values()].filter((robot) => visibleToActor(actor, robot));
@@ -1105,9 +1192,9 @@ function workforceMatrix(actor, robotId = null) {
   const rows = [];
   for (const robot of robots) for (const technician of technicians) {
     const assignment = [...state.robotAssignments.values()].find((item) => item.robotId === robot.id && item.technicianId === technician.id && item.status === 'active') || null;
-    rows.push({ robot: { id:robot.id, serialNumber:robot.serialNumber, modelId:robot.modelId }, technician: { id:technician.id, name:technician.name, email:technician.email, jobTitle:technician.jobTitle || 'Service Technician', organizationId:technician.organizationId }, eligibility: technicianEligibility(technician, robot), assignment: assignment ? clone(assignment) : null });
+    rows.push({ robot: { id:robot.id, serialNumber:robot.serialNumber, modelId:robot.modelId }, technician: { id:technician.id, name:technician.name, email:technician.email, jobTitle:technician.jobTitle || 'Service Technician', organizationId:technician.organizationId,availability:technicianAvailabilityView(technician) }, eligibility: technicianEligibility(technician, robot), assignment: assignment ? clone(assignment) : null });
   }
-  return { rows, robots: robots.map((robot) => ({ id:robot.id, serialNumber:robot.serialNumber, modelId:robot.modelId, requirements:workRequirementsForRobot(robot) })), technicians:clone(technicians), assignments:clone([...state.robotAssignments.values()].filter((item) => robots.some((robot) => robot.id === item.robotId))), permissions:{ manage:canManageWorkforce(actor) }, generatedAt:timestamp() };
+  return { rows, robots: robots.map((robot) => ({ id:robot.id, serialNumber:robot.serialNumber, modelId:robot.modelId, requirements:workRequirementsForRobot(robot) })), technicians:technicians.map((technician) => ({ ...clone(technician),availability:technicianAvailabilityView(technician) })), assignments:clone([...state.robotAssignments.values()].filter((item) => robots.some((robot) => robot.id === item.robotId))), permissions:{ manage:canManageWorkforce(actor) }, generatedAt:timestamp() };
 }
 
 function operationsSummary(actor) {
@@ -1192,6 +1279,16 @@ function notificationWorkflow(notificationId) {
   return workflow || { status:'open',technicianId:null,technicianName:null,note:'',snoozeUntil:null,updatedAt:null,updatedBy:null };
 }
 
+function notificationReadKey(actor,notificationId) { return `${actor.id}:${notificationId}`; }
+
+function notificationsWithReadState(actor,notifications=operationalNotifications(actor)) {
+  return notifications.map((item) => { const receipt=state.notificationReads.get(notificationReadKey(actor,item.id)); return { ...item,read:Boolean(receipt),readAt:receipt?.readAt || null }; });
+}
+
+function activeNotification(item) {
+  return item.workflow.status !== 'resolved' && !(item.workflow.status === 'snoozed' && Date.parse(item.workflow.snoozeUntil) > Date.now());
+}
+
 function operationalNotifications(actor) {
   const robotIds = visibleRobotIds(actor);
   const robots = [...state.robots.values()].filter((robot) => robotIds.has(robot.id));
@@ -1223,8 +1320,9 @@ function operationalReport(actor,days=30) {
   days=Math.min(365,Math.max(1,Number(days) || 30)); const since=Date.now()-days*86400000; const robots=[...state.robots.values()].filter((robot) => visibleToActor(actor,robot)); const robotIds=new Set(robots.map((robot) => robot.id)); const events=state.events.filter((event) => robotIds.has(event.robotId) && Date.parse(event.occurredAt) >= since);
   const externalIds=new Set(robots.flatMap((robot) => robot.externalIdentities || []).filter((identity) => identity.system === 'autoxing').map((identity) => String(identity.externalId))); const tasks=[...state.autoxing.tasks.values()].filter((task) => externalIds.has(String(taskRobotExternalId(task)))); const taskSummary=autoXingTaskSummary(tasks); const periodTasks=taskSummary.tasks.filter((task) => !task.occurredAt || Date.parse(task.occurredAt) >= since); const completed=periodTasks.filter((task) => task.completed).length; const failed=periodTasks.filter((task) => task.failed).length; const batteryValues=robots.map((robot) => Number(robot.battery)).filter(Number.isFinite); const serviceCases=[...state.serviceCases.values()].filter((item) => robotIds.has(item.robotId) && Date.parse(item.createdAt) >= since); const schedules=[...state.maintenanceSchedules.values()].filter((item) => robotIds.has(item.robotId));
   const daily=[]; for (let offset=days-1;offset>=0;offset-=1) { const day=new Date(); day.setUTCHours(0,0,0,0); day.setUTCDate(day.getUTCDate()-offset); const next=new Date(day); next.setUTCDate(next.getUTCDate()+1); const dayEvents=events.filter((item) => Date.parse(item.occurredAt) >= day.getTime() && Date.parse(item.occurredAt) < next.getTime()); daily.push({ date:day.toISOString().slice(0,10),events:dayEvents.length,errors:dayEvents.filter((item) => ['error','critical'].includes(item.severity)).length,maintenance:dayEvents.filter((item) => item.eventType.includes('maintenance')).length,tasks:periodTasks.filter((item) => item.occurredAt && Date.parse(item.occurredAt) >= day.getTime() && Date.parse(item.occurredAt) < next.getTime()).length }); }
-  const providerBreakdown=['autoxing','cenobots','manual'].map((provider) => ({ provider,count:robots.filter((robot) => provider === 'manual' ? !(robot.externalIdentities || []).length : robot.externalIdentities?.some((identity) => identity.system === provider)).length }));
-  return { period:{ days,from:new Date(since).toISOString(),to:timestamp() },fleet:{ total:robots.length,online:robots.filter((item) => item.online === true).length,offline:robots.filter((item) => item.online === false).length,availabilityPercent:robots.length ? Math.round(robots.filter((item) => item.online === true).length/robots.length*100) : null,averageBattery:batteryValues.length ? Math.round(batteryValues.reduce((sum,value) => sum+value,0)/batteryValues.length) : null,providers:providerBreakdown },tasks:{ total:periodTasks.length,completed,failed,running:periodTasks.filter((item) => item.running).length,successRate:completed+failed ? Math.round(completed/(completed+failed)*100) : null,cleanedArea:Math.round(periodTasks.map((item) => item.cleanedArea).filter(Number.isFinite).reduce((sum,value) => sum+value,0)),averageDurationMinutes:(() => { const values=periodTasks.map((item) => item.durationMinutes).filter(Number.isFinite); return values.length ? Math.round(values.reduce((sum,value) => sum+value,0)/values.length) : null; })() },service:{ casesOpened:serviceCases.length,casesClosed:serviceCases.filter((item) => item.status === 'closed').length,schedules:schedules.length,overdue:schedules.map(maintenanceScheduleView).filter((item) => item.dueState === 'overdue').length,costTrackingAvailable:false },events:{ total:events.length,critical:events.filter((item) => item.severity === 'critical').length,errors:events.filter((item) => item.severity === 'error').length },daily,generatedAt:timestamp() };
+  const providerBreakdown=['autoxing','cenobots','manual'].map((provider) => ({ provider,count:robots.filter((robot) => robotProvider(robot) === provider).length }));
+  const availabilityPercent=robots.length ? Math.round(robots.filter((item) => item.online === true).length/robots.length*100) : null; const successRate=completed+failed ? Math.round(completed/(completed+failed)*100) : null; const overdue=schedules.map(maintenanceScheduleView).filter((item) => item.dueState === 'overdue').length; const closedCases=serviceCases.filter((item) => item.closedAt && Date.parse(item.closedAt) >= Date.parse(item.createdAt)); const resolutionHours=closedCases.map((item) => (Date.parse(item.closedAt)-Date.parse(item.createdAt))/3600000).filter(Number.isFinite); const technicians=techniciansForActor(actor).filter((item) => item.status === 'active'); const availableTechnicians=technicians.filter((item) => ['available','busy'].includes(technicianAvailabilityView(item).status)); const criticalEvents=events.filter((item) => item.severity === 'critical').length; const lowBattery=robots.filter((item) => item.battery != null && Number.isFinite(Number(item.battery)) && Number(item.battery) <= 20).length; const attentionRobots=robots.filter((robot) => robot.online === false || robot.battery != null && Number(robot.battery) <= 20 || events.some((event) => event.robotId === robot.id && ['error','critical'].includes(event.severity))).length; const healthInputs=[availabilityPercent,successRate,Math.max(0,100-(robots.length ? overdue/robots.length*100 : 0)),Math.max(0,100-Math.min(100,criticalEvents*10))].filter(Number.isFinite); const healthScore=healthInputs.length ? Math.round(healthInputs.reduce((sum,value) => sum+value,0)/healthInputs.length) : null;
+  return { period:{ days,from:new Date(since).toISOString(),to:timestamp() },fleet:{ total:robots.length,online:robots.filter((item) => item.online === true).length,offline:robots.filter((item) => item.online === false).length,availabilityPercent,averageBattery:batteryValues.length ? Math.round(batteryValues.reduce((sum,value) => sum+value,0)/batteryValues.length) : null,lowBattery,attentionRobots,healthScore,providers:providerBreakdown },tasks:{ total:periodTasks.length,completed,failed,running:periodTasks.filter((item) => item.running).length,successRate,cleanedArea:Math.round(periodTasks.map((item) => item.cleanedArea).filter(Number.isFinite).reduce((sum,value) => sum+value,0)),averageDurationMinutes:(() => { const values=periodTasks.map((item) => item.durationMinutes).filter(Number.isFinite); return values.length ? Math.round(values.reduce((sum,value) => sum+value,0)/values.length) : null; })() },service:{ casesOpened:serviceCases.length,casesClosed:closedCases.length,caseClosureRate:serviceCases.length ? Math.round(closedCases.length/serviceCases.length*100) : null,averageResolutionHours:resolutionHours.length ? Math.round(resolutionHours.reduce((sum,value) => sum+value,0)/resolutionHours.length*10)/10 : null,schedules:schedules.length,overdue,costTrackingAvailable:false },workforce:{ technicians:technicians.length,available:availableTechnicians.length,onLeave:technicians.filter((item) => technicianAvailabilityView(item).status === 'on_leave').length,availabilityPercent:technicians.length ? Math.round(availableTechnicians.length/technicians.length*100) : null },events:{ total:events.length,critical:criticalEvents,errors:events.filter((item) => item.severity === 'error').length,incidentsPerRobot:robots.length ? Math.round(events.filter((item) => ['error','critical'].includes(item.severity)).length/robots.length*10)/10 : null },daily,generatedAt:timestamp() };
 }
 
 function pdfText(value) {
@@ -1368,7 +1466,21 @@ function publicAttachment(attachment) {
 }
 
 function securityHeaders(contentType, extra = {}) {
-  return { 'content-type': contentType, 'cache-control': 'no-store', 'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'", 'referrer-policy': 'no-referrer', 'permissions-policy': 'camera=(), microphone=(), geolocation=()', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'cross-origin-resource-policy': 'same-origin', ...extra };
+  const headers={ 'content-type': contentType, 'cache-control': 'no-store', 'content-security-policy': `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'${process.env.NODE_ENV === 'production' ? '; upgrade-insecure-requests' : ''}`, 'referrer-policy': 'no-referrer', 'permissions-policy': 'camera=(), microphone=(), geolocation=()', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY', 'cross-origin-resource-policy':'same-origin','cross-origin-opener-policy':'same-origin','origin-agent-cluster':'?1','x-permitted-cross-domain-policies':'none' };
+  if (process.env.NODE_ENV === 'production' || enabled(process.env.ALTEGRO_HSTS_ENABLED)) headers['strict-transport-security']=`max-age=${Math.max(300,Number(process.env.ALTEGRO_HSTS_MAX_AGE || 31536000))}; includeSubDomains`;
+  return { ...headers,...extra };
+}
+
+function commaSeparatedSet(value,{ lower=true }={}) { return new Set(String(value || '').split(',').map((item) => item.trim()).filter(Boolean).map((item) => lower ? item.toLowerCase() : item)); }
+
+function requestIsSecure(req) {
+  if (req.socket.encrypted) return true; if (!enabled(process.env.ALTEGRO_TRUST_PROXY)) return false; return String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase() === 'https';
+}
+
+function validateProductionRequest(req) {
+  const allowedHosts=commaSeparatedSet(process.env.ALTEGRO_ALLOWED_HOSTS); const host=String(req.headers.host || '').split(':')[0].toLowerCase(); if (allowedHosts.size && !allowedHosts.has(host)) throw httpError(421,'Request host is not allowed');
+  const enforceHttps=process.env.NODE_ENV === 'production' ? !['0','false','no'].includes(String(process.env.ALTEGRO_ENFORCE_HTTPS ?? 'true').toLowerCase()) : enabled(process.env.ALTEGRO_ENFORCE_HTTPS); if (enforceHttps && !requestIsSecure(req)) throw httpError(400,'HTTPS is required');
+  if (['POST','PUT','PATCH','DELETE'].includes(req.method) && !String(req.url || '').startsWith('/api/v1/webhooks/')) { const origin=String(req.headers.origin || '').trim(); if (origin) { const allowedOrigins=commaSeparatedSet(process.env.ALTEGRO_ALLOWED_ORIGINS,{ lower:false }); if (allowedOrigins.size && !allowedOrigins.has(origin)) throw httpError(403,'Request origin is not allowed'); } }
 }
 
 function send(res, status, payload, extraHeaders = {}) {
@@ -1410,8 +1522,8 @@ function systemReadiness() {
 function monitoringSnapshot(actor = null) {
   const uptimeSeconds = Math.max(0,Math.floor((Date.now() - Date.parse(startedAt)) / 1000));
   const robots=actor ? [...state.robots.values()].filter((robot) => visibleToActor(actor,robot)) : [...state.robots.values()]; const robotIds=new Set(robots.map((robot) => robot.id));
-  const email=emailDeliverySummary();
-  return { service:'altegro-prototype', uptimeSeconds, startedAt, readiness:systemReadiness(), requests:{ total:runtimeMetrics.requestsTotal, active:runtimeMetrics.activeRequests, errors:runtimeMetrics.errorsTotal, averageResponseTimeMs:runtimeMetrics.requestsTotal ? Math.round(runtimeMetrics.responseTimeMsTotal/runtimeMetrics.requestsTotal) : 0, maxResponseTimeMs:runtimeMetrics.responseTimeMsMax, byStatus:clone(runtimeMetrics.byStatus) }, fleet:{ robots:robots.length, events:state.events.filter((event) => robotIds.has(event.robotId)).length, openServiceCases:[...state.serviceCases.values()].filter((item) => robotIds.has(item.robotId) && !['resolved','closed'].includes(item.status)).length }, adapters:actor && ['robot_user','auditor'].includes(actor.role) ? [] : [...state.adapters.values()].map((adapter) => ({ provider:adapter.provider,status:adapter.status,lastSyncStatus:adapter.lastSyncStatus,lastSyncAt:adapter.lastSyncAt,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncWarnings:adapter.lastSyncWarnings || 0 })),email:actor && ['platform_admin','data_admin','support_admin'].includes(actor.role) ? { configuration:email.configuration,counts:email.counts } : null };
+  const email=emailDeliverySummary(); const sms=smsDeliverySummary();
+  return { service:'altegro-prototype', uptimeSeconds, startedAt, readiness:systemReadiness(), requests:{ total:runtimeMetrics.requestsTotal, active:runtimeMetrics.activeRequests, errors:runtimeMetrics.errorsTotal, averageResponseTimeMs:runtimeMetrics.requestsTotal ? Math.round(runtimeMetrics.responseTimeMsTotal/runtimeMetrics.requestsTotal) : 0, maxResponseTimeMs:runtimeMetrics.responseTimeMsMax, byStatus:clone(runtimeMetrics.byStatus) }, fleet:{ robots:robots.length, events:state.events.filter((event) => robotIds.has(event.robotId)).length, openServiceCases:[...state.serviceCases.values()].filter((item) => robotIds.has(item.robotId) && !['resolved','closed'].includes(item.status)).length }, adapters:actor && ['robot_user','auditor'].includes(actor.role) ? [] : [...state.adapters.values()].map((adapter) => ({ provider:adapter.provider,status:adapter.status,lastSyncStatus:adapter.lastSyncStatus,lastSyncAt:adapter.lastSyncAt,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncWarnings:adapter.lastSyncWarnings || 0 })),email:actor && ['platform_admin','data_admin','support_admin'].includes(actor.role) ? { configuration:email.configuration,counts:email.counts } : null,sms:actor && ['platform_admin','data_admin','support_admin'].includes(actor.role) ? { configuration:sms.configuration,counts:sms.counts } : null };
 }
 
 function metricsAuthorized(req) {
@@ -1464,6 +1576,7 @@ function route(method, pathname, pattern) {
 }
 
 async function handle(req, res) {
+  validateProductionRequest(req);
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const path = url.pathname;
   if (req.method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: 'altegro-prototype', startedAt, now: timestamp() });
@@ -1500,13 +1613,22 @@ async function handle(req, res) {
   const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
 
   if (req.method === 'GET' && path === '/api/v1/operations/summary') return send(res, 200, { data: operationsSummary(actor) });
+  if (req.method === 'GET' && path === '/api/v1/tracking/live') return send(res,200,{ data:fleetTrackingSnapshot(actor) });
   if (req.method === 'GET' && path === '/api/v1/notifications') {
-    let data=operationalNotifications(actor); const q=String(url.searchParams.get('q') || '').trim().toLowerCase(); const severity=url.searchParams.get('severity'); const status=url.searchParams.get('status');
+    let data=notificationsWithReadState(actor); const q=String(url.searchParams.get('q') || '').trim().toLowerCase(); const severity=url.searchParams.get('severity'); const status=url.searchParams.get('status');
     if (q) data=data.filter((item) => [item.title,item.message,item.type,item.workflow?.technicianName].some((value) => String(value || '').toLowerCase().includes(q)));
     if (severity) data=data.filter((item) => item.severity === severity);
     if (status) data=data.filter((item) => item.workflow.status === status);
-    const activeCount=data.filter((item) => item.workflow.status !== 'resolved' && !(item.workflow.status === 'snoozed' && Date.parse(item.workflow.snoozeUntil) > Date.now())).length;
-    return send(res, 200, { data, count:data.length,activeCount,generatedAt:timestamp() });
+    const activeCount=data.filter(activeNotification).length; const unreadCount=data.filter((item) => activeNotification(item) && !item.read).length;
+    return send(res, 200, { data, count:data.length,activeCount,unreadCount,generatedAt:timestamp() });
+  }
+  if (req.method === 'POST' && path === '/api/v1/notifications/read') {
+    const notifications=notificationsWithReadState(actor); const requestedIds=Array.isArray(body.notificationIds) ? new Set(body.notificationIds.map(String)) : null; const visibleIds=new Set(notifications.map((item) => item.id)); const readAt=timestamp(); let readCount=0;
+    if (requestedIds && [...requestedIds].some((id) => !visibleIds.has(id))) throw httpError(400,'One or more notifications are not visible');
+    for (const notification of notifications) { if (requestedIds && !requestedIds.has(notification.id)) continue; state.notificationReads.set(notificationReadKey(actor,notification.id),{ userId:actor.id,notificationId:notification.id,readAt }); readCount += 1; }
+    const unreadCount=notifications.filter((item) => activeNotification(item) && !state.notificationReads.has(notificationReadKey(actor,item.id))).length;
+    recordAudit(actor,'notification.read','user',actor.id,'success',{ readCount });
+    return send(res,200,{ readCount,unreadCount,readAt });
   }
   const notificationUpdate=route(req.method,path,/^\/api\/v1\/notifications\/([^/]+)$/);
   if (notificationUpdate && req.method === 'PATCH') {
@@ -1550,11 +1672,18 @@ async function handle(req, res) {
     } else throw httpError(400, 'Qualification kind must be skill or certificate');
     technician.updatedAt = timestamp(); appendOutbox('technician.qualification.updated','technician',technician.id,{ kind:body.kind, code }); recordAudit(actor,'technician.qualification.add','technician',technician.id,'success',{ kind:body.kind, code }); return send(res,201,{ data:qualification, technician });
   }
+  const technicianAvailability=route(req.method,path,/^\/api\/v1\/technicians\/([^/]+)\/availability$/);
+  if (technicianAvailability && req.method === 'PATCH') {
+    if (!canManageWorkforce(actor)) throw httpError(403,'Workforce administration permission required'); const technician=state.technicians.get(technicianAvailability.id); if (!technician || technician.tenantId !== actor.tenantId) throw httpError(404,'Technician not found'); const status=String(body.status || 'available'); if (!['available','busy','off_duty','on_leave'].includes(status)) throw httpError(400,'Invalid availability status'); const workingDays=Array.isArray(body.workingDays) ? [...new Set(body.workingDays.filter((day) => ['Mon.','Tue.','Wed.','Thur.','Fri.','Sat.','Sun.'].includes(day)))] : [];
+    const availableFrom=body.availableFrom ? new Date(body.availableFrom) : null; const availableUntil=body.availableUntil ? new Date(body.availableUntil) : null; if (availableFrom && Number.isNaN(availableFrom.getTime()) || availableUntil && Number.isNaN(availableUntil.getTime())) throw httpError(400,'Availability dates must be valid'); if (availableFrom && availableUntil && availableUntil <= availableFrom) throw httpError(400,'Available-until must be after available-from');
+    technician.availability={ status,availableFrom:availableFrom?.toISOString() || null,availableUntil:availableUntil?.toISOString() || null,workingDays:workingDays.length ? workingDays : ['Mon.','Tue.','Wed.','Thur.','Fri.'],dailyCapacityHours:Math.max(1,Math.min(24,Number(body.dailyCapacityHours || 8))),timezone:String(body.timezone || 'Europe/Berlin').slice(0,80),notes:String(body.notes || '').trim().slice(0,1000) }; technician.updatedAt=timestamp(); appendOutbox('technician.availability.updated','technician',technician.id,technician.availability); recordAudit(actor,'technician.availability.update','technician',technician.id,'success',{ status }); return send(res,200,{ data:{ ...clone(technician),availability:technicianAvailabilityView(technician) } });
+  }
   if (req.method === 'POST' && path === '/api/v1/robot-assignments') {
     if (!canManageWorkforce(actor)) throw httpError(403, 'Workforce administration permission required');
     const robot = state.robots.get(body.robotId); if (!robot || !visibleToActor(actor,robot)) throw httpError(404,'Robot not found');
     const technician = state.technicians.get(body.technicianId); if (!technician || technician.tenantId !== actor.tenantId || technician.status !== 'active') throw httpError(404,'Technician not found');
     const eligibility = technicianEligibility(technician,robot); if (!eligibility.eligible) throw httpError(409,'Technician is missing required qualifications',{ missingSkills:eligibility.missingSkills, missingCertificates:eligibility.missingCertificates });
+    const availability=technicianAvailabilityView(technician); if (['off_duty','on_leave'].includes(availability.status)) throw httpError(409,`Technician is ${availability.status.replaceAll('_',' ')} and cannot receive a new assignment`);
     const existing = [...state.robotAssignments.values()].find((item) => item.robotId === robot.id && item.technicianId === technician.id && item.status === 'active'); if (existing) return send(res,200,{ data:existing, eligibility, idempotent:true });
     const assignment = { id:ids(), tenantId:actor.tenantId, robotId:robot.id, technicianId:technician.id, status:'active', notes:String(body.notes || '').slice(0,1000), assignedBy:actor.id, assignedAt:timestamp(), endedAt:null };
     state.robotAssignments.set(assignment.id,assignment); appendPassportEntry(robot.id,{ type:'technician_assigned',source:'altegro',data:{ assignmentId:assignment.id,technicianId:technician.id,technicianName:technician.name,eligibilityStatus:eligibility.status } },actor); appendOutbox('robot.technician.assigned','robot',robot.id,{ assignmentId:assignment.id,technicianId:technician.id }); recordAudit(actor,'technician.assign','robot',robot.id,'success',{ assignmentId:assignment.id,technicianId:technician.id }); return send(res,201,{ data:assignment, eligibility });
@@ -1625,6 +1754,12 @@ async function handle(req, res) {
   if (req.method === 'GET' && path === '/api/v1/email-notifications') {
     if (!['platform_admin','data_admin','support_admin'].includes(actor.role)) throw httpError(403,'Email notification administration permission required');
     return send(res,200,{ data:emailDeliverySummary() });
+  }
+  if (req.method === 'GET' && path === '/api/v1/sms-notifications') {
+    if (!['platform_admin','data_admin','support_admin'].includes(actor.role)) throw httpError(403,'SMS notification administration permission required'); return send(res,200,{ data:smsDeliverySummary() });
+  }
+  if (req.method === 'POST' && path === '/api/v1/sms-notifications/test') {
+    if (!['platform_admin','support_admin'].includes(actor.role)) throw httpError(403,'SMS notification test permission required'); const config=smsAlertConfiguration(); if (!config.enabled || !config.configured) throw httpError(400,config.configurationError || 'SMS alerts are disabled'); const delivery=createSmsDelivery({ notificationKey:`test:${ids()}`,type:'test',severity:'info',title:'Altegro SMS notification test',message:`Test requested by ${actor.name}.`,occurredAt:timestamp() }); try { await deliverSmsNotification(delivery); } catch(error) { throw httpError(503,`Test SMS delivery failed: ${error.message}`); } recordAudit(actor,'sms_notification.test','tenant',actor.tenantId,'success',{ deliveryId:delivery.id,recipientCount:delivery.recipients.length }); return send(res,200,{ data:{ id:delivery.id,status:delivery.status,sentAt:delivery.sentAt,recipientCount:delivery.recipients.length } });
   }
   if (req.method === 'POST' && path === '/api/v1/email-notifications/test') {
     if (!['platform_admin','support_admin'].includes(actor.role)) throw httpError(403,'Email notification test permission required');
@@ -1988,7 +2123,7 @@ const server = http.createServer(async (req, res) => {
 
 const providerPollTimers=[];
 let emailQueueTimer = null;
-function startEmailDeliveryWorker() { if (!emailAlertConfiguration().enabled) return; processEmailQueue(); emailQueueTimer=setInterval(processEmailQueue,60000); emailQueueTimer.unref?.(); }
+function startEmailDeliveryWorker() { if (!emailAlertConfiguration().enabled && !smsAlertConfiguration().enabled) return; processEmailQueue(); const processAlerts=async () => { await processEmailQueue(); for (const delivery of state.smsDeliveries.filter((item) => ['pending','failed'].includes(item.status) && item.attempts < 3 && (!item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= Date.now())).slice(0,20)) await deliverSmsNotification(delivery).catch(() => {}); }; processAlerts(); emailQueueTimer=setInterval(processAlerts,60000); emailQueueTimer.unref?.(); }
 let operationsAutomationTimer=null;
 function startOperationsAutomationWorker() { operationsAutomationTimer=setInterval(() => { for (const tenantId of state.tenants.keys()) evaluateAlertEscalations(tenantId); },60000); operationsAutomationTimer.unref?.(); }
 let syncWorkerTimer=null; let syncWorkerRunning=false;

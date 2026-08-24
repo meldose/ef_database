@@ -3,6 +3,12 @@ services:
     environment:
       NODE_ENV: production
       COOKIE_SECURE: "true"
+      ALTEGRO_ENFORCE_HTTPS: "true"
+      ALTEGRO_TRUST_PROXY: "true"
+      ALTEGRO_ALLOWED_HOSTS: ${ALTEGRO_ALLOWED_HOSTS:-altegro.example.com}
+      ALTEGRO_ALLOWED_ORIGINS: ${ALTEGRO_ALLOWED_ORIGINS:-https://altegro.example.com}
+      ALTEGRO_HSTS_ENABLED: "true"
+      ALTEGRO_HSTS_MAX_AGE: "31536000"
       ALTEGRO_REQUIRE_MANAGED_SECRETS: "true"
       PGPASSWORD: ""
       PGPASSWORD_FILE: /run/secrets/altegro_postgres_password

@@ -9,6 +9,7 @@
   <body>
     <a class="skip-link" href="#mainContent" data-i18n="skip">Skip to operations content</a>
     <label class="language-switch" for="languageSelect"><span data-i18n="language">Language</span><select id="languageSelect" aria-label="Language"><option value="en">English</option><option value="de">Deutsch</option></select></label>
+    <button class="accessibility-button" id="accessibilityButton" type="button" aria-haspopup="dialog" aria-controls="accessibilityDialog">Accessibility</button>
     <section id="loginScreen" class="login-screen">
       <div class="login-card">
         <div class="login-brand"><span class="brand-mark">A</span><div><strong>altegro</strong><small>robot operations platform</small></div></div>
@@ -42,6 +43,7 @@
     <main class="shell" id="mainContent" tabindex="-1">
       <nav class="dashboard-tabs" id="dashboardTabs" role="tablist" aria-label="Dashboard sections">
         <button id="overviewTab" type="button" role="tab" aria-selected="true" aria-controls="overviewView" data-dashboard-tab="overview" data-i18n="overview">Overview</button>
+        <button id="trackingTab" type="button" role="tab" aria-selected="false" aria-controls="trackingView" data-dashboard-tab="tracking">Live Tracking</button>
         <button id="robotsTab" type="button" role="tab" aria-selected="false" aria-controls="robotsView" data-dashboard-tab="robots" data-i18n="robots">Robots</button>
         <button id="operationsTab" type="button" role="tab" aria-selected="false" aria-controls="operationsView" data-dashboard-tab="operations" data-i18n="eventsService">Events &amp; Service</button>
         <button id="autoxingTab" type="button" role="tab" aria-selected="false" aria-controls="autoxingWorkspace" data-dashboard-tab="autoxing">AutoXing</button>
@@ -89,6 +91,19 @@
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="offline"><span class="metric-label">Offline now</span><strong class="amber" id="metricOffline">—</strong><small>Filter offline robots</small></article>
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="errors"><span class="metric-label">Error events</span><strong id="metricErrors">—</strong><small>Filter technical errors</small></article>
         <article class="metric-card metric-action" role="button" tabindex="0" data-metric-action="maintenance"><span class="metric-label">Maintenance due</span><strong id="metricMaintenanceDue">—</strong><small>Filter maintenance alerts</small></article>
+      </section>
+
+      <section class="lower-grid" id="trackingView" data-dashboard-view="tracking" role="tabpanel" aria-labelledby="trackingTab">
+        <article class="panel tracking-panel">
+          <div class="panel-header"><div><p class="eyebrow">Unified telemetry</p><h2>Real-time robot tracking</h2></div><div class="panel-header-actions"><span class="auto-refresh-status" id="trackingRefreshStatus" role="status" aria-live="polite">Connecting…</span><button class="text-button" id="refreshTracking" type="button">Refresh</button></div></div>
+          <div id="trackingMetrics" class="tracking-metrics"><div class="empty">Loading fleet positions…</div></div>
+          <div class="tracking-toolbar"><label>Robot<select id="trackingRobotFilter"><option value="">All visible robots</option></select></label><label>Connection<select id="trackingStatusFilter"><option value="">Any status</option><option value="online">Online</option><option value="offline">Offline</option><option value="stale">Stale position</option></select></label></div>
+          <div id="trackingCanvas" class="tracking-canvas" role="img" aria-label="Relative robot position plot"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-header"><div><p class="eyebrow">Location feed</p><h2>Current robot positions</h2></div></div>
+          <div id="trackingFleetList" class="tracking-list" aria-live="polite"><div class="empty">Loading live tracking…</div></div>
+        </article>
       </section>
 
       <section class="workspace-grid" id="robotsView" data-dashboard-view="robots" role="tabpanel" aria-labelledby="robotsTab">
@@ -245,6 +260,9 @@
           <div id="emailNotificationStatus" class="record-list"><div class="empty">Loading email notification status…</div></div>
         </article>
       </section>
+      <section class="lower-grid" id="smsNotificationsSection" data-dashboard-view="admin">
+        <article class="panel audit-panel"><div class="panel-header"><div><p class="eyebrow">Urgent communications</p><h2>SMS alert notifications</h2></div><div class="panel-header-actions"><button class="text-button" id="testSmsNotification" type="button">Send test SMS</button><button class="text-button" id="refreshSmsNotifications" type="button">Refresh</button></div></div><div id="smsNotificationStatus" class="record-list"><div class="empty">Loading SMS notification status…</div></div></article>
+      </section>
       <section class="lower-grid" id="workforceSection" data-dashboard-view="workforce" role="tabpanel" aria-labelledby="workforceTab">
         <article class="panel audit-panel">
           <div class="panel-header"><div><p class="eyebrow">Skills and certificate gate</p><h2>Technician qualification matrix</h2></div><button class="button primary" id="newTechnicianButton" type="button">＋ Add technician</button></div>
@@ -252,12 +270,15 @@
           <div id="workforceSummary" class="workforce-summary"></div>
           <div id="workforceMatrixList" class="workforce-list"><div class="empty">Loading technician eligibility…</div></div>
         </article>
+        <article class="panel availability-panel"><div class="panel-header"><div><p class="eyebrow">Capacity planning</p><h2>Technician availability</h2></div></div><p class="panel-copy">Plan shifts, leave and assignment capacity before dispatching qualified service staff.</p><div id="technicianAvailabilityList" class="availability-list"><div class="empty">Loading availability…</div></div></article>
       </section>
       <section class="lower-grid" id="reportsView" data-dashboard-view="reports" role="tabpanel" aria-labelledby="reportsTab">
         <article class="panel audit-panel">
           <div class="panel-header"><div><p class="eyebrow">Operational intelligence</p><h2>Fleet performance report</h2></div><div class="panel-header-actions"><label class="compact-label">Period<select id="reportPeriod"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></select></label><button class="text-button" id="refreshReports" type="button">Refresh</button></div></div>
           <div id="reportMetrics" class="report-metrics"><div class="empty">Loading operational report…</div></div>
+          <div id="advancedAnalytics" class="advanced-analytics" aria-live="polite"></div>
           <div id="reportTrend" class="report-trend" aria-label="Daily operational report"></div>
+          <p id="reportTrendSummary" class="sr-only"></p>
           <div class="report-actions"><button class="button secondary" id="exportReportCsv" type="button">Export CSV</button><button class="button secondary" id="exportReportJson" type="button">Export JSON</button><small>Service-cost reporting will activate when labour and parts pricing is recorded.</small></div>
           <div class="pdf-report-actions"><label><span data-i18n="robotReport">Robot report</span><select id="pdfReportRobot"><option value="">Select a robot</option></select></label><button class="button secondary" id="exportMaintenancePdf" type="button" data-i18n="maintenancePdf">Maintenance PDF</button><button class="button secondary" id="exportCompliancePdf" type="button" data-i18n="compliancePdf">Compliance PDF</button></div>
         </article>
@@ -352,6 +373,7 @@
         <div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Create technician</button></div>
       </form>
     </dialog>
+    <dialog id="technicianAvailabilityDialog" aria-labelledby="technicianAvailabilityTitle"><form method="dialog" id="technicianAvailabilityForm"><div class="dialog-header"><div><p class="eyebrow">Capacity planning</p><h2 id="technicianAvailabilityTitle">Update technician availability</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close availability planner">×</button></div><input id="availabilityTechnicianId" type="hidden" /><label>Status<select id="availabilityStatus"><option value="available">Available</option><option value="busy">Busy</option><option value="off_duty">Off duty</option><option value="on_leave">On leave</option></select></label><div class="form-grid"><label>Available from<input id="availabilityFrom" type="datetime-local" /></label><label>Available until<input id="availabilityUntil" type="datetime-local" /></label></div><label>Daily capacity hours<input id="availabilityCapacity" type="number" min="1" max="24" value="8" required /></label><fieldset class="day-picker"><legend>Working days</legend><label><input type="checkbox" name="availabilityDay" value="Mon." /> Mon.</label><label><input type="checkbox" name="availabilityDay" value="Tue." /> Tue.</label><label><input type="checkbox" name="availabilityDay" value="Wed." /> Wed.</label><label><input type="checkbox" name="availabilityDay" value="Thur." /> Thur.</label><label><input type="checkbox" name="availabilityDay" value="Fri." /> Fri.</label><label><input type="checkbox" name="availabilityDay" value="Sat." /> Sat.</label><label><input type="checkbox" name="availabilityDay" value="Sun." /> Sun.</label></fieldset><label>Planning note<textarea id="availabilityNotes" rows="3" maxlength="1000" placeholder="Shift, leave, or dispatch note"></textarea></label><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Save availability</button></div></form></dialog>
     <dialog id="qualificationDialog">
       <form method="dialog" id="qualificationForm">
         <div class="dialog-header"><div><p class="eyebrow">Verified capability</p><h2>Add qualification</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close">×</button></div>
@@ -372,6 +394,7 @@
         <div class="dialog-actions"><button class="button primary" value="default">Done</button></div>
       </form>
     </dialog>
+    <dialog id="accessibilityDialog" aria-labelledby="accessibilityTitle"><form method="dialog" id="accessibilityForm"><div class="dialog-header"><div><p class="eyebrow">Display preferences</p><h2 id="accessibilityTitle">Accessibility settings</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close accessibility settings">×</button></div><label>Text size<select id="accessibilityTextSize"><option value="normal">Normal</option><option value="large">Large</option><option value="extra-large">Extra large</option></select></label><label class="checkbox-label"><input id="accessibilityContrast" type="checkbox" /> High contrast</label><label class="checkbox-label"><input id="accessibilityMotion" type="checkbox" /> Reduce motion</label><div class="dialog-actions"><button class="button secondary" id="resetAccessibility" type="button">Reset</button><button class="button primary" value="default">Apply</button></div></form></dialog>
     <dialog id="notificationWorkflowDialog" class="detail-dialog" aria-labelledby="notificationWorkflowTitle"><form method="dialog" id="notificationWorkflowForm"><div class="dialog-header"><div><p class="eyebrow">Alert workflow</p><h2 id="notificationWorkflowTitle">Manage notification</h2></div><button class="close-button" value="cancel" formnovalidate aria-label="Close notification workflow">×</button></div><p class="dialog-copy" id="notificationWorkflowDescription"></p><label>Status<select id="notificationWorkflowStatus"><option value="acknowledged">Acknowledged</option><option value="snoozed">Snoozed</option><option value="resolved">Resolved</option><option value="open">Open</option></select></label><label id="notificationSnoozeField" class="hidden">Snooze until<input id="notificationSnoozeUntil" type="datetime-local" /></label><label>Assign technician<select id="notificationTechnician"><option value="">Not assigned</option></select></label><label>Work note<textarea id="notificationWorkflowNote" rows="4" maxlength="2000" placeholder="Containment, assignment, or resolution note"></textarea></label><div class="dialog-actions"><button class="button secondary" value="cancel" formnovalidate>Cancel</button><button class="button primary" value="default">Save workflow</button></div></form></dialog>
     <dialog id="taskDetailDialog" class="detail-dialog" aria-labelledby="taskDetailTitle">
       <form method="dialog"><div class="dialog-header"><div><p class="eyebrow">AutoXing task</p><h2 id="taskDetailTitle">Task details</h2></div><button class="close-button" value="cancel" aria-label="Close task details">×</button></div><div id="taskDetailContent"><div class="empty">Loading task details…</div></div><div class="dialog-actions"><button class="button primary" value="default">Done</button></div></form>

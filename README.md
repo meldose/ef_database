@@ -235,6 +235,10 @@ docker compose -f compose.yaml -f compose.production.yaml -f compose.email.yaml 
 
 Email delivery history and retry state are persisted. Failed messages retry every minute, up to three attempts. A successful provider synchronization does not generate email. The `capture` transport exists only for automated tests and is rejected when `NODE_ENV=production`.
 
+## SMS alert notifications
+
+Urgent notifications can also be sent through an external SMS provider webhook. Configure `SMS_ALERTS_ENABLED=true`, E.164 numbers in `SMS_ALERT_RECIPIENTS`, an HTTPS `SMS_ALERT_WEBHOOK_URL`, and optionally `SMS_ALERT_WEBHOOK_TOKEN_FILE`. `SMS_ALERT_MIN_SEVERITY` defaults to `critical`, and cooldown/retry behavior prevents repeated delivery. Platform and support administrators can send a test message and inspect delivery status in **Administration → SMS alert notifications**. The `capture` transport is test-only and rejected in production.
+
 For real customer/site assignment, configure a JSON business mapping before the pilot. The keys can be an AutoXing business ID or business name:
 
 ```bash
@@ -256,7 +260,11 @@ CenoBots has its own dashboard tab with fleet totals, online/offline and chargin
 
 The encrypted CenoBots webhook receiver is `POST /api/v1/webhooks/cenobots`. Configure the separate `CENOBOTS_WEBHOOK_SECRET`, publish the callback over HTTPS, and verify it in the CZ Robots company-administrator portal. Error, task, maintenance, and door-assistance messages are freshness-checked, AES-GCM authenticated, deduplicated, persisted, and added to the matching Robot Passport. The CenoBots workspace displays webhook readiness and receipt activity.
 
-The browser includes a three-step robot onboarding wizard, searchable and actionable notification workflows, role-focused landing dashboards, English/German navigation, and operational reports with JSON/CSV export. Robot-specific maintenance and compliance reports download as PDFs. The Support tab lets customer and robot accounts open tickets, follow the conversation, and add updates while service staff manage ticket status. Labour and parts pricing remains explicitly unavailable until cost fields are captured.
+The browser includes a three-step robot onboarding wizard, searchable and actionable notification workflows, role-focused landing dashboards, English/German navigation, and operational reports with JSON/CSV export. The **Live Tracking** tab refreshes the unified, tenant-scoped AutoXing and CenoBots position feed every ten seconds, marks stale data, plots relative provider coordinates, and shows connection, movement, battery and task state. Robot-specific maintenance and compliance reports download as PDFs. The Support tab lets customer and robot accounts open tickets, follow the conversation, and add updates while service staff manage ticket status. Labour and parts pricing remains explicitly unavailable until cost fields are captured.
+
+The fleet report now includes a composite health score, attention and low-battery counts, provider distribution, service-case closure rate, average resolution time, incidents per robot, and technician availability. The technician workspace includes availability status, working days, shift windows, daily capacity and estimated assignment load. Technicians on leave or off duty cannot receive new assignments.
+
+Accessibility preferences are stored in the browser and provide larger text, extra-large text, high contrast and reduced motion. The interface also includes a skip link, visible focus indication, keyboard tab navigation, live-region updates, accessible chart summaries and responsive table alternatives.
 
 Run `npm run test:e2e` for the automated browser-facing customer journey and performance budgets. It verifies login, static assets, support-ticket creation/replies, PDF download, concurrent API responses, a 1.5-second p95 response budget, and JavaScript/CSS size budgets. The same check is included in `npm test`.
 
@@ -309,6 +317,7 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - Synchronization progress, elapsed time, partial/error feedback, and retry controls
 - Automatic expired-session handling and duplicate robot validation
 - Login throttling, upload allow-listing, request-size limits, safe public errors, and baseline HTTP security headers
+- Production HTTPS enforcement, trusted-proxy handling, Host/Origin allow-lists, HSTS, cross-origin isolation headers, and mounted-secret validation
 - Keyboard-accessible metric filters and responsive mobile layouts
 - Stable JSON error responses
 - PostgreSQL persistence with migrations and queryable core projections
@@ -317,6 +326,7 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - Salted scrypt password hashes and hashed server-side session tokens
 - HttpOnly SameSite session cookies with optional HTTPS-only mode
 - Role-scoped operational notifications and SMTP email alerts
+- Critical SMS webhook alerts with delivery history, cooldown and retries
 - Container build, health check, persistent volume, and graceful shutdown
 - Fleet-level AutoXing resource explorer and role-scoped task history
 - Platform robot-account administration without password disclosure
@@ -326,7 +336,10 @@ Attempting a robot command returns `403`; Phase 1 command capabilities are inten
 - English/German language switch, customer support portal, and PDF maintenance/compliance exports
 - Safety-gated CenoBots schedules and mission controls with exact-target confirmation
 - Automated end-to-end workflow and performance budgets
+- Unified ten-second fleet tracking and advanced operational analytics
 - Technician skill/certificate matching with enforced robot assignment eligibility
+- Technician shift, leave, availability and capacity planning
+- Remembered text-size, contrast and reduced-motion accessibility controls
 - Workforce assignment evidence in Robot Passports, audit history, notifications, and Outbox
 
 ## Container deployment
@@ -337,7 +350,7 @@ For a local container deployment:
 docker compose up --build
 ```
 
-The Compose configuration mounts a named volume for `/app/data`. For an internet-facing deployment, terminate TLS at a reverse proxy, set `COOKIE_SECURE=true`, inject secrets through the deployment platform, restrict network access, and replace the prototype identity system and JSON store.
+The Compose configuration mounts a named volume for `/app/data`. For an internet-facing deployment, terminate TLS at a reverse proxy and set `ALTEGRO_ALLOWED_HOSTS` and `ALTEGRO_ALLOWED_ORIGINS` to the real public domain before applying `compose.production.yaml`. Production startup requires secure cookies, mounted secrets, PostgreSQL, object storage, Host/Origin allow-lists and HTTPS forwarding. Restrict network access and replace the prototype identity system before public launch.
 
 ## Intentionally not production-ready
 

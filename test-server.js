@@ -21,6 +21,10 @@ process.env.EMAIL_ALERT_TRANSPORT = 'capture';
 process.env.EMAIL_ALERT_FROM = 'altegro-alerts@example.test';
 process.env.EMAIL_ALERT_RECIPIENTS = 'operations@example.test,service@example.test';
 process.env.EMAIL_ALERT_MIN_SEVERITY = 'error';
+process.env.SMS_ALERTS_ENABLED = 'true';
+process.env.SMS_ALERT_TRANSPORT = 'capture';
+process.env.SMS_ALERT_RECIPIENTS = '+491701234567,+491709876543';
+process.env.SMS_ALERT_MIN_SEVERITY = 'critical';
 const { server, state, DATA_FILE } = require('./server');
 
 const port = 3107;
@@ -58,7 +62,11 @@ async function startFakeSmtpServer() {
     assert.equal(result.status, 200);
     assert.equal(result.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(result.headers.get('x-frame-options'), 'DENY');
+    assert.equal(result.headers.get('cross-origin-opener-policy'), 'same-origin');
+    assert.equal(result.headers.get('x-permitted-cross-domain-policies'), 'none');
     assert.match(result.headers.get('content-security-policy'), /frame-ancestors 'none'/);
+    process.env.ALTEGRO_HSTS_ENABLED='true'; const hstsResponse=await fetch(`http://localhost:${port}/health`); assert.match(hstsResponse.headers.get('strict-transport-security'),/max-age=/); delete process.env.ALTEGRO_HSTS_ENABLED;
+    process.env.ALTEGRO_ALLOWED_HOSTS='localhost'; process.env.ALTEGRO_ALLOWED_ORIGINS='https://trusted.example'; let originResponse=await fetch(`http://localhost:${port}/api/v1/auth/logout`,{ method:'POST',headers:{ origin:'https://evil.example' } }); assert.equal(originResponse.status,403); originResponse=await fetch(`http://localhost:${port}/api/v1/auth/logout`,{ method:'POST',headers:{ origin:'https://trusted.example' } }); assert.equal(originResponse.status,200); delete process.env.ALTEGRO_ALLOWED_HOSTS; delete process.env.ALTEGRO_ALLOWED_ORIGINS;
     const readyResponse = await fetch(`http://localhost:${port}/ready`);
     assert.equal(readyResponse.status,200);
     assert.equal((await readyResponse.json()).ready,true);
@@ -68,8 +76,8 @@ async function startFakeSmtpServer() {
     const frontendResponse = await fetch(`http://localhost:${port}/`);
     assert.equal(frontendResponse.status, 200);
     const frontendHtml = await frontendResponse.text();
-    for (const controlId of ['dashboardTabs', 'roleDashboard', 'exportRobotsCsv', 'serviceTechniciansButton', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'cenoBotsLiveFleet', 'cenoBotsDiagnostics', 'cenoBotsControlSection', 'cenoBotsCommandDialog', 'cenoBotsScheduleDialog', 'reportMetrics', 'reportTrend', 'pdfReportRobot', 'exportMaintenancePdf', 'exportCompliancePdf', 'supportView', 'supportTicketsList', 'supportTicketDialog', 'supportReplyDialog', 'languageSelect', 'notificationSearch', 'notificationWorkflowDialog', 'onboardingProvider', 'onboardingExternalId', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'compatibilityForm', 'workforceSection', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
-    for (const view of ['overview', 'robots', 'operations', 'autoxing', 'cenobots', 'workforce', 'reports', 'support', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
+    for (const controlId of ['dashboardTabs', 'roleDashboard', 'exportRobotsCsv', 'serviceTechniciansButton', 'trackingView', 'trackingMetrics', 'trackingCanvas', 'trackingFleetList', 'accessibilityButton', 'accessibilityDialog', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'cenoBotsLiveFleet', 'cenoBotsDiagnostics', 'cenoBotsControlSection', 'cenoBotsCommandDialog', 'cenoBotsScheduleDialog', 'reportMetrics', 'advancedAnalytics', 'reportTrend', 'pdfReportRobot', 'exportMaintenancePdf', 'exportCompliancePdf', 'supportView', 'supportTicketsList', 'supportTicketDialog', 'supportReplyDialog', 'languageSelect', 'notificationSearch', 'notificationWorkflowDialog', 'onboardingProvider', 'onboardingExternalId', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'smsNotificationsSection', 'smsNotificationStatus', 'testSmsNotification', 'compatibilityForm', 'workforceSection', 'technicianAvailabilityList', 'technicianAvailabilityDialog', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
+    for (const view of ['overview', 'tracking', 'robots', 'operations', 'autoxing', 'cenobots', 'workforce', 'reports', 'support', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
     assert.match(frontendHtml,/data-i18n="support"/);
 
     const webhookHeaders={ 'content-type':'application/json','x-webhook-id':'trace-test','x-webhook-timestamp':String(Math.floor(Date.now()/1000)) };
@@ -109,6 +117,8 @@ async function startFakeSmtpServer() {
     assert.equal(result.status,200);
     assert.equal(result.body.data.status,'sent');
     assert.equal(result.body.data.recipientCount,2);
+    result = await request('/api/v1/sms-notifications'); assert.equal(result.status,200); assert.equal(result.body.data.configuration.enabled,true); assert.equal(result.body.data.configuration.transport,'capture'); assert.equal(result.body.data.configuration.recipientCount,2);
+    result = await request('/api/v1/sms-notifications/test',{ method:'POST',body:'{}' }); assert.equal(result.status,200); assert.equal(result.body.data.status,'sent'); assert.equal(result.body.data.recipientCount,2);
     const fakeSmtp=await startFakeSmtpServer(); process.env.EMAIL_ALERT_TRANSPORT='smtp'; process.env.EMAIL_SMTP_HOST='127.0.0.1'; process.env.EMAIL_SMTP_PORT=String(fakeSmtp.port); process.env.EMAIL_SMTP_SECURE='false'; delete process.env.EMAIL_SMTP_USERNAME; delete process.env.EMAIL_SMTP_PASSWORD; delete process.env.EMAIL_SMTP_PASSWORD_FILE;
     result=await request('/api/v1/email-notifications/test',{ method:'POST',body:'{}' });
     assert.equal(result.status,200); assert.equal(result.body.data.status,'sent'); assert.equal(fakeSmtp.messages.length,1); assert.match(fakeSmtp.messages[0],/Test requested by Demo Platform Admin/); await new Promise((resolve) => fakeSmtp.server.close(resolve)); process.env.EMAIL_ALERT_TRANSPORT='capture';
@@ -124,6 +134,8 @@ async function startFakeSmtpServer() {
     assert.equal(result.body.facets.total, 2);
     const robotId = result.body.data[0].id;
     const cenobotsRobotId = result.body.data[1].id;
+    state.robots.get(robotId).position={ x:12.5,y:-3.2,yaw:1.2 }; state.robots.get(robotId).speed=0.4; state.robots.get(cenobotsRobotId).position={ x:4.1,y:8.7,yaw:-0.3 };
+    result=await request('/api/v1/tracking/live'); assert.equal(result.status,200); assert.equal(result.body.data.summary.total,2); assert.equal(result.body.data.summary.located,2); assert.ok(result.body.data.fleet.find((robot) => robot.id === robotId).position);
 
     result = await request('/api/v1/cenobots/operations');
     assert.equal(result.status, 200);
@@ -155,6 +167,8 @@ async function startFakeSmtpServer() {
     for (const name of ['Midhun Eldose', 'Ahmed Galai', 'Michell Blawat', 'Elvis Heil']) {
       assert.ok(result.body.data.technicians.some((technician) => technician.name === name && technician.jobTitle === 'Service Technician'));
     }
+    result=await request('/api/v1/technicians/technician-lena/availability',{ method:'PATCH',body:JSON.stringify({ status:'busy',workingDays:['Mon.','Tue.','Wed.','Thur.'],dailyCapacityHours:6,notes:'Reserved for field service.' }) }); assert.equal(result.status,200); assert.equal(result.body.data.availability.status,'busy'); assert.equal(result.body.data.availability.dailyCapacityHours,6);
+    result=await request(`/api/v1/workforce/matrix?robotId=${robotId}`); assert.equal(result.body.data.technicians.find((technician) => technician.id === 'technician-lena').availability.status,'busy');
     const lenaRow = result.body.data.rows.find((row) => row.technician.id === 'technician-lena');
     const noraRow = result.body.data.rows.find((row) => row.technician.id === 'technician-nora');
     assert.equal(lenaRow.eligibility.eligible, true);
@@ -199,6 +213,7 @@ async function startFakeSmtpServer() {
     assert.equal(result.status, 200);
     assert.equal(result.body.count, 1);
     assert.equal(result.body.data[0].serialNumber, 'AX-DEMO-001');
+    result=await requestAs(robotAxSessionToken,'/api/v1/tracking/live'); assert.equal(result.status,200); assert.equal(result.body.data.summary.total,1); assert.equal(result.body.data.fleet[0].serialNumber,'AX-DEMO-001');
 
     result = await requestAs(robotAxSessionToken, `/api/v1/robots/${cenobotsRobotId}/passport`);
     assert.equal(result.status, 404);
@@ -376,7 +391,7 @@ async function startFakeSmtpServer() {
     assert.equal(result.body.data.deployments.length, 1);
     assert.equal(result.body.data.documents[0].attachment.contentBase64, undefined);
 
-    result = await request('/api/v1/incidents', { method: 'POST', body: JSON.stringify({ robotId, title: 'Robot stopped during operation', description: 'Operator secured the affected area.', severity: 'error', assignedTo: 'Robot Care Berlin' }) });
+    result = await request('/api/v1/incidents', { method: 'POST', body: JSON.stringify({ robotId, title: 'Robot stopped during operation', description: 'Operator secured the affected area.', severity: 'critical', assignedTo: 'Robot Care Berlin' }) });
     assert.equal(result.status, 201);
     assert.equal(result.body.data.serviceCase.status, 'open');
     await new Promise((resolve) => setImmediate(resolve));
@@ -384,6 +399,7 @@ async function startFakeSmtpServer() {
     assert.ok(incidentEmail);
     assert.equal(incidentEmail.status,'sent');
     assert.equal(incidentEmail.robotSerialNumber,'AX-DEMO-001');
+    const incidentSms=state.smsDeliveries.find((delivery) => delivery.type === 'technical_event' && delivery.title === 'Robot stopped during operation'); assert.ok(incidentSms); assert.equal(incidentSms.status,'sent'); assert.equal(incidentSms.robotSerialNumber,'AX-DEMO-001');
     const incidentServiceCaseId = result.body.data.serviceCase.id;
 
     result = await request(`/api/v1/service-cases/${incidentServiceCaseId}`, { method: 'PATCH', body: JSON.stringify({ status: 'closed', cause: 'Obstruction sensor contamination', action: 'Sensor cleaned and verified', parts: [] }) });
@@ -401,11 +417,17 @@ async function startFakeSmtpServer() {
     assert.ok(Array.isArray(result.body.data));
     assert.equal(result.body.count, result.body.data.length);
     assert.ok(Number.isInteger(result.body.activeCount));
+    assert.ok(Number.isInteger(result.body.unreadCount));
+    assert.ok(result.body.unreadCount > 0);
+    const notificationIds=result.body.data.map((item) => item.id);
+    result=await request('/api/v1/notifications/read',{ method:'POST',body:JSON.stringify({ notificationIds }) });
+    assert.equal(result.status,200); assert.equal(result.body.readCount,notificationIds.length); assert.equal(result.body.unreadCount,0);
+    result=await request('/api/v1/notifications'); assert.equal(result.status,200); assert.equal(result.body.unreadCount,0); assert.ok(result.body.data.every((item) => item.read === true));
     const managedNotification=result.body.data.find((item) => item.robotId);
     assert.ok(managedNotification);
     result=await request(`/api/v1/notifications/${encodeURIComponent(managedNotification.id)}`,{ method:'PATCH',body:JSON.stringify({ status:'acknowledged',note:'Reviewed by automated test.' }) });
     assert.equal(result.status,200); assert.equal(result.body.data.status,'acknowledged');
-    result=await request('/api/v1/reports/operations?days=30'); assert.equal(result.status,200); assert.equal(result.body.data.period.days,30); assert.ok(Array.isArray(result.body.data.daily)); assert.equal(result.body.data.daily.length,30);
+    result=await request('/api/v1/reports/operations?days=30'); assert.equal(result.status,200); assert.equal(result.body.data.period.days,30); assert.ok(Array.isArray(result.body.data.daily)); assert.equal(result.body.data.daily.length,30); assert.ok('healthScore' in result.body.data.fleet); assert.ok('averageResolutionHours' in result.body.data.service); assert.ok('availabilityPercent' in result.body.data.workforce);
     const reportExportResponse=await fetch(`http://localhost:${port}/api/v1/reports/operations.csv?days=7`,{ headers:{ authorization:`Bearer ${defaultToken}` } }); assert.equal(reportExportResponse.status,200); assert.match(await reportExportResponse.text(),/date.*events.*errors.*maintenance.*tasks/);
     result=await request('/api/v1/cenobots/webhooks/status'); assert.equal(result.status,200); assert.equal(result.body.data.configured,true); assert.equal(result.body.data.receiptCount,1);
 
@@ -455,6 +477,7 @@ async function startFakeSmtpServer() {
     assert.match(persisted, /MANUAL-ROBOT-001/);
     assert.match(persisted, /scrypt\$/);
     assert.match(persisted, /Altegro email notification test/);
+    assert.match(persisted, /Altegro SMS notification test/);
     assert.match(persisted, /Robot stopped during operation/);
     assert.match(persisted, /Quarterly AutoXing inspection/);
     assert.match(persisted, /Offline robot escalation/);
