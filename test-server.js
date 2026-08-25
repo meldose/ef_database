@@ -76,9 +76,10 @@ async function startFakeSmtpServer() {
     const frontendResponse = await fetch(`http://localhost:${port}/`);
     assert.equal(frontendResponse.status, 200);
     const frontendHtml = await frontendResponse.text();
-    for (const controlId of ['dashboardTabs', 'roleDashboard', 'exportRobotsCsv', 'serviceTechniciansButton', 'trackingView', 'trackingMetrics', 'trackingCanvas', 'trackingFleetList', 'accessibilityButton', 'accessibilityDialog', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'cenoBotsLiveFleet', 'cenoBotsDiagnostics', 'cenoBotsControlSection', 'cenoBotsCommandDialog', 'cenoBotsScheduleDialog', 'reportMetrics', 'advancedAnalytics', 'reportTrend', 'pdfReportRobot', 'exportMaintenancePdf', 'exportCompliancePdf', 'supportView', 'supportTicketsList', 'supportTicketDialog', 'supportReplyDialog', 'languageSelect', 'notificationSearch', 'notificationWorkflowDialog', 'onboardingProvider', 'onboardingExternalId', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'smsNotificationsSection', 'smsNotificationStatus', 'testSmsNotification', 'compatibilityForm', 'workforceSection', 'technicianAvailabilityList', 'technicianAvailabilityDialog', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
+    for (const controlId of ['dashboardTabs', 'roleDashboard', 'customerDashboardPanel', 'customerDashboardContent', 'exportRobotsCsv', 'serviceTechniciansButton', 'trackingView', 'trackingMetrics', 'trackingCanvas', 'trackingFleetList', 'accessibilityButton', 'accessibilityDialog', 'resourceExplorer', 'taskHistoryList', 'taskDetailDialog', 'autoXingLiveFleet', 'autoXingFleetSearch', 'autoXingFleetPrevious', 'autoXingTaskAnalytics', 'autoXingDiagnostics', 'autoXingMonitoring', 'autoXingAlerts', 'alertWorkflowDialog', 'autoXingMaintenancePanel', 'autoXingMaintenanceSummary', 'maintenanceScheduleDialog', 'autoXingDiagnosticPanel', 'diagnosticRobotSelect', 'autoXingEscalationPanel', 'autoXingEscalationRules', 'escalationRuleDialog', 'autoXingTrends', 'cenoBotsLiveFleet', 'cenoBotsDiagnostics', 'cenoBotsControlSection', 'cenoBotsCommandDialog', 'cenoBotsScheduleDialog', 'reportMetrics', 'advancedAnalytics', 'maintenancePredictions', 'reportTrend', 'pdfReportRobot', 'exportMaintenancePdf', 'exportCompliancePdf', 'supportView', 'supportTicketsList', 'supportTicketDialog', 'supportReplyDialog', 'languageSelect', 'notificationSearch', 'notificationWorkflowDialog', 'onboardingProvider', 'onboardingExternalId', 'robotAccountsList', 'emailNotificationsSection', 'emailNotificationStatus', 'testEmailNotification', 'smsNotificationsSection', 'smsNotificationStatus', 'testSmsNotification', 'compatibilityForm', 'workforceSection', 'technicianAvailabilityList', 'technicianAvailabilityDialog', 'workOrderCalendar', 'workOrderDialog', 'permissionMatrix', 'auditSearch', 'technicianForm', 'qualificationForm']) assert.match(frontendHtml, new RegExp(`id="${controlId}"`));
     for (const view of ['overview', 'tracking', 'robots', 'operations', 'autoxing', 'cenobots', 'workforce', 'reports', 'support', 'admin']) assert.match(frontendHtml, new RegExp(`data-dashboard-tab="${view}"`));
     assert.match(frontendHtml,/data-i18n="support"/);
+    const refreshedDashboard=await fetch(`http://localhost:${port}/dashboard/reports`); assert.equal(refreshedDashboard.status,200); assert.match(await refreshedDashboard.text(),/id="reportsView"/);
 
     const webhookHeaders={ 'content-type':'application/json','x-webhook-id':'trace-test','x-webhook-timestamp':String(Math.floor(Date.now()/1000)) };
     let webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/cenobots`,{ method:'POST',headers:webhookHeaders,body:JSON.stringify(encryptedWebhook({ messageType:'challenge',data:{ challenge:'verify-me' } })) });
@@ -96,10 +97,12 @@ async function startFakeSmtpServer() {
     let loginBody = loginResult.body;
     assert.equal(loginResult.status, 200);
     assert.equal(loginBody.user.role, 'platform_admin');
+    assert.ok(loginBody.user.permissions.includes('work_order.manage'));
     assert.notEqual(loginBody.token, 'demo-platform-admin');
     assert.match(loginResult.headers.get('set-cookie'), /HttpOnly/);
     assert.match(loginResult.headers.get('set-cookie'), /SameSite=Strict/);
     const browserCookie = loginResult.headers.get('set-cookie').split(';')[0];
+    const wsHandshake=await new Promise((resolve,reject) => { const socket=net.createConnection({ host:'127.0.0.1',port },() => socket.write(`GET /api/v1/notifications/stream HTTP/1.1\r\nHost: localhost:${port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nCookie: ${browserCookie}\r\n\r\n`)); let response=''; const timer=setTimeout(() => { socket.destroy(); reject(new Error('WebSocket handshake timed out')); },2000); socket.on('data',(chunk) => { response+=chunk.toString('latin1'); if (response.includes('\r\n\r\n')) { clearTimeout(timer); socket.destroy(); resolve(response); } }); socket.on('error',reject); }); assert.match(wsHandshake,/101 Switching Protocols/);
     const cookieSessionResponse = await fetch(`http://localhost:${port}/api/v1/auth/session`, { headers: { cookie: browserCookie } });
     assert.equal(cookieSessionResponse.status, 200);
     assert.equal((await cookieSessionResponse.json()).user.role, 'platform_admin');
@@ -108,6 +111,7 @@ async function startFakeSmtpServer() {
     result = await request('/api/v1/auth/session');
     assert.equal(result.status, 200);
     assert.equal(result.body.user.role, 'platform_admin');
+    result=await request('/api/v1/permissions'); assert.equal(result.status,200); assert.ok(result.body.data.permissions.includes('audit.export')); assert.ok(result.body.data.roles.some((item) => item.role === 'technician' && item.permissions.includes('work_order.update_assigned')));
     result = await request('/api/v1/email-notifications');
     assert.equal(result.status,200);
     assert.equal(result.body.data.configuration.enabled,true);
@@ -152,6 +156,7 @@ async function startFakeSmtpServer() {
     assert.equal(result.body.data.summary.maintenanceDue, 1);
     assert.equal(result.body.data.summary.errors, 1);
     assert.equal(result.body.data.alerts.length, 2);
+    result=await request('/api/v1/maintenance/predictions'); assert.equal(result.status,200); assert.equal(result.body.data.length,2); assert.ok(result.body.data.some((item) => item.robotId === cenobotsRobotId && item.score > 0)); assert.ok(Number.isInteger(result.body.summary.attention));
     result=await request(`/api/v1/cenobots/robots/${cenobotsRobotId}/commands`,{ method:'POST',body:JSON.stringify({ action:'go-home',execute:false }) }); assert.equal(result.status,200); assert.equal(result.body.data.dryRun,true); assert.match(result.body.data.message,/Preview only/);
     result=await request(`/api/v1/cenobots/robots/${cenobotsRobotId}/commands`,{ method:'POST',body:JSON.stringify({ action:'schedule',execute:false,mapId:42,mapVersion:'test.map.version',startTime:'04:52 PM',duration:60,intensity:'MEDIUM',cleanEverywhere:true,repeat:['Mon.','Fri.'] }) }); assert.equal(result.status,200); assert.equal(result.body.data.task.payload.repeat.length,2);
     result=await request(`/api/v1/cenobots/robots/${cenobotsRobotId}/commands`,{ method:'POST',body:JSON.stringify({ action:'go-home',execute:true,confirmation:'CB-DEMO-001' }) }); assert.equal(result.status,503);
@@ -169,6 +174,15 @@ async function startFakeSmtpServer() {
     }
     result=await request('/api/v1/technicians/technician-lena/availability',{ method:'PATCH',body:JSON.stringify({ status:'busy',workingDays:['Mon.','Tue.','Wed.','Thur.'],dailyCapacityHours:6,notes:'Reserved for field service.' }) }); assert.equal(result.status,200); assert.equal(result.body.data.availability.status,'busy'); assert.equal(result.body.data.availability.dailyCapacityHours,6);
     result=await request(`/api/v1/workforce/matrix?robotId=${robotId}`); assert.equal(result.body.data.technicians.find((technician) => technician.id === 'technician-lena').availability.status,'busy');
+    const workOrderStart=new Date(Date.now()+3*86400000); workOrderStart.setUTCHours(9,0,0,0); const workOrderEnd=new Date(workOrderStart.getTime()+2*3600000);
+    result=await request('/api/v1/work-orders',{ method:'POST',body:JSON.stringify({ robotId,technicianId:'technician-lena',title:'Predictive sensor inspection',description:'Inspect the risk factors identified by Altegro.',priority:'high',startsAt:workOrderStart.toISOString(),endsAt:workOrderEnd.toISOString() }) }); assert.equal(result.status,201); assert.equal(result.body.data.technicianName,'Midhun Eldose'); const workOrderId=result.body.data.id;
+    result=await request('/api/v1/work-orders'); assert.equal(result.status,200); assert.ok(result.body.data.some((item) => item.id === workOrderId)); assert.equal(result.body.permissions.manage,true);
+    result=await request(`/api/v1/work-orders/${workOrderId}`,{ method:'PATCH',body:JSON.stringify({ status:'in_progress' }) }); assert.equal(result.status,200); assert.equal(result.body.data.status,'in_progress');
+    const technicianLogin=await loginWithPassword('technician@demo.altegro.local','efrobotics'); assert.equal(technicianLogin.status,200); const technicianToken=technicianLogin.body.token;
+    result=await requestAs(technicianToken,'/api/v1/work-orders'); assert.equal(result.status,200); assert.ok(result.body.data.some((item) => item.id === workOrderId)); assert.equal(result.body.permissions.manage,false); assert.equal(result.body.permissions.updateAssigned,true);
+    result=await requestAs(technicianToken,`/api/v1/work-orders/${workOrderId}`,{ method:'PATCH',body:JSON.stringify({ status:'blocked',completionNote:'Waiting for access.' }) }); assert.equal(result.status,200); assert.equal(result.body.data.status,'blocked');
+    result=await requestAs(technicianToken,'/api/v1/work-orders',{ method:'POST',body:JSON.stringify({}) }); assert.equal(result.status,403);
+    result=await request(`/api/v1/workforce/matrix?robotId=${robotId}`);
     const lenaRow = result.body.data.rows.find((row) => row.technician.id === 'technician-lena');
     const noraRow = result.body.data.rows.find((row) => row.technician.id === 'technician-nora');
     assert.equal(lenaRow.eligibility.eligible, true);
@@ -412,6 +426,7 @@ async function startFakeSmtpServer() {
     assert.equal(result.status, 200);
     assert.ok(result.body.data.passport.percentage >= 0);
     assert.ok(result.body.data.service.closed >= 1);
+    result=await request('/api/v1/customer-dashboard'); assert.equal(result.status,200); assert.equal(result.body.data.customer.id,'org-demo'); assert.ok(result.body.data.fleet.total >= 2); assert.ok(Array.isArray(result.body.data.sites));
     result = await request('/api/v1/notifications');
     assert.equal(result.status, 200);
     assert.ok(Array.isArray(result.body.data));
@@ -428,6 +443,9 @@ async function startFakeSmtpServer() {
     result=await request(`/api/v1/notifications/${encodeURIComponent(managedNotification.id)}`,{ method:'PATCH',body:JSON.stringify({ status:'acknowledged',note:'Reviewed by automated test.' }) });
     assert.equal(result.status,200); assert.equal(result.body.data.status,'acknowledged');
     result=await request('/api/v1/reports/operations?days=30'); assert.equal(result.status,200); assert.equal(result.body.data.period.days,30); assert.ok(Array.isArray(result.body.data.daily)); assert.equal(result.body.data.daily.length,30); assert.ok('healthScore' in result.body.data.fleet); assert.ok('averageResolutionHours' in result.body.data.service); assert.ok('availabilityPercent' in result.body.data.workforce);
+    assert.ok('predictedHighRisk' in result.body.data.maintenance);
+    result=await request('/api/v1/audit?action=work_order.create'); assert.equal(result.status,200); assert.ok(result.body.data.some((item) => item.action === 'work_order.create')); assert.ok(Array.isArray(result.body.facets.actions));
+    const auditExport=await fetch(`http://localhost:${port}/api/v1/audit.csv?result=success`,{ headers:{ authorization:`Bearer ${defaultToken}` } }); assert.equal(auditExport.status,200); assert.match(await auditExport.text(),/occurredAt.*actor.*action.*objectType/);
     const reportExportResponse=await fetch(`http://localhost:${port}/api/v1/reports/operations.csv?days=7`,{ headers:{ authorization:`Bearer ${defaultToken}` } }); assert.equal(reportExportResponse.status,200); assert.match(await reportExportResponse.text(),/date.*events.*errors.*maintenance.*tasks/);
     result=await request('/api/v1/cenobots/webhooks/status'); assert.equal(result.status,200); assert.equal(result.body.data.configured,true); assert.equal(result.body.data.receiptCount,1);
 
@@ -480,6 +498,7 @@ async function startFakeSmtpServer() {
     assert.match(persisted, /Altegro SMS notification test/);
     assert.match(persisted, /Robot stopped during operation/);
     assert.match(persisted, /Quarterly AutoXing inspection/);
+    assert.match(persisted, /Predictive sensor inspection/);
     assert.match(persisted, /Offline robot escalation/);
     assert.doesNotMatch(persisted, /Manual-robot-001/);
     assert.doesNotMatch(persisted, /efrobotics/);

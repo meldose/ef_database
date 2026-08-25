@@ -17,7 +17,7 @@ npm start
 
 The server listens on `http://localhost:3000`.
 
-Open `http://127.0.0.1:3000/` in a browser for the included operations frontend. It provides a login page, robot registry table, search and status filters, Passport inspection, adapter sync buttons, event and capability panels, logged-in user display, logout, a robot-registration form, and a robot-specific event form.
+Open `http://127.0.0.1:3000/` in a browser for the included operations frontend. Dashboard URLs such as `/dashboard/reports` and `/dashboard/workforce` are refresh-safe and preserve the selected workspace.
 
 The frontend starts with a login page. Standard prototype accounts use password `efrobotics`:
 
@@ -79,7 +79,16 @@ Use `ALTEGRO_DATA_FILE` to choose another location in legacy file mode, or `ALTE
 
 ## Notifications
 
-The dashboard alert button summarizes visible offline robots, error and critical events, expiring certificates, open service cases, and failed integrations. `GET /api/v1/notifications` exposes the same tenant- and role-scoped view.
+The dashboard alert button summarizes visible offline robots, error and critical events, predictive-maintenance risks, expiring certificates, open service cases, and failed integrations. `GET /api/v1/notifications` exposes the same tenant- and role-scoped view. Browsers receive live changes through the authenticated WebSocket endpoint `/api/v1/notifications/stream`; read receipts remain per user.
+
+## Operations intelligence and access control
+
+- `GET /api/v1/maintenance/predictions` scores visible robots from errors, connectivity, battery, consumable life, and scheduled-maintenance state.
+- `GET /api/v1/customer-dashboard` provides customer- and site-scoped fleet, service, provider, and maintenance summaries.
+- `GET /api/v1/permissions` exposes the authenticated role's server-enforced capability set and the role matrix.
+- `GET /api/v1/audit` supports search, action, result, actor, object type, and date filters. `GET /api/v1/audit.csv` exports the filtered evidence.
+
+Permissions are checked by capability (`robot.write`, `notification.manage`, `work_order.manage`, `audit.export`, and similar) instead of relying only on UI role labels.
 
 ## Technician qualifications
 
@@ -94,9 +103,12 @@ POST   /api/v1/technicians
 POST   /api/v1/technicians/:id/qualifications
 POST   /api/v1/robot-assignments
 DELETE /api/v1/robot-assignments/:id
+GET    /api/v1/work-orders
+POST   /api/v1/work-orders
+PATCH  /api/v1/work-orders/:id
 ```
 
-Platform, data, and support administrators can manage technicians and assignments. Other human roles receive a read-only matrix; robot accounts cannot access workforce data.
+Platform, data, and support administrators can schedule qualified, conflict-checked work orders. Linked technicians may update only their assigned orders. Work-order completion is recorded in the Robot Passport and audit history.
 
 Run the smoke tests in a second command:
 
