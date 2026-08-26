@@ -1,5 +1,6 @@
 services:
   altegro:
+    image: ${ALTEGRO_IMAGE:-altegro:local}
     environment:
       NODE_ENV: production
       COOKIE_SECURE: "true"

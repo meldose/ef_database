@@ -272,11 +272,25 @@ CenoBots has its own dashboard tab with fleet totals, online/offline and chargin
 
 The encrypted CenoBots webhook receiver is `POST /api/v1/webhooks/cenobots`. Configure the separate `CENOBOTS_WEBHOOK_SECRET`, publish the callback over HTTPS, and verify it in the CZ Robots company-administrator portal. Error, task, maintenance, and door-assistance messages are freshness-checked, AES-GCM authenticated, deduplicated, persisted, and added to the matching Robot Passport. The CenoBots workspace displays webhook readiness and receipt activity.
 
-The browser includes a three-step robot onboarding wizard, searchable and actionable notification workflows, role-focused landing dashboards, English/German navigation, and operational reports with JSON/CSV export. The **Live Tracking** tab refreshes the unified, tenant-scoped AutoXing and CenoBots position feed every ten seconds, marks stale data, plots relative provider coordinates, and shows connection, movement, battery and task state. Robot-specific maintenance and compliance reports download as PDFs. The Support tab lets customer and robot accounts open tickets, follow the conversation, and add updates while service staff manage ticket status. Labour and parts pricing remains explicitly unavailable until cost fields are captured.
+The browser includes a three-step robot onboarding wizard, searchable and actionable notification workflows, role-focused landing dashboards, English/German navigation, and operational reports with JSON/CSV export. Users can switch between system, light, and dark themes and personalize the Overview by hiding, reordering, resizing, or compacting widgets; these preferences stay in the browser. The Robot Registry supports server-side provider, site, model, battery-range, connection, lifecycle status, and maintenance-attention filters. The **Live Tracking** tab refreshes the unified, tenant-scoped AutoXing and CenoBots position feed every ten seconds, marks stale data, plots relative provider coordinates, and shows connection, movement, battery and task state. Robot-specific maintenance and compliance reports download as PDFs. The Support tab lets customer and robot accounts open tickets, follow the conversation, and add updates while service staff manage ticket status. Labour and parts pricing remains explicitly unavailable until cost fields are captured.
 
 The fleet report now includes a composite health score, attention and low-battery counts, provider distribution, service-case closure rate, average resolution time, incidents per robot, and technician availability. The technician workspace includes availability status, working days, shift windows, daily capacity and estimated assignment load. Technicians on leave or off duty cannot receive new assignments.
 
-Accessibility preferences are stored in the browser and provide larger text, extra-large text, high contrast and reduced motion. The interface also includes a skip link, visible focus indication, keyboard tab navigation, live-region updates, accessible chart summaries and responsive table alternatives.
+Accessibility preferences are stored in the browser and provide larger text, extra-large text, relaxed reading spacing, high contrast, reduced motion, stronger keyboard focus, and underlined interactive text. The interface also includes a skip link, visible focus indication, keyboard tab navigation, live-region updates, accessible chart summaries and responsive table alternatives.
+
+Maintenance schedules include a configurable 1–90 day reminder lead time. Active reminders automatically enter the tenant-scoped notification feed, become live WebSocket alerts, identify overdue work, and keep per-user read receipts. Completing recurring work creates Passport evidence and moves the reminder to the next service date.
+
+## Automated deployment
+
+The GitHub Actions workflow in `.github/workflows/deploy.yml` checks JavaScript syntax, runs the complete Node/Python test suite, verifies that the production container builds, publishes an immutable SHA-tagged image to GitHub Container Registry, and can deploy `main` through SSH. Deployment uses `scripts/deploy-production.sh`, production Compose settings, and a `/ready` smoke check.
+
+Configure the protected `production` GitHub environment with:
+
+- Variables: `DEPLOY_ENABLED=true`, `DEPLOY_HOST`, `DEPLOY_USER`, and `DEPLOY_PATH`.
+- Secrets: `DEPLOY_SSH_KEY`, the pinned server host-key line in `DEPLOY_KNOWN_HOSTS`, and a package-read token in `GHCR_READ_TOKEN`.
+- The existing external Docker secrets referenced by `compose.production.yaml` on the target host.
+
+Keep environment approval rules enabled for production. The target account needs Docker Compose access, and `DEPLOY_PATH` must be dedicated to this application.
 
 Run `npm run test:e2e` for the automated browser-facing customer journey and performance budgets. It verifies login, static assets, support-ticket creation/replies, PDF download, concurrent API responses, a 1.5-second p95 response budget, and JavaScript/CSS size budgets. The same check is included in `npm test`.
 

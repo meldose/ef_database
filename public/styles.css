@@ -118,6 +118,37 @@ textarea:focus { border-color:#78aebb; box-shadow:0 0 0 3px #e3f1f3; }
 .permission-matrix { padding:0 22px 22px; } .permission-matrix article { padding:11px 0; border-top:1px solid var(--line); } .permission-matrix strong { display:block; margin-bottom:7px; text-transform:capitalize; } .permission-matrix article div { display:flex; flex-wrap:wrap; gap:5px; } .permission-matrix span { padding:4px 6px; border-radius:99px; background:#f1e9ed; color:var(--muted); font-size:8px; } .permission-matrix span.current { background:var(--blue); color:white; }
 @media (max-width:800px) { .customer-metrics { grid-template-columns:1fr 1fr; } .work-order-card { grid-template-columns:1fr; } .audit-toolbar { grid-template-columns:1fr 1fr; } }
 
+/* Theme, personalized overview, advanced registry search, and enhanced accessibility */
+.metrics { grid-template-columns:repeat(var(--dashboard-columns,4),minmax(0,1fr)); }
+.widget-hidden { display:none !important; }
+.compact-dashboard [data-dashboard-widget] { margin-bottom:10px; }
+.compact-dashboard .metric-card { padding:12px 15px; }
+.compact-dashboard .metric-card strong { font-size:24px; }
+.dashboard-widget-list { display:grid; gap:7px; margin:18px 0; }
+.dashboard-widget-option { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--pink-soft); }
+.dashboard-widget-option > div { display:flex; gap:5px; }
+.dashboard-widget-option .icon-button { width:30px; height:30px; }
+.advanced-robot-search { display:grid; grid-template-columns:repeat(6,minmax(110px,1fr)) auto; align-items:end; gap:9px; margin:0 22px 16px; padding:13px; border:1px solid var(--line); border-radius:9px; background:var(--pink-soft); }
+.advanced-robot-search label { color:var(--muted); font-size:9px; font-weight:800; }
+.advanced-robot-search select,.advanced-robot-search input[type="number"] { width:100%; margin-top:5px; padding:8px; font-size:10px; }
+.advanced-robot-search .checkbox-label { align-self:center; padding-top:14px; white-space:nowrap; }
+html.relaxed-spacing body { line-height:1.7; letter-spacing:.015em; }
+html.strong-focus :where(a,button,input,select,textarea,[tabindex]):focus-visible { outline:4px solid #ff8c00 !important; outline-offset:4px !important; box-shadow:0 0 0 7px rgba(255,255,255,.85) !important; }
+html.underline-links :where(a,.text-button,.view-button,.logout-button) { text-decoration:underline !important; text-underline-offset:3px; }
+
+html[data-theme="dark"] { --ink:#f7eaf1; --muted:#c0aeb8; --line:#503b47; --paper:#241a21; --bg:#171116; --blue:#ff5da5; --blue-dark:#ffd6e8; --pink-dark:#ff86ba; --pink-soft:#30202a; --pink-glow:#59283f; --green:#65d5aa; --green-bg:#173b31; --amber:#ffc86b; --amber-bg:#493619; --red:#ff8a9b; --shadow:0 14px 38px rgba(0,0,0,.28); }
+html[data-theme="dark"] body,html[data-theme="dark"] .login-screen { background:var(--bg); color:var(--ink); }
+html[data-theme="dark"] .topbar,html[data-theme="dark"] .dashboard-tabs,html[data-theme="dark"] .accessibility-button { background:rgba(36,26,33,.97); }
+html[data-theme="dark"] :where(input,select,textarea,dialog,.button.secondary,.demo-accounts button,.support-ticket,.support-message,.analytics-card,.prediction-card,.customer-sites article,.resource-metric,.autoxing-live-card,.cenobots-robot-card,.dashboard-widget-option) { background:#2b2027; color:var(--ink); border-color:var(--line); }
+html[data-theme="dark"] :where(th,.table-wrap tbody tr:hover,.notification-item:hover,.task-detail-row:hover) { background:#2d2229; }
+html[data-theme="dark"] :where(.tracking-canvas,.provider-map img) { background-color:#1d171b; }
+html[data-theme="dark"] .provider-json pre { background:#100d0f; }
+html[data-theme="dark"] .skip-link { background:var(--paper); }
+html[data-theme="dark"].high-contrast { --ink:#fff; --muted:#eee; --paper:#000; --bg:#000; --line:#fff; --blue:#66d9ff; --blue-dark:#fff; --pink-soft:#111; --green:#72ffb8; --amber:#ffe66d; --red:#ff8e9e; }
+@media (max-width:1050px) { .advanced-robot-search { grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media (max-width:700px) { .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); } .advanced-robot-search { grid-template-columns:1fr 1fr; } }
+@media (max-width:430px) { .metrics,.advanced-robot-search { grid-template-columns:1fr; } }
+
 /* Pink and black Altegro theme */
 .topbar { background:#151014; border-bottom-color:#33232d; box-shadow:0 10px 30px rgba(21,16,20,.12); }
 .brand-mark { background:linear-gradient(145deg,#ff5aa1,var(--blue)); box-shadow:0 8px 22px rgba(233,47,130,.28); }
