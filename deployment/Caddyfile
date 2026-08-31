@@ -1,0 +1,22 @@
+{
+  email {$ACME_EMAIL}
+  servers {
+    protocols h1 h2 h3
+  }
+}
+
+{$ALTEGRO_DOMAIN:altegro.de} {
+  encode zstd gzip
+  header {
+    -Server
+    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+  }
+  reverse_proxy altegro:3000 {
+    health_uri /ready
+    health_interval 30s
+  }
+  log {
+    output stdout
+    format json
+  }
+}

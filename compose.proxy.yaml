@@ -1,0 +1,22 @@
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      ALTEGRO_DOMAIN: ${ALTEGRO_DOMAIN:-altegro.de}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL for TLS certificate notices}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deployment/Caddyfile:/etc/caddy/Caddyfile:ro
+      - altegro-caddy-data:/data
+      - altegro-caddy-config:/config
+    depends_on:
+      altegro:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  altegro-caddy-data:
+  altegro-caddy-config:

@@ -67,6 +67,11 @@ const parseJsonEnv = (name, fallback = {}) => { try { return process.env[name] ?
 const autoXingMappingRequired = () => ['1', 'true', 'yes'].includes(String(process.env.AUTOXING_REQUIRE_MAPPING || '').toLowerCase());
 const cenoBotsLiveEnabled = () => ['1', 'true', 'yes'].includes(String(process.env.CENOBOTS_LIVE || '').toLowerCase());
 const cenoBotsPollIntervalMs = () => Math.max(0,Number(process.env.CENOBOTS_POLL_INTERVAL_MS || 300000));
+function executableAvailable(command) {
+  const value=String(command || '').trim(); if (!value) return false;
+  const candidates=value.includes(pathUtil.sep) ? [value] : String(process.env.PATH || '').split(pathUtil.delimiter).filter(Boolean).map((directory) => pathUtil.join(directory,value));
+  return candidates.some((candidate) => { try { fs.accessSync(candidate,fs.constants.X_OK); return true; } catch { return false; } });
+}
 function secretEnvValue(name) {
   const filePath = process.env[`${name}_FILE`];
   if (filePath) {
@@ -82,6 +87,27 @@ function secretConfigurationMode() {
   return autoXingLiveEnabled() ? 'wrapper-managed' : 'not-required-in-mock-mode';
 }
 const enabled = (value) => ['1', 'true', 'yes'].includes(String(value || '').toLowerCase());
+function providerRuntimeStatus(provider) {
+  const pythonAvailable=executableAvailable(process.env.PYTHON_BIN || 'python3');
+  if (provider === 'autoxing') {
+    const liveEnabled=autoXingLiveEnabled(); const credentialsConfigured=['APPID','APPSECRET','APPCODE'].every((name) => Boolean(secretEnvValue(name)));
+    const checks={ python:pythonAvailable,bridge:fs.existsSync(AUTOXING_BRIDGE),wrapper:fs.existsSync(AUTOXING_LIB),credentials:credentialsConfigured };
+    const reasons=[]; if (!checks.python) reasons.push('Python runtime unavailable'); if (!checks.bridge) reasons.push('AutoXing bridge unavailable'); if (!checks.wrapper) reasons.push('AutoXing wrapper mount unavailable'); if (!checks.credentials) reasons.push('AutoXing credentials incomplete');
+    return { provider,mode:liveEnabled ? 'live' : 'mock',liveEnabled,ready:!liveEnabled || Object.values(checks).every(Boolean),checks,reasons };
+  }
+  if (provider === 'cenobots') {
+    const liveEnabled=cenoBotsLiveEnabled(); const credentialsConfigured=['CENOBOTS_ACCESS_KEY','CENOBOTS_SECRET_KEY'].every((name) => Boolean(secretEnvValue(name)));
+    const checks={ python:pythonAvailable,bridge:fs.existsSync(CENOBOTS_BRIDGE),credentials:credentialsConfigured };
+    const reasons=[]; if (!checks.python) reasons.push('Python runtime unavailable'); if (!checks.bridge) reasons.push('CenoBots bridge unavailable'); if (!checks.credentials) reasons.push('CenoBots credentials incomplete');
+    return { provider,mode:liveEnabled ? 'live' : 'mock',liveEnabled,ready:!liveEnabled || Object.values(checks).every(Boolean),checks,reasons };
+  }
+  return { provider,mode:'mock',liveEnabled:false,ready:true,checks:{},reasons:[] };
+}
+function assertLiveProviderRuntimeConfiguration() {
+  if (process.env.NODE_ENV !== 'production') return;
+  const invalid=['autoxing','cenobots'].map(providerRuntimeStatus).filter((status) => status.liveEnabled && !status.ready);
+  if (invalid.length) throw new Error(`Live provider runtime configuration failed: ${invalid.map((item) => `${item.provider}: ${item.reasons.join(', ')}`).join('; ')}`);
+}
 function managedSecretStatus() {
   const providers = [
     { name:'autoxing', enabled:autoXingLiveEnabled(), names:['APPID','APPSECRET','APPCODE'] },
@@ -606,6 +632,7 @@ function syncAdapter(provider, actorId = 'system') {
   const syncStartedAt = Date.now();
   const payload = adapter.sync();
   let robot = [...state.robots.values()].find((item) => item.externalIdentities.some((identity) => identity.system === provider && identity.externalId === payload.externalId));
+  const created = !robot;
   const actor = typeof actorId === 'string' && demoUsers[actorId] ? demoUsers[actorId] : { id: actorId, name: 'System' };
   if (!robot) {
     robot = {
@@ -622,7 +649,7 @@ function syncAdapter(provider, actorId = 'system') {
   appendPassportEntry(robot.id, { type: 'configuration_snapshot', source: provider, data: { battery: payload.battery, status: payload.status } }, actor);
   upsertEvent(robot.id, { eventType: payload.eventType, sourceSystem: provider, sourceEventId: `${payload.externalId}:${payload.eventType}:${payload.battery}`, payload: { battery: payload.battery, status: payload.status } }, actor);
   recordAdapterSync(adapter, { status:'success', startedAt:syncStartedAt, count:1, trigger:actorId === 'seed' ? 'seed' : 'manual' });
-  return { provider, adapterVersion: adapter.version, robot: getPassport(robot.id), commandCapabilitiesEnabled: false };
+  return { provider,mode:'mock',adapterVersion:adapter.version,robot:getPassport(robot.id),count:1,changes:{ created:created ? 1 : 0,updated:created ? 0 : 1,unchanged:0,failed:0 },commandCapabilitiesEnabled:false };
 }
 
 async function runAutoXingBridge(command = 'snapshot') {
@@ -675,7 +702,25 @@ async function runCenoBotsBridge(command = 'snapshot') {
 function cenoBotsControlConfiguration() {
   const credentialsConfigured=Boolean(secretEnvValue('CENOBOTS_ACCESS_KEY') && secretEnvValue('CENOBOTS_SECRET_KEY'));
   const commandsEnabled=enabled(process.env.CENOBOTS_COMMANDS_ENABLED);
-  return { liveEnabled:cenoBotsLiveEnabled(),commandsEnabled,credentialsConfigured,ready:cenoBotsLiveEnabled() && commandsEnabled && credentialsConfigured,safetyConfirmation:'Exact robot serial number required for every live command.' };
+  const runtime=providerRuntimeStatus('cenobots'); const reasons=[];
+  if (!runtime.liveEnabled) reasons.push('CenoBots is using mock mode'); if (!commandsEnabled) reasons.push('Live commands are disabled'); if (!credentialsConfigured) reasons.push('CenoBots credentials are incomplete'); if (!runtime.checks.python) reasons.push('Python runtime is unavailable');
+  return { liveEnabled:runtime.liveEnabled,mode:runtime.mode,commandsEnabled,credentialsConfigured,ready:runtime.liveEnabled && commandsEnabled && credentialsConfigured && runtime.ready,reasons,safetyConfirmation:'Exact robot serial number required for every live command.' };
+}
+
+function cenoBotsCommandAvailability(robot) {
+  const task=robot.providerTask && typeof robot.providerTask === 'object' ? robot.providerTask : {};
+  const stateValue=String(task.status || task.state || task.taskStatus || task.missionStatus || '').toUpperCase();
+  const completeStates=new Set(['','COMPLETED','COMPLETE','FINISHED','SUCCEEDED','SUCCESS','FAILED','CANCELLED','CANCELED','STOPPED','IDLE']);
+  const active=Object.keys(task).length > 0 && !completeStates.has(stateValue); const paused=active && stateValue.includes('PAUS');
+  const unsafe=robot.emergencyStop === true || robot.manualMode === true; const offline=robot.online !== true;
+  return { missionActive:active,missionPaused:paused,missionState:stateValue || (active ? 'ACTIVE' : 'IDLE'),actions:{
+    clean:{ allowed:!offline && !unsafe && !active && Boolean(robot.providerMapId && robot.providerMapVersion),reason:offline ? 'Robot is offline' : unsafe ? 'Clear emergency stop and manual mode first' : active ? 'Stop the current mission first' : !robot.providerMapId || !robot.providerMapVersion ? 'Current map information is unavailable' : null },
+    'go-home':{ allowed:!offline && !unsafe && !active && robot.docked !== true,reason:offline ? 'Robot is offline' : unsafe ? 'Clear emergency stop and manual mode first' : active ? 'Stop the current mission before returning home' : robot.docked === true ? 'Robot is already docked' : null },
+    pause:{ allowed:!offline && active && !paused,reason:offline ? 'Robot is offline' : !active ? 'No active mission to pause' : paused ? 'Mission is already paused' : null },
+    continue:{ allowed:!offline && active && paused,reason:offline ? 'Robot is offline' : !active ? 'No active mission to continue' : !paused ? 'Mission is not paused' : null },
+    stop:{ allowed:!offline && active,reason:offline ? 'Robot is offline' : !active ? 'No active mission to stop' : null },
+    schedule:{ allowed:true,reason:null },
+  } };
 }
 
 async function runCenoBotsTask(action,robot,body={},execute=false) {
@@ -892,7 +937,8 @@ function autoXingOperations(actor) {
   }
   const alerts=autoXingAlertsForRobots(robots); const maintenance=[...state.maintenanceSchedules.values()].filter((schedule) => robots.some((robot) => robot.id === schedule.robotId)).map(maintenanceScheduleView);
   const adapter = state.adapters.get('autoxing') || {};
-  return { fleet:robots.map((robot) => ({ id:robot.id,serialNumber:robot.serialNumber,externalId:robot.externalIdentities.find((identity) => identity.system === 'autoxing').externalId,online:robot.online,battery:robot.battery,charging:robot.charging,position:robot.position,speed:robot.speed,emergencyStop:robot.emergencyStop,obstruction:robot.obstruction,currentTask:robot.providerTask,providerVersion:robot.providerVersion,businessName:robot.providerBusinessName,siteId:robot.siteId,mappingStatus:robot.mappingStatus,updatedAt:robot.updatedAt,alertCount:alerts.filter((alert) => alert.robotId === robot.id).length })),taskAnalytics:{ ...taskSummary,tasks:undefined },maintenance:{ schedules:maintenance,total:maintenance.length,overdue:maintenance.filter((item) => item.dueState === 'overdue').length,dueSoon:maintenance.filter((item) => item.dueState === 'due_soon').length },alerts:alerts.map(alertWithWorkflow),alertWorkflow:{ canManage:canWrite(actor),technicians:techniciansForActor(actor).filter((technician) => technician.status === 'active').map((technician) => ({ id:technician.id,name:technician.name })) },trends,diagnostics:{ liveEnabled:autoXingLiveEnabled(),status:adapter.status,lastSyncAt:adapter.lastSyncAt,lastSyncStatus:adapter.lastSyncStatus,lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncCount:adapter.lastSyncCount,lastSyncWarnings:adapter.lastSyncWarnings || 0,pollingIntervalMs:autoXingPollIntervalMs(),nextPollAt:adapter.lastSyncAt && autoXingPollIntervalMs() ? new Date(Date.parse(adapter.lastSyncAt)+autoXingPollIntervalMs()).toISOString() : null,secretMode:secretConfigurationMode(),secretPolicy:managedSecretStatus(),syncHistory:clone(adapter.syncHistory || []) },generatedAt:timestamp() };
+  const runtime=providerRuntimeStatus('autoxing');
+  return { fleet:robots.map((robot) => ({ id:robot.id,serialNumber:robot.serialNumber,externalId:robot.externalIdentities.find((identity) => identity.system === 'autoxing').externalId,online:robot.online,battery:robot.battery,charging:robot.charging,position:robot.position,speed:robot.speed,emergencyStop:robot.emergencyStop,obstruction:robot.obstruction,currentTask:robot.providerTask,providerVersion:robot.providerVersion,businessName:robot.providerBusinessName,siteId:robot.siteId,mappingStatus:robot.mappingStatus,updatedAt:robot.updatedAt,alertCount:alerts.filter((alert) => alert.robotId === robot.id).length })),taskAnalytics:{ ...taskSummary,tasks:undefined },maintenance:{ schedules:maintenance,total:maintenance.length,overdue:maintenance.filter((item) => item.dueState === 'overdue').length,dueSoon:maintenance.filter((item) => item.dueState === 'due_soon').length },alerts:alerts.map(alertWithWorkflow),alertWorkflow:{ canManage:canWrite(actor),technicians:techniciansForActor(actor).filter((technician) => technician.status === 'active').map((technician) => ({ id:technician.id,name:technician.name })) },trends,diagnostics:{ mode:runtime.mode,runtime,liveEnabled:autoXingLiveEnabled(),status:adapter.status,lastSyncAt:adapter.lastSyncAt,lastSyncStatus:adapter.lastSyncStatus,lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncCount:adapter.lastSyncCount,lastSyncWarnings:adapter.lastSyncWarnings || 0,pollingIntervalMs:autoXingPollIntervalMs(),nextPollAt:adapter.lastSyncAt && autoXingPollIntervalMs() ? new Date(Date.parse(adapter.lastSyncAt)+autoXingPollIntervalMs()).toISOString() : null,secretMode:secretConfigurationMode(),secretPolicy:managedSecretStatus(),syncHistory:clone(adapter.syncHistory || []) },generatedAt:timestamp() };
 }
 
 function cenoBotsOperations(actor) {
@@ -907,8 +953,9 @@ function cenoBotsOperations(actor) {
     maintenanceDue.forEach((item,index) => alerts.push({ id:`${robot.id}:maintenance:${index}`,robotId:robot.id,serialNumber:robot.serialNumber,type:'maintenance_due',severity:Number(item.overDueHours || 0) > 0 ? 'error' : 'warning',title:`Maintenance due: ${item.name || 'Consumable'}`,message:Number(item.overDueHours || 0) > 0 ? `${item.overDueHours} overdue hours` : `${item.remainPercent || 'Low remaining life'} remaining`,occurredAt:robot.updatedAt }));
     return { id:robot.id,serialNumber:robot.serialNumber,externalId,online:robot.online,battery:robot.battery,charging:robot.charging,position:clone(robot.position || null),speed:robot.speed ?? null,emergencyStop:robot.emergencyStop ?? null,manualMode:robot.manualMode ?? null,docked:robot.docked ?? null,currentTask:clone(robot.providerTask || null),providerVersion:robot.providerVersion || null,buildingName:robot.providerBuildingName || null,mapId:robot.providerMapId || null,mapName:robot.providerMapName || null,mapVersion:robot.providerMapVersion || null,maintenanceItems:clone(maintenanceItems),maintenanceDueCount:maintenanceDue.length,errorCount:errorItems.length,updatedAt:robot.updatedAt };
   });
-  const adapter=state.adapters.get('cenobots') || {}; const policy=managedSecretStatus().providers.find((item) => item.provider === 'cenobots') || null;
-  return { summary:{ total:fleet.length,online:fleet.filter((item) => item.online === true).length,offline:fleet.filter((item) => item.online === false).length,charging:fleet.filter((item) => item.charging === true).length,docked:fleet.filter((item) => item.docked === true).length,maintenanceDue:fleet.reduce((sum,item) => sum+item.maintenanceDueCount,0),errors:fleet.reduce((sum,item) => sum+item.errorCount,0) },fleet,alerts:alerts.sort((a,b) => Date.parse(b.occurredAt || 0)-Date.parse(a.occurredAt || 0)),control:{ ...cenoBotsControlConfiguration(),canControl:canControlCenoBots(actor) },diagnostics:{ liveEnabled:cenoBotsLiveEnabled(),status:adapter.status,lastSyncAt:adapter.lastSyncAt,lastSyncStatus:adapter.lastSyncStatus,lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncCount:adapter.lastSyncCount,lastSyncWarnings:adapter.lastSyncWarnings || 0,minimumRequestIntervalSeconds:Number(process.env.CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS || 1.05),secretPolicy:policy,webhook:cenoBotsWebhookConfiguration(),syncHistory:clone(adapter.syncHistory || []) },generatedAt:timestamp() };
+  for (const item of fleet) { const robot=state.robots.get(item.id); const docking=robot?.statusDetails?.dockingStationDetail || {}; item.water={ cleanLevels:clone(robot?.statusDetails?.waterBox || []),dirtyLevels:clone(robot?.statusDetails?.dirtyBox || []),cleanStatus:docking.cleanWaterStatus || null,dirtyStatus:docking.dirtyWaterStatus || null }; item.commandAvailability=cenoBotsCommandAvailability(robot); }
+  const adapter=state.adapters.get('cenobots') || {}; const policy=managedSecretStatus().providers.find((item) => item.provider === 'cenobots') || null; const runtime=providerRuntimeStatus('cenobots');
+  return { summary:{ total:fleet.length,online:fleet.filter((item) => item.online === true).length,offline:fleet.filter((item) => item.online === false).length,charging:fleet.filter((item) => item.charging === true).length,docked:fleet.filter((item) => item.docked === true).length,waterServicing:fleet.filter((item) => item.water.cleanStatus || item.water.dirtyStatus).length,maintenanceDue:fleet.reduce((sum,item) => sum+item.maintenanceDueCount,0),errors:fleet.reduce((sum,item) => sum+item.errorCount,0) },fleet,alerts:alerts.sort((a,b) => Date.parse(b.occurredAt || 0)-Date.parse(a.occurredAt || 0)),control:{ ...cenoBotsControlConfiguration(),canControl:canControlCenoBots(actor) },diagnostics:{ mode:runtime.mode,runtime,liveEnabled:cenoBotsLiveEnabled(),status:adapter.status,lastSyncAt:adapter.lastSyncAt,lastSyncStatus:adapter.lastSyncStatus,lastError:adapter.lastError ? 'Synchronization failed. Retry or inspect the protected server log.' : null,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncCount:adapter.lastSyncCount,lastSyncWarnings:adapter.lastSyncWarnings || 0,minimumRequestIntervalSeconds:Number(process.env.CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS || 1.05),secretPolicy:policy,webhook:cenoBotsWebhookConfiguration(),syncHistory:clone(adapter.syncHistory || []) },generatedAt:timestamp() };
 }
 
 function autoXingDiagnosticReport(actor,robot) {
@@ -948,7 +995,7 @@ async function syncAutoXingLive(actor) {
   const bridge = await runAutoXingBridge('snapshot');
   const businessMap = parseJsonEnv('AUTOXING_BUSINESS_MAP');
   const modelMap = parseJsonEnv('AUTOXING_MODEL_MAP');
-  const synced = [];
+  const synced = []; let createdCount=0; let updatedCount=0;
   for (const externalRobot of bridge.robots) {
     const externalId = externalRobot.externalId;
     if (!externalId) continue;
@@ -958,10 +1005,12 @@ async function syncAutoXingLive(actor) {
     const modelId = modelMap[String(externalRobot.model)] || 'model-autoxing-a1';
     const mappingStatus = Object.keys(mapping).length ? 'configured' : 'default-demo';
     if (!robot) {
+      createdCount += 1;
       robot = { id: ids(), tenantId: actor.tenantId, organizationId: mapping.organizationId || process.env.AUTOXING_DEFAULT_ORGANIZATION_ID || 'org-demo', operatorOrganizationId: mapping.operatorOrganizationId || process.env.AUTOXING_DEFAULT_OPERATOR_ORGANIZATION_ID || 'org-service', siteId: mapping.siteId || process.env.AUTOXING_DEFAULT_SITE_ID || 'site-berlin', modelId, serialNumber: externalRobot.serialNumber, status: 'draft', online: externalRobot.online, battery: externalRobot.battery, charging: externalRobot.charging, position: externalRobot.position, speed: externalRobot.speed, emergencyStop: externalRobot.emergencyStop, obstruction: externalRobot.obstruction, statusDetails: externalRobot.statusDetails, providerTask: externalRobot.task, errors: externalRobot.errors, providerVersion: externalRobot.version, providerBusinessId: externalRobot.businessId, providerBusinessName: externalRobot.businessName, providerAreaId: externalRobot.areaId, mappingStatus, lastProviderError: externalRobot.stateError || null, externalIdentities: [{ system: 'autoxing', externalId }], createdAt: timestamp(), updatedAt: timestamp() };
       state.robots.set(robot.id, robot);
       appendPassportEntry(robot.id, { type: 'registration', source: 'autoxing', data: { externalId, serialNumber: robot.serialNumber, model: externalRobot.model, businessId: externalRobot.businessId } }, actor);
     } else {
+      updatedCount += 1;
       robot.online = externalRobot.online;
       robot.battery = externalRobot.battery;
       robot.charging = externalRobot.charging;
@@ -995,7 +1044,7 @@ async function syncAutoXingLive(actor) {
   storeAutoXingResources(bridge.resources, bridge.resourceErrors);
   recordAdapterSync(adapter, { status:'success', startedAt:syncStartedAt, count:synced.length, warnings:bridge.resourceErrors?.length || 0, trigger:String(actor.id || '').includes('poller') ? 'poll' : 'manual' });
   evaluateAlertEscalations(actor.tenantId);
-  return { provider: 'autoxing', adapterVersion: 'wrapper-backed', source: bridge.wrapper, robots: synced, count: synced.length, resources: { businesses: state.autoxing.businesses.length, buildings: state.autoxing.buildings.length, poiRobotScopes: state.autoxing.pois.size, areaRobotScopes: state.autoxing.areas.size, maps: state.autoxing.maps.size, tasks: state.autoxing.tasks.size, warnings: state.autoxing.resourceErrors.length }, resourceErrors: clone(state.autoxing.resourceErrors), commandCapabilitiesEnabled: false };
+  return { provider:'autoxing',mode:'live',adapterVersion:'wrapper-backed',source:bridge.wrapper,robots:synced,count:synced.length,changes:{ created:createdCount,updated:updatedCount,unchanged:0,failed:0 },resources:{ businesses:state.autoxing.businesses.length,buildings:state.autoxing.buildings.length,poiRobotScopes:state.autoxing.pois.size,areaRobotScopes:state.autoxing.areas.size,maps:state.autoxing.maps.size,tasks:state.autoxing.tasks.size,warnings:state.autoxing.resourceErrors.length },resourceErrors:clone(state.autoxing.resourceErrors),commandCapabilitiesEnabled:false };
 }
 
 async function syncCenoBotsLive(actor) {
@@ -1003,7 +1052,7 @@ async function syncCenoBotsLive(actor) {
   const syncStartedAt = Date.now();
   if (adapter) { adapter.lastSyncStatus = 'running'; adapter.lastError = null; }
   const bridge = await runCenoBotsBridge('snapshot');
-  const synced = [];
+  const synced = []; let createdCount=0; let updatedCount=0;
   for (const externalRobot of bridge.robots || []) {
     const externalId = String(externalRobot.externalId || '').trim();
     if (!externalId) continue;
@@ -1011,10 +1060,11 @@ async function syncCenoBotsLive(actor) {
     const canonicalStatus = externalRobot.activated === false ? 'draft' : 'active';
     let robot = [...state.robots.values()].find((item) => item.externalIdentities.some((identity) => identity.system === 'cenobots' && identity.externalId === externalId));
     if (!robot) {
+      createdCount += 1;
       robot = { id:ids(), tenantId:actor.tenantId, organizationId:process.env.CENOBOTS_DEFAULT_ORGANIZATION_ID || 'org-demo', operatorOrganizationId:process.env.CENOBOTS_DEFAULT_OPERATOR_ORGANIZATION_ID || 'org-service', siteId:process.env.CENOBOTS_DEFAULT_SITE_ID || 'site-berlin', modelId:'model-cenobots-c1', serialNumber, status:canonicalStatus, externalIdentities:[{ system:'cenobots', externalId }], createdAt:timestamp(), updatedAt:timestamp() };
       state.robots.set(robot.id, robot);
       appendPassportEntry(robot.id, { type:'registration', source:'cenobots', data:{ externalId, serialNumber, licensePlate:externalRobot.licensePlate || null } }, actor);
-    }
+    } else updatedCount += 1;
     Object.assign(robot, { serialNumber, status:canonicalStatus, online:externalRobot.online, battery:externalRobot.battery, charging:externalRobot.charging, position:externalRobot.position || null, speed:externalRobot.speed ?? null, emergencyStop:externalRobot.emergencyStop, manualMode:externalRobot.manualMode, docked:externalRobot.docked, statusDetails:externalRobot.statusDetails || {}, providerTask:externalRobot.task || null, providerMapId:externalRobot.mapId || null, providerMapName:externalRobot.mapName || null, providerMapVersion:externalRobot.mapVersion || null, providerVersion:externalRobot.version || null, providerBuildingName:externalRobot.buildingName || null, maintenance:externalRobot.maintenance || null, errors:externalRobot.errors || [], lastProviderError:externalRobot.stateErrors?.length ? `${externalRobot.stateErrors.length} provider warning(s)` : null, updatedAt:timestamp() });
     ensureRobotUser(robot);
     appendPassportEntry(robot.id, { type:'configuration_snapshot', source:'cenobots', data:{ online:robot.online, battery:robot.battery, charging:robot.charging, position:robot.position, softwareVersion:robot.providerVersion, mission:robot.providerTask, maintenance:robot.maintenance, errors:robot.errors } }, actor);
@@ -1035,7 +1085,7 @@ async function syncCenoBotsLive(actor) {
   }
   const resourceErrors = bridge.resourceErrors || bridge.warnings || [];
   recordAdapterSync(adapter, { status:'success', startedAt:syncStartedAt, count:synced.length, warnings:resourceErrors.length, trigger:'manual' });
-  return { provider:'cenobots', adapterVersion:'open-api-v1.0.16', source:bridge.wrapper || 'integrations/cenobots/client.py', robots:synced, count:synced.length, resources:clone(bridge.resources || {}), resourceErrors:clone(resourceErrors), commandCapabilitiesEnabled:cenoBotsControlConfiguration().ready };
+  return { provider:'cenobots',mode:'live',adapterVersion:'open-api-v1.0.16',source:bridge.wrapper || 'integrations/cenobots/client.py',robots:synced,count:synced.length,changes:{ created:createdCount,updated:updatedCount,unchanged:0,failed:0 },resources:clone(bridge.resources || {}),resourceErrors:clone(resourceErrors),commandCapabilitiesEnabled:cenoBotsControlConfiguration().ready };
 }
 
 async function executeProviderSync(provider,actor,trigger='manual') {
@@ -1563,6 +1613,7 @@ function systemReadiness() {
   checks.push({ name:'persistence',ok:storageOk,detail:persistenceDetail });
   if (OBJECT_STORAGE_DRIVER === 's3') { const health=objectStore?.health() || { ready:false,error:'not initialized' }; checks.push({ name:'object-storage',ok:health.ready,detail:health.ready ? `s3 bucket ${health.bucket} ready` : `s3 unavailable: ${health.error}` }); }
   else checks.push({ name:'object-storage',ok:process.env.NODE_ENV !== 'production',detail:'inline legacy/test mode' });
+  for (const provider of ['autoxing','cenobots']) { const runtime=providerRuntimeStatus(provider); checks.push({ name:`provider-${provider}`,ok:runtime.ready,detail:runtime.liveEnabled ? runtime.ready ? 'live runtime ready' : runtime.reasons.join('; ') : 'mock mode' }); }
   return { ready:checks.every((check) => check.ok), checks };
 }
 
@@ -1570,7 +1621,7 @@ function monitoringSnapshot(actor = null) {
   const uptimeSeconds = Math.max(0,Math.floor((Date.now() - Date.parse(startedAt)) / 1000));
   const robots=actor ? [...state.robots.values()].filter((robot) => visibleToActor(actor,robot)) : [...state.robots.values()]; const robotIds=new Set(robots.map((robot) => robot.id));
   const email=emailDeliverySummary(); const sms=smsDeliverySummary();
-  return { service:'altegro-prototype', uptimeSeconds, startedAt, readiness:systemReadiness(), requests:{ total:runtimeMetrics.requestsTotal, active:runtimeMetrics.activeRequests, errors:runtimeMetrics.errorsTotal, averageResponseTimeMs:runtimeMetrics.requestsTotal ? Math.round(runtimeMetrics.responseTimeMsTotal/runtimeMetrics.requestsTotal) : 0, maxResponseTimeMs:runtimeMetrics.responseTimeMsMax, byStatus:clone(runtimeMetrics.byStatus) }, fleet:{ robots:robots.length, events:state.events.filter((event) => robotIds.has(event.robotId)).length, openServiceCases:[...state.serviceCases.values()].filter((item) => robotIds.has(item.robotId) && !['resolved','closed'].includes(item.status)).length }, adapters:actor && ['robot_user','auditor'].includes(actor.role) ? [] : [...state.adapters.values()].map((adapter) => ({ provider:adapter.provider,status:adapter.status,lastSyncStatus:adapter.lastSyncStatus,lastSyncAt:adapter.lastSyncAt,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncWarnings:adapter.lastSyncWarnings || 0 })),email:actor && ['platform_admin','data_admin','support_admin'].includes(actor.role) ? { configuration:email.configuration,counts:email.counts } : null,sms:actor && ['platform_admin','data_admin','support_admin'].includes(actor.role) ? { configuration:sms.configuration,counts:sms.counts } : null };
+  return { service:'altegro-prototype', uptimeSeconds, startedAt, readiness:systemReadiness(), requests:{ total:runtimeMetrics.requestsTotal, active:runtimeMetrics.activeRequests, errors:runtimeMetrics.errorsTotal, averageResponseTimeMs:runtimeMetrics.requestsTotal ? Math.round(runtimeMetrics.responseTimeMsTotal/runtimeMetrics.requestsTotal) : 0, maxResponseTimeMs:runtimeMetrics.responseTimeMsMax, byStatus:clone(runtimeMetrics.byStatus) }, fleet:{ robots:robots.length, events:state.events.filter((event) => robotIds.has(event.robotId)).length, openServiceCases:[...state.serviceCases.values()].filter((item) => robotIds.has(item.robotId) && !['resolved','closed'].includes(item.status)).length }, adapters:actor && ['robot_user','auditor'].includes(actor.role) ? [] : [...state.adapters.values()].map((adapter) => { const runtime=providerRuntimeStatus(adapter.provider); return { provider:adapter.provider,mode:runtime.mode,runtimeReady:runtime.ready,status:adapter.status,lastSyncStatus:adapter.lastSyncStatus,lastSyncAt:adapter.lastSyncAt,lastSyncDurationMs:adapter.lastSyncDurationMs,lastSyncWarnings:adapter.lastSyncWarnings || 0 }; }),email:actor && ['platform_admin','data_admin','support_admin'].includes(actor.role) ? { configuration:email.configuration,counts:email.counts } : null,sms:actor && ['platform_admin','data_admin','support_admin'].includes(actor.role) ? { configuration:sms.configuration,counts:sms.counts } : null };
 }
 
 function metricsAuthorized(req) {
@@ -1592,7 +1643,12 @@ function sendPrometheusMetrics(res) {
     '# HELP altegro_robots_total Robots stored by Altegro.', '# TYPE altegro_robots_total gauge', `altegro_robots_total ${state.robots.size}`,
     '# HELP altegro_service_cases_open Open service cases.', '# TYPE altegro_service_cases_open gauge', `altegro_service_cases_open ${snapshot.fleet.openServiceCases}`
   ];
-  for (const adapter of snapshot.adapters) lines.push(`altegro_adapter_last_sync_success{provider="${adapter.provider}"} ${adapter.lastSyncStatus === 'success' ? 1 : 0}`);
+  for (const adapter of snapshot.adapters) {
+    lines.push(`altegro_adapter_last_sync_success{provider="${adapter.provider}",mode="${adapter.mode}"} ${adapter.lastSyncStatus === 'success' ? 1 : 0}`);
+    lines.push(`altegro_adapter_runtime_ready{provider="${adapter.provider}",mode="${adapter.mode}"} ${adapter.runtimeReady ? 1 : 0}`);
+    lines.push(`altegro_adapter_last_sync_timestamp_seconds{provider="${adapter.provider}"} ${adapter.lastSyncAt ? Math.floor(Date.parse(adapter.lastSyncAt)/1000) : 0}`);
+    lines.push(`altegro_adapter_last_sync_warnings{provider="${adapter.provider}"} ${adapter.lastSyncWarnings || 0}`);
+  }
   const body = `${lines.join('\n')}\n`; res.writeHead(200,securityHeaders('text/plain; version=0.0.4; charset=utf-8',{'content-length':Buffer.byteLength(body)})); res.end(body);
 }
 
@@ -1602,13 +1658,13 @@ function csvCell(value) {
 }
 
 function serveFrontend(pathname, res) {
-  const dashboardRoute=/^\/dashboard(?:\/(overview|tracking|robots|operations|autoxing|cenobots|workforce|reports|support|admin))?\/?$/.test(pathname); const requested = pathname === '/' || dashboardRoute ? 'index.html' : pathname.slice(1);
-  const allowed = new Set(['index.html', 'app.js', 'styles.css']);
+  const dashboardRoute=/^\/dashboard(?:\/(overview|tracking|robots|operations|autoxing|cenobots|workforce|reports|support|admin))?\/?$/.test(pathname); const requested = pathname === '/' || dashboardRoute ? 'index.html' : pathname === '/docs' || pathname === '/docs/' ? 'docs.html' : pathname.slice(1);
+  const allowed = new Set(['index.html', 'app.js', 'styles.css', 'docs.html', 'docs.js', 'openapi.json']);
   if (!allowed.has(requested)) return false;
   const filePath = pathUtil.join(publicDir, requested);
   try {
     const body = fs.readFileSync(filePath);
-    const contentTypes = { 'index.html': 'text/html; charset=utf-8', 'app.js': 'text/javascript; charset=utf-8', 'styles.css': 'text/css; charset=utf-8' };
+    const contentTypes = { 'index.html':'text/html; charset=utf-8','docs.html':'text/html; charset=utf-8','app.js':'text/javascript; charset=utf-8','docs.js':'text/javascript; charset=utf-8','styles.css':'text/css; charset=utf-8','openapi.json':'application/json; charset=utf-8' };
     res.writeHead(200, securityHeaders(contentTypes[requested], { 'content-length': body.length }));
     res.end(body);
     return true;
@@ -1848,8 +1904,7 @@ async function handle(req, res) {
     if (execute) {
       const config=cenoBotsControlConfiguration(); if (!config.ready) { recordAudit(actor,'cenobots.command','robot',robot.id,'rejected',{ action,reason:'disabled' }); throw httpError(503,'Live CenoBots control is disabled or credentials are incomplete'); }
       if (String(body.confirmation || '') !== robot.serialNumber) { recordAudit(actor,'cenobots.command','robot',robot.id,'rejected',{ action,reason:'confirmation' }); throw httpError(400,`Type ${robot.serialNumber} exactly to confirm this live command`); }
-      if (action !== 'schedule' && robot.online !== true) throw httpError(409,'The robot must be online before a live command can be sent');
-      if (['clean','go-home'].includes(action) && (robot.emergencyStop === true || robot.manualMode === true)) throw httpError(409,'Clear emergency-stop and manual mode before sending this command');
+      const availability=cenoBotsCommandAvailability(robot).actions[action]; if (!availability?.allowed) { recordAudit(actor,'cenobots.command','robot',robot.id,'rejected',{ action,reason:'state-conflict' }); throw httpError(409,availability?.reason || 'The command conflicts with the current robot state'); }
     }
     const result=await runCenoBotsTask(action,robot,body,execute); recordAudit(actor,`cenobots.${action}`,'robot',robot.id,'success',{ execute,dryRun:result.dryRun,providerRequestId:result.result?.rid || null });
     if (execute) { appendPassportEntry(robot.id,{ type:action === 'schedule' ? 'provider_schedule_created' : 'provider_command',source:'cenobots',data:{ action,providerRequestId:result.result?.rid || null,task:result.task } },actor); upsertEvent(robot.id,{ eventType:action === 'schedule' ? 'schedule_created' : 'robot_command',sourceSystem:'cenobots',sourceEventId:`command:${action}:${result.result?.rid || ids()}`,severity:'info',title:`CenoBots ${action.replaceAll('-',' ')} accepted`,description:`Live command requested by ${actor.name}.`,payload:{ action,providerRequestId:result.result?.rid || null } },actor); }
@@ -2167,6 +2222,7 @@ initializeCredentialHashes();
 loadPersistedState();
 applyRequestedTechnicianRoster();
 assertProductionSecretConfiguration();
+assertLiveProviderRuntimeConfiguration();
 if (filePersistenceEnabled()) persistState();
 const server = http.createServer(async (req, res) => {
   const requestStartedAt=Date.now(); runtimeMetrics.activeRequests += 1;
@@ -2204,8 +2260,8 @@ async function processSyncJobs() {
     const actor={ ...job.actor,tenantId:job.tenantId };
     try {
       const result=await executeProviderSync(job.provider,actor,job.trigger); await persistState();
-      const compact={ provider:job.provider,count:result.count ?? 1,resources:result.resources || null,resourceErrors:result.resourceErrors || [],completedAt:timestamp() };
-      await databaseStore.completeSyncJob(job.id,compact); recordAudit(actor,'adapter.sync.completed','adapter',job.provider,'success',{ jobId:job.id,count:compact.count }); await persistState();
+      const finalStatus=(result.resourceErrors || []).length ? 'partial' : 'completed'; const compact={ status:finalStatus,provider:job.provider,mode:result.mode || providerRuntimeStatus(job.provider).mode,count:result.count ?? 1,changes:result.changes || null,resources:result.resources || null,resourceErrors:result.resourceErrors || [],completedAt:timestamp() };
+      await databaseStore.completeSyncJob(job.id,compact,finalStatus); recordAudit(actor,'adapter.sync.completed','adapter',job.provider,finalStatus === 'partial' ? 'warning' : 'success',{ jobId:job.id,count:compact.count }); await persistState();
     } catch(error) { await databaseStore.failSyncJob(job.id,error.message); recordAudit(actor,'adapter.sync.completed','adapter',job.provider,'error',{ jobId:job.id }); await persistState().catch(() => {}); }
   } finally { syncWorkerRunning=false; }
 }

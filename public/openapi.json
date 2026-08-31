@@ -1,0 +1,32 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Altegro Robot Operations API",
+    "version": "1.0.0",
+    "description": "Authenticated robot registry, provider synchronization, CenoBots operations, Passport and monitoring endpoints. Live robot commands require administrator permission, an enabled safety gate and exact serial-number confirmation."
+  },
+  "servers": [{ "url": "https://altegro.de" }],
+  "components": {
+    "securitySchemes": { "bearerAuth": { "type": "http", "scheme": "bearer" } },
+    "schemas": {
+      "Error": { "type": "object", "properties": { "error": { "type": "object", "properties": { "code": { "type": "string" }, "message": { "type": "string" }, "correlationId": { "type": "string" } } } } },
+      "SyncJob": { "type": "object", "required": ["id", "provider", "status"], "properties": { "id": { "type": "string", "format": "uuid" }, "provider": { "type": "string", "enum": ["autoxing", "cenobots"] }, "status": { "type": "string", "enum": ["queued", "running", "completed", "partial", "failed"] }, "result": { "type": ["object", "null"] }, "error": { "type": ["string", "null"] } } },
+      "CenoBotsCommand": { "type": "object", "required": ["action", "execute"], "properties": { "action": { "type": "string", "enum": ["clean", "schedule", "go-home", "pause", "continue", "stop"] }, "execute": { "type": "boolean" }, "confirmation": { "type": "string", "description": "Exact robot serial number required when execute is true." }, "mapId": { "type": "integer", "minimum": 1 }, "mapVersion": { "type": "string" }, "duration": { "type": "integer", "minimum": 1, "maximum": 1440 }, "intensity": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH"] }, "cleanEverywhere": { "type": "boolean" }, "areaIds": { "type": "array", "items": { "type": "string" } } } }
+    }
+  },
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/health": { "get": { "security": [], "tags": ["System"], "summary": "Process liveness", "responses": { "200": { "description": "Process is alive" } } } },
+    "/ready": { "get": { "security": [], "tags": ["System"], "summary": "Database, storage and live-provider readiness", "responses": { "200": { "description": "Ready" }, "503": { "description": "A required dependency is unavailable" } } } },
+    "/api/v1/auth/login": { "post": { "security": [], "tags": ["Authentication"], "summary": "Create an authenticated session", "responses": { "200": { "description": "Authenticated" }, "401": { "description": "Invalid credentials" } } } },
+    "/api/v1/robots": { "get": { "tags": ["Robots"], "summary": "List visible robots", "responses": { "200": { "description": "Robot collection" } } }, "post": { "tags": ["Robots"], "summary": "Register a robot", "responses": { "201": { "description": "Robot registered" }, "409": { "description": "Identity conflict" } } } },
+    "/api/v1/robots/{robotId}/passport": { "get": { "tags": ["Passport"], "summary": "Read a robot Passport", "parameters": [{ "name": "robotId", "in": "path", "required": true, "schema": { "type": "string" } }], "responses": { "200": { "description": "Passport" }, "404": { "description": "Robot not found" } } } },
+    "/api/v1/adapters/{provider}/sync": { "post": { "tags": ["Synchronization"], "summary": "Queue provider synchronization", "parameters": [{ "name": "provider", "in": "path", "required": true, "schema": { "type": "string", "enum": ["autoxing", "cenobots"] } }], "responses": { "202": { "description": "Synchronization queued" }, "503": { "description": "Provider unavailable" } } } },
+    "/api/v1/sync-jobs": { "get": { "tags": ["Synchronization"], "summary": "List recent synchronization jobs", "responses": { "200": { "description": "Job collection" } } } },
+    "/api/v1/sync-jobs/{jobId}": { "get": { "tags": ["Synchronization"], "summary": "Read synchronization progress and result", "parameters": [{ "name": "jobId", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }], "responses": { "200": { "description": "Synchronization job" }, "404": { "description": "Job not found" } } } },
+    "/api/v1/autoxing/operations": { "get": { "tags": ["AutoXing"], "summary": "Read AutoXing fleet and connector diagnostics", "responses": { "200": { "description": "AutoXing operations" } } } },
+    "/api/v1/cenobots/operations": { "get": { "tags": ["CenoBots"], "summary": "Read CenoBots fleet, water telemetry and command availability", "responses": { "200": { "description": "CenoBots operations" } } } },
+    "/api/v1/cenobots/robots/{robotId}/commands": { "post": { "tags": ["CenoBots"], "summary": "Preview or execute a guarded CenoBots command", "parameters": [{ "name": "robotId", "in": "path", "required": true, "schema": { "type": "string" } }], "requestBody": { "required": true, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/CenoBotsCommand" } } } }, "responses": { "200": { "description": "Command preview" }, "202": { "description": "Live command accepted" }, "409": { "description": "Command conflicts with robot state" }, "503": { "description": "Live controls unavailable" } } } },
+    "/api/v1/monitoring": { "get": { "tags": ["System"], "summary": "Read operational monitoring data", "responses": { "200": { "description": "Monitoring snapshot" } } } }
+  }
+}

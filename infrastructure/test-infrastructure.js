@@ -13,6 +13,7 @@ class Command { constructor(input) { this.input=input; } }
   for (const table of ['application_snapshots','robots','passport_entries','attachments','sync_jobs']) assert.match(migration,new RegExp(`CREATE TABLE ${table}`));
   assert.match(migration,/WHERE status IN \('queued','running'\)/);
   assert.match(fs.readFileSync(path.join(__dirname,'..','migrations','002_email_jobs.sql'),'utf8'),/CREATE TABLE email_jobs/);
+  assert.match(fs.readFileSync(path.join(__dirname,'..','migrations','003_sync_job_terminal_statuses.sql'),'utf8'),/'completed','partial','failed'/);
 
   const sent=[]; const client={ send:async (command) => { sent.push(command); if (command instanceof GetObjectCommand) return { Body:{ transformToByteArray:async () => Uint8Array.from([65,66]) } }; return {}; },destroy:() => {} };
   class HeadBucketCommand extends Command {} class CreateBucketCommand extends Command {} class PutObjectCommand extends Command {} class GetObjectCommand extends Command {}

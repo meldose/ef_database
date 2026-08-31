@@ -187,7 +187,7 @@ GET /api/v1/sync-jobs
 GET /api/v1/sync-jobs/:jobId
 ```
 
-Jobs move through `queued`, `running`, `succeeded`, or `failed`. PostgreSQL prevents two active jobs for the same tenant/provider, workers claim work with row locking, and abandoned running jobs can be reclaimed after `SYNC_JOB_STALE_SECONDS`. Both AutoXing and CenoBots scheduled polling enqueue through this same path.
+Jobs move through `queued`, `running`, `completed`, `partial`, or `failed`. PostgreSQL prevents two active jobs for the same tenant/provider, workers claim work with row locking, and abandoned running jobs can be reclaimed after `SYNC_JOB_STALE_SECONDS`. Both AutoXing and CenoBots scheduled polling enqueue through this same path.
 
 The bridge imports the vendor wrapper in a separate Python process, normalizes robot identity/model/online state/battery, position, safety status, POIs, areas, maps, task history/status, and detailed errors into Altegro records, creates read-only technical events, and keeps command capabilities empty. Base-map images are omitted by default to keep fleet snapshots small; set `AUTOXING_INCLUDE_BASE_MAP=true` when they are needed. It does not expose AutoXing task creation, navigation, cancel, or control methods.
 
@@ -375,6 +375,17 @@ For a local container deployment:
 ```bash
 docker compose up --build
 ```
+
+The base stack starts in mock-provider mode. To use real providers, put the local credentials and live flags in the ignored `.env`, keep the approved AutoXing wrapper at `AUTOXING_REPO_HOST_PATH` (default `../autoxing`), and start with the production provider mount or an equivalent local override. The image contains Python and the minimal provider libraries. `/ready` now reports provider runtime failures instead of allowing a live connector with a missing bridge or wrapper.
+
+For `altegro.de`, configure the inputs in [deployment/README.md](deployment/README.md) and start the TLS proxy and monitoring overlays:
+
+```bash
+ALTEGRO_DOMAIN=altegro.de ACME_EMAIL=operations@altegro.de \
+  docker compose -f compose.yaml -f compose.production.yaml -f compose.proxy.yaml -f compose.monitoring.yaml up -d
+```
+
+The public API contract is available at `/docs` and `/openapi.json`. Prometheus is bound to loopback port `9090`; its rules alert on application readiness, provider synchronization failures, and repeated HTTP server errors.
 
 The Compose configuration mounts a named volume for `/app/data`. For an internet-facing deployment, terminate TLS at a reverse proxy and set `ALTEGRO_ALLOWED_HOSTS` and `ALTEGRO_ALLOWED_ORIGINS` to the real public domain before applying `compose.production.yaml`. Production startup requires secure cookies, mounted secrets, PostgreSQL, object storage, Host/Origin allow-lists and HTTPS forwarding. Restrict network access and replace the prototype identity system before public launch.
 

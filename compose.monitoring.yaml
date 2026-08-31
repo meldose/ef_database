@@ -1,0 +1,26 @@
+services:
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - altegro-prometheus:/prometheus
+    secrets:
+      - altegro_metrics_token
+    depends_on:
+      altegro:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
+    restart: unless-stopped
+
+volumes:
+  altegro-prometheus:
+
+secrets:
+  altegro_metrics_token:
+    external: true

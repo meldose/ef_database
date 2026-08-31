@@ -87,7 +87,7 @@ class PostgresStore {
     return result.rowCount ? normalizeJob(result.rows[0]) : null;
   }
 
-  async completeSyncJob(id,result) { const response=await this.pool.query(`UPDATE sync_jobs SET status='succeeded',result=$2,error=NULL,completed_at=now(),updated_at=now() WHERE id=$1 RETURNING *`,[id,result]); return response.rowCount ? normalizeJob(response.rows[0]) : null; }
+  async completeSyncJob(id,result,status='completed') { if (!['completed','partial'].includes(status)) throw new Error('Invalid synchronization terminal status'); const response=await this.pool.query(`UPDATE sync_jobs SET status=$3,result=$2,error=NULL,completed_at=now(),updated_at=now() WHERE id=$1 RETURNING *`,[id,result,status]); return response.rowCount ? normalizeJob(response.rows[0]) : null; }
   async failSyncJob(id,error) { const response=await this.pool.query(`UPDATE sync_jobs SET status='failed',error=$2,completed_at=now(),updated_at=now() WHERE id=$1 RETURNING *`,[id,String(error || 'Synchronization failed').slice(0,1000)]); return response.rowCount ? normalizeJob(response.rows[0]) : null; }
   async getSyncJob(id,tenantId) { const result=await this.pool.query('SELECT * FROM sync_jobs WHERE id=$1 AND tenant_id=$2',[id,tenantId]); return result.rowCount ? normalizeJob(result.rows[0]) : null; }
   async listSyncJobs(tenantId,limit=25) { const result=await this.pool.query('SELECT * FROM sync_jobs WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT $2',[tenantId,Math.min(100,Math.max(1,limit))]); return result.rows.map(normalizeJob); }

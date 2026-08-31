@@ -1,6 +1,12 @@
-FROM node:22-alpine
+FROM node:22-bookworm-slim
 
 WORKDIR /app
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates python3 python3-pip python3-venv \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv /opt/altegro-python
+COPY requirements.providers.txt ./
+RUN /opt/altegro-python/bin/pip install --no-cache-dir -r requirements.providers.txt
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY server.js ./
@@ -14,6 +20,8 @@ RUN mkdir -p /app/data && chown -R node:node /app
 USER node
 
 ENV NODE_ENV=production \
+    PATH=/opt/altegro-python/bin:$PATH \
+    PYTHON_BIN=/opt/altegro-python/bin/python3 \
     BIND_HOST=0.0.0.0 \
     PORT=3000 \
     ALTEGRO_PERSISTENCE=true \

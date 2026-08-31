@@ -1,0 +1,23 @@
+groups:
+  - name: altegro
+    rules:
+      - alert: AltegroUnavailable
+        expr: up{job="altegro"} == 0 or altegro_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Altegro is unavailable or not ready
+      - alert: AltegroProviderSyncFailing
+        expr: altegro_adapter_last_sync_success == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.provider }} synchronization is failing"
+      - alert: AltegroHttpErrors
+        expr: increase(altegro_http_errors_total[10m]) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: Altegro returned more than five server errors in ten minutes

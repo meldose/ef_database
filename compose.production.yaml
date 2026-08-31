@@ -6,8 +6,9 @@ services:
       COOKIE_SECURE: "true"
       ALTEGRO_ENFORCE_HTTPS: "true"
       ALTEGRO_TRUST_PROXY: "true"
-      ALTEGRO_ALLOWED_HOSTS: ${ALTEGRO_ALLOWED_HOSTS:-altegro.example.com}
-      ALTEGRO_ALLOWED_ORIGINS: ${ALTEGRO_ALLOWED_ORIGINS:-https://altegro.example.com}
+      ALTEGRO_ALLOWED_HOSTS: ${ALTEGRO_ALLOWED_HOSTS:-altegro.de,www.altegro.de}
+      ALTEGRO_ALLOWED_ORIGINS: ${ALTEGRO_ALLOWED_ORIGINS:-https://altegro.de}
+      ALTEGRO_PUBLIC_URL: ${ALTEGRO_PUBLIC_URL:-https://altegro.de}
       ALTEGRO_HSTS_ENABLED: "true"
       ALTEGRO_HSTS_MAX_AGE: "31536000"
       ALTEGRO_REQUIRE_MANAGED_SECRETS: "true"
@@ -18,11 +19,26 @@ services:
       OBJECT_STORAGE_ACCESS_KEY_FILE: /run/secrets/altegro_object_access_key
       OBJECT_STORAGE_SECRET_KEY_FILE: /run/secrets/altegro_object_secret_key
       OBJECT_STORAGE_CREATE_BUCKET: "false"
+      AUTOXING_LIVE: "true"
+      AUTOXING_REPO_PATH: /opt/autoxing
+      AUTOXING_LIB_PATH: /opt/autoxing/lib
+      AUTOXING_ENV_FILE: /run/altegro/autoxing.env
+      APPID: ""
+      APPSECRET: ""
+      APPCODE: ""
       APPID_FILE: /run/secrets/autoxing_app_id
       APPSECRET_FILE: /run/secrets/autoxing_app_secret
       APPCODE_FILE: /run/secrets/autoxing_app_code
+      CENOBOTS_LIVE: "true"
+      CENOBOTS_HOST: ${CENOBOTS_HOST:-https://app-server-eu.cz-robots.com}
+      CENOBOTS_ACCESS_KEY: ""
+      CENOBOTS_SECRET_KEY: ""
+      CENOBOTS_ROBOT_OPEN_ID: ${CENOBOTS_ROBOT_OPEN_ID:-}
+      CENOBOTS_ROBOT_OPEN_IDS: ${CENOBOTS_ROBOT_OPEN_IDS:-}
+      CENOBOTS_COMMANDS_ENABLED: ${CENOBOTS_COMMANDS_ENABLED:-false}
       CENOBOTS_ACCESS_KEY_FILE: /run/secrets/cenobots_access_key
       CENOBOTS_SECRET_KEY_FILE: /run/secrets/cenobots_secret_key
+      CENOBOTS_WEBHOOK_SECRET_FILE: /run/secrets/cenobots_webhook_secret
       METRICS_TOKEN_FILE: /run/secrets/altegro_metrics_token
     secrets:
       - autoxing_app_id
@@ -30,10 +46,16 @@ services:
       - autoxing_app_code
       - cenobots_access_key
       - cenobots_secret_key
+      - cenobots_webhook_secret
       - altegro_metrics_token
       - altegro_postgres_password
       - altegro_object_access_key
       - altegro_object_secret_key
+    volumes:
+      - type: bind
+        source: ${AUTOXING_REPO_HOST_PATH:-../autoxing}
+        target: /opt/autoxing
+        read_only: true
 
   postgres:
     environment:
@@ -62,6 +84,8 @@ secrets:
   cenobots_access_key:
     external: true
   cenobots_secret_key:
+    external: true
+  cenobots_webhook_secret:
     external: true
   altegro_metrics_token:
     external: true

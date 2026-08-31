@@ -74,8 +74,10 @@ jobs:
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
         run: |
-          ssh -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH/scripts'"
-          scp -i ~/.ssh/altegro_deploy compose.yaml compose.production.yaml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          ssh -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH/scripts' '$DEPLOY_PATH/deployment' '$DEPLOY_PATH/monitoring'"
+          scp -i ~/.ssh/altegro_deploy compose.yaml compose.production.yaml compose.proxy.yaml compose.monitoring.yaml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          scp -i ~/.ssh/altegro_deploy deployment/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/deployment/"
+          scp -i ~/.ssh/altegro_deploy monitoring/prometheus.yml monitoring/alerts.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/"
           scp -i ~/.ssh/altegro_deploy scripts/deploy-production.sh "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/scripts/"
       - name: Deploy immutable image and verify readiness
         env:
@@ -84,6 +86,10 @@ jobs:
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
           DEPLOY_IMAGE: ${{ needs.publish.outputs.image }}
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+          ALTEGRO_DOMAIN: ${{ vars.ALTEGRO_DOMAIN }}
+          ACME_EMAIL: ${{ vars.ACME_EMAIL }}
+          AUTOXING_REPO_HOST_PATH: ${{ vars.AUTOXING_REPO_HOST_PATH }}
+          CENOBOTS_ROBOT_OPEN_IDS: ${{ secrets.CENOBOTS_ROBOT_OPEN_IDS }}
         run: |
           printf '%s' "$GHCR_READ_TOKEN" | ssh -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
-          ssh -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && chmod +x scripts/deploy-production.sh && ALTEGRO_IMAGE='$DEPLOY_IMAGE' scripts/deploy-production.sh"
+          ssh -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && chmod +x scripts/deploy-production.sh && ALTEGRO_IMAGE='$DEPLOY_IMAGE' ALTEGRO_DOMAIN='$ALTEGRO_DOMAIN' ACME_EMAIL='$ACME_EMAIL' AUTOXING_REPO_HOST_PATH='$AUTOXING_REPO_HOST_PATH' CENOBOTS_ROBOT_OPEN_IDS='$CENOBOTS_ROBOT_OPEN_IDS' scripts/deploy-production.sh"

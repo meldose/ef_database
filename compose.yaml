@@ -2,7 +2,7 @@ services:
   altegro:
     build: .
     ports:
-      - "${ALTEGRO_HOST_PORT:-3000}:3000"
+      - "${ALTEGRO_BIND_ADDRESS:-127.0.0.1}:${ALTEGRO_HOST_PORT:-3000}:3000"
     environment:
       NODE_ENV: development
       BIND_HOST: 0.0.0.0
@@ -24,6 +24,21 @@ services:
       OBJECT_STORAGE_CREATE_BUCKET: "true"
       AUTH_SESSION_TTL_SECONDS: "28800"
       COOKIE_SECURE: "false"
+      PYTHON_BIN: /opt/altegro-python/bin/python3
+      AUTOXING_LIVE: ${AUTOXING_LIVE:-false}
+      AUTOXING_REPO_PATH: /opt/autoxing
+      AUTOXING_LIB_PATH: /opt/autoxing/lib
+      AUTOXING_ENV_FILE: /run/altegro/autoxing.env
+      APPID: ${APPID:-}
+      APPSECRET: ${APPSECRET:-}
+      APPCODE: ${APPCODE:-}
+      CENOBOTS_LIVE: ${CENOBOTS_LIVE:-false}
+      CENOBOTS_HOST: ${CENOBOTS_HOST:-https://app-server-eu.cz-robots.com}
+      CENOBOTS_ACCESS_KEY: ${CENOBOTS_ACCESS_KEY:-}
+      CENOBOTS_SECRET_KEY: ${CENOBOTS_SECRET_KEY:-}
+      CENOBOTS_ROBOT_OPEN_ID: ${CENOBOTS_ROBOT_OPEN_ID:-}
+      CENOBOTS_ROBOT_OPEN_IDS: ${CENOBOTS_ROBOT_OPEN_IDS:-}
+      CENOBOTS_COMMANDS_ENABLED: ${CENOBOTS_COMMANDS_ENABLED:-false}
     depends_on:
       postgres:
         condition: service_healthy
