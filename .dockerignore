@@ -2,6 +2,8 @@
 .env
 data
 node_modules
+**/node_modules
+**/.next
 *.pdf
 *.md
 !README.md

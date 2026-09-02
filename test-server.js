@@ -16,6 +16,7 @@ process.env.ALTEGRO_SYNC_MODE = 'inline';
 process.env.AUTOXING_LIVE = 'false';
 process.env.CENOBOTS_LIVE = 'false';
 process.env.CENOBOTS_WEBHOOK_SECRET = 'test-webhook-secret';
+process.env.SERVICE_WEBHOOK_SECRET = 'test-service-webhook-secret';
 process.env.EMAIL_ALERTS_ENABLED = 'true';
 process.env.EMAIL_ALERT_TRANSPORT = 'capture';
 process.env.EMAIL_ALERT_FROM = 'altegro-alerts@example.test';
@@ -48,6 +49,11 @@ async function loginWithPassword(email, password) {
 
 function encryptedWebhook(message) {
   const iv=crypto.randomBytes(12); const key=crypto.createHash('sha256').update(process.env.CENOBOTS_WEBHOOK_SECRET,'utf8').digest(); const cipher=crypto.createCipheriv('aes-256-gcm',key,iv); const ciphertext=Buffer.concat([cipher.update(JSON.stringify(message),'utf8'),cipher.final(),cipher.getAuthTag()]); return { iv:iv.toString('base64url'),encrypt:ciphertext.toString('base64url') };
+}
+
+function signedServiceWebhook(payload,eventId='service-event-test') {
+  const body=JSON.stringify(payload); const timestamp=String(Math.floor(Date.now()/1000)); const signature=crypto.createHmac('sha256',process.env.SERVICE_WEBHOOK_SECRET).update(`${timestamp}.${body}`).digest('hex');
+  return { body,headers:{ 'content-type':'application/json','x-altegro-event-id':eventId,'x-altegro-timestamp':timestamp,'x-altegro-signature':signature } };
 }
 
 async function startFakeSmtpServer() {
@@ -92,6 +98,10 @@ async function startFakeSmtpServer() {
     webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/cenobots`,{ method:'POST',headers:webhookHeaders,body:JSON.stringify(encryptedWebhook(webhookEvent)) });
     assert.equal(webhookResponse.status,200); assert.equal((await webhookResponse.json()).duplicate,true); assert.equal(state.cenobotsWebhookReceipts.size,1);
     webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/cenobots`,{ method:'POST',headers:{ ...webhookHeaders,'x-webhook-timestamp':String(Math.floor(Date.now()/1000)-1000) },body:JSON.stringify(encryptedWebhook(webhookEvent)) }); assert.equal(webhookResponse.status,401);
+    const serviceWebhook=signedServiceWebhook({ id:'SERVICE-TEST-1',status:'assigned',robotSerialNumber:'AX-DEMO-001',title:'Provider inspection',description:'Inspection imported from external service system.' });
+    webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/service`,{ method:'POST',headers:serviceWebhook.headers,body:serviceWebhook.body }); assert.equal(webhookResponse.status,200); assert.equal((await webhookResponse.json()).status,'created');
+    webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/service`,{ method:'POST',headers:serviceWebhook.headers,body:serviceWebhook.body }); assert.equal(webhookResponse.status,200); assert.equal((await webhookResponse.json()).duplicate,true); assert.equal(state.serviceWebhookReceipts.size,1);
+    webhookResponse=await fetch(`http://localhost:${port}/api/v1/webhooks/service`,{ method:'POST',headers:{ ...serviceWebhook.headers,'x-altegro-signature':'00' },body:serviceWebhook.body }); assert.equal(webhookResponse.status,401);
 
     const oldPasswordLogin = await loginWithPassword('admin@demo.altegro.local', 'demo');
     assert.equal(oldPasswordLogin.status, 401);
@@ -114,6 +124,9 @@ async function startFakeSmtpServer() {
     assert.equal(result.status, 200);
     assert.equal(result.body.user.role, 'platform_admin');
     result=await request('/api/v1/permissions'); assert.equal(result.status,200); assert.ok(result.body.data.permissions.includes('audit.export')); assert.ok(result.body.data.roles.some((item) => item.role === 'technician' && item.permissions.includes('work_order.update_assigned')));
+    result=await request('/api/v1/integrations/enterprise'); assert.equal(result.status,200); assert.equal(result.body.data.length,2); assert.ok(result.body.data.every((item) => item.mode === 'mock' && item.ready));
+    result=await request('/api/v1/adapters/crm-reference/sync',{ method:'POST',body:'{}' }); assert.equal(result.status,200); assert.equal(result.body.data.count,0);
+    result=await request('/api/v1/adapters/service-reference/sync',{ method:'POST',body:'{}' }); assert.equal(result.status,200); assert.equal(result.body.data.count,0);
     result = await request('/api/v1/email-notifications');
     assert.equal(result.status,200);
     assert.equal(result.body.data.configuration.enabled,true);

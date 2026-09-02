@@ -1,5 +1,7 @@
 # Altegro Phase 1 server prototype
 
+Current implementation status: [`Altegro_Phase1_Status_Report_2026-09-01.md`](Altegro_Phase1_Status_Report_2026-09-01.md). The July report is retained only as historical evidence.
+
 This is a dependency-free Node.js prototype for testing the first Altegro thin slice described in:
 
 - `Altegro_Projektbriefing_Entwickler.md`
@@ -294,6 +296,25 @@ Keep environment approval rules enabled for production. The target account needs
 
 Run `npm run test:e2e` for the automated browser-facing customer journey and performance budgets. It verifies login, static assets, support-ticket creation/replies, PDF download, concurrent API responses, a 1.5-second p95 response budget, and JavaScript/CSS size budgets. The same check is included in `npm test`.
 
+## Typed frontend migration
+
+The strict TypeScript Next.js/React application in `frontend/` is the incremental replacement for the large legacy `public/` frontend. It currently covers authentication/session handling, role-scoped navigation, fleet priorities, recent robots and provider health. Unmigrated journeys link back to the stable portal until parity tests pass.
+
+```bash
+npm run frontend:install
+npm run frontend:check
+npm run frontend:test
+npm run frontend:build
+```
+
+The migration sequence and cutover criteria are documented in [`docs/FRONTEND_MIGRATION.md`](docs/FRONTEND_MIGRATION.md).
+
+## CRM and service reference adapters
+
+`integrations/enterprise/adapter.js` supplies vendor-neutral CRM and service contracts. Both integrations use managed bearer tokens, HTTPS in production, response normalization and explicit readiness checks. CRM synchronization is idempotent by generic External Identity. Service synchronization links normalized tickets to robots and writes status changes to Passport and Outbox evidence.
+
+`POST /api/v1/webhooks/service` accepts signed service events using the raw-body HMAC contract documented in [`integrations/enterprise/README.md`](integrations/enterprise/README.md). Safe configuration status is available to authorized users at `GET /api/v1/integrations/enterprise`.
+
 CenoBots limits this account to less than one request per second, so calls are paced by `CENOBOTS_MIN_REQUEST_INTERVAL_SECONDS` (default `1.05`). Optional map, area, and mission-history collection is enabled with `CENOBOTS_RESOURCE_SYNC=true`; it is off by default to keep normal fleet synchronization fast.
 
 Append an immutable Passport entry:
@@ -391,4 +412,4 @@ The Compose configuration mounts a named volume for `/app/data`. For an internet
 
 ## Intentionally not production-ready
 
-PostgreSQL now stores durable state and queryable core projections, but the domain layer still maintains a process-local working set and currently supports a single web writer. The Outbox is persisted but does not yet have a transactional external publisher. The platform also does not yet implement OIDC, OpenAPI generation, signed Webhooks, distributed login throttling, or automatic object-retention policies. AutoXing and CenoBots can run through their configured read-only bridges, but production deployment still requires provider authorization, managed PostgreSQL/object storage, monitored backups, and restore drills.
+PostgreSQL now stores durable state and queryable core projections, but the domain layer still maintains a process-local working set and currently supports a single web writer. The Outbox is persisted but does not yet have a transactional external publisher. The platform also does not yet implement OIDC, generated API contracts, distributed login throttling, or automatic object-retention policies. A maintained OpenAPI baseline and signed service/CenoBots webhook contracts exist. AutoXing, CenoBots, CRM and service adapters still require provider authorization, real sandbox validation, managed infrastructure, monitored backups, and restore drills before production use.

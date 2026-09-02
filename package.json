@@ -9,10 +9,15 @@
     "import:legacy": "node scripts/import-legacy-state.js",
     "backup": "sh scripts/backup.sh",
     "restore": "sh scripts/restore.sh",
-    "test": "node infrastructure/test-infrastructure.js && node quality-test.js && ALTEGRO_PERSISTENCE_DRIVER=file OBJECT_STORAGE_DRIVER=inline ALTEGRO_SYNC_MODE=inline node test-server.js && node e2e-performance-test.js && python3 -m unittest integrations/cenobots/test_client.py integrations/cenobots/test_bridge.py integrations/cenobots/test_tasks.py integrations/cenobots/test_wrapper.py",
+    "test": "node infrastructure/test-infrastructure.js && node integrations/enterprise/test-adapter.js && node quality-test.js && ALTEGRO_PERSISTENCE_DRIVER=file OBJECT_STORAGE_DRIVER=inline ALTEGRO_SYNC_MODE=inline node test-server.js && node e2e-performance-test.js && python3 -m unittest integrations/cenobots/test_client.py integrations/cenobots/test_bridge.py integrations/cenobots/test_tasks.py integrations/cenobots/test_wrapper.py",
     "test:e2e": "node e2e-performance-test.js",
     "test:performance": "node e2e-performance-test.js",
-    "check": "node --check server.js && node --check public/app.js && node --check public/docs.js && node --check test-server.js && node --check quality-test.js"
+    "check": "node --check server.js && node --check public/app.js && node --check public/docs.js && node --check integrations/enterprise/adapter.js && node --check test-server.js && node --check quality-test.js",
+    "frontend:install": "npm --prefix frontend install",
+    "frontend:dev": "npm --prefix frontend run dev",
+    "frontend:build": "npm --prefix frontend run build",
+    "frontend:check": "npm --prefix frontend run check",
+    "frontend:test": "npm --prefix frontend test"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1109.0",

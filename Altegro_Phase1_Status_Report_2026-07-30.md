@@ -1,5 +1,7 @@
 # Altegro Phase 1 Status Report
 
+> Historical report. Superseded by `Altegro_Phase1_Status_Report_2026-09-01.md`; do not use this file as the current implementation status.
+
 **Date:** 30 July 2026  
 **Scope:** Current `ef_database` prototype compared with the binding developer briefing and Phase 1 technical specification.
 

@@ -290,6 +290,18 @@ html.reduce-motion *,html.reduce-motion *::before,html.reduce-motion *::after { 
 @media (max-width:900px) { .data-freshness { display:none; } }
 @media (max-width:700px) { .command-menu-button span:nth-child(2),.command-menu-button kbd { display:none; } .command-menu-button { padding:6px 8px; } .dashboard-tabs { position:sticky; top:8px; z-index:35; } }
 @media (prefers-reduced-motion:reduce) { .data-freshness.refreshing::before { animation:none; } }
+.workspace-secondary-hidden { display:none !important; }
+.dashboard-navigation { position:sticky; top:10px; z-index:20; display:flex; align-items:flex-start; gap:7px; margin-bottom:34px; }
+.dashboard-navigation .dashboard-tabs { position:static; margin-bottom:0; }
+.more-workspaces-button { flex:none; border:1px dashed var(--line); border-radius:11px; padding:14px 12px; background:var(--paper); color:var(--muted); font-size:10px; font-weight:750; white-space:nowrap; }
+.more-workspaces-button:hover { border-color:var(--pink); color:var(--pink-dark); background:var(--pink-soft); }
+.hero-more-actions { position:relative; }
+.hero-more-actions summary { list-style:none; cursor:pointer; }
+.hero-more-actions summary::-webkit-details-marker { display:none; }
+.hero-more-actions[open] summary { border-color:var(--pink); color:var(--pink-dark); }
+.hero-more-actions > div { position:absolute; z-index:30; right:0; top:calc(100% + 7px); display:grid; width:220px; gap:6px; padding:9px; border:1px solid var(--line); border-radius:10px; background:var(--paper); box-shadow:0 16px 44px rgba(31,18,25,.2); }
+.hero-more-actions > div .button { width:100%; justify-content:flex-start; }
+@media (max-width:700px) { .dashboard-navigation { position:sticky; top:8px; z-index:35; align-items:stretch; margin-bottom:25px; } .dashboard-navigation .dashboard-tabs { position:static; margin:0; } .more-workspaces-button { padding:8px; } .hero-more-actions > div { position:fixed; right:12px; left:12px; top:auto; width:auto; } }
 select:focus, input:focus, textarea:focus { border-color:#ef6aa6; box-shadow:0 0 0 3px #ffe1ee; }
 .button.primary { background:linear-gradient(135deg,#ff4f99,var(--blue)); box-shadow:0 8px 18px rgba(233,47,130,.18); }
 .button.primary:hover { background:linear-gradient(135deg,var(--blue),var(--pink-dark)); }

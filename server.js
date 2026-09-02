@@ -11,6 +11,7 @@ const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
 const { PostgresStore } = require('./infrastructure/postgres-store');
 const { S3ObjectStore } = require('./infrastructure/object-store');
+const { fetchProviderRecords, normalizeServiceCase, providerConfiguration: enterpriseProviderConfiguration, verifySignedWebhook } = require('./integrations/enterprise/adapter');
 
 function loadLocalEnv(filePath = process.env.ALTEGRO_ENV_FILE || pathUtil.join(__dirname, '.env')) {
   if (!fs.existsSync(filePath)) return;
@@ -101,11 +102,15 @@ function providerRuntimeStatus(provider) {
     const reasons=[]; if (!checks.python) reasons.push('Python runtime unavailable'); if (!checks.bridge) reasons.push('CenoBots bridge unavailable'); if (!checks.credentials) reasons.push('CenoBots credentials incomplete');
     return { provider,mode:liveEnabled ? 'live' : 'mock',liveEnabled,ready:!liveEnabled || Object.values(checks).every(Boolean),checks,reasons };
   }
+  if (provider === 'crm-reference' || provider === 'service-reference') {
+    const kind=provider === 'crm-reference' ? 'crm' : 'service'; const config=enterpriseProviderConfiguration(kind);
+    return { provider,mode:config.mode,liveEnabled:config.liveEnabled,ready:config.ready,checks:{ baseUrl:config.baseUrlConfigured,credentials:config.tokenConfigured },reasons:config.reasons };
+  }
   return { provider,mode:'mock',liveEnabled:false,ready:true,checks:{},reasons:[] };
 }
 function assertLiveProviderRuntimeConfiguration() {
   if (process.env.NODE_ENV !== 'production') return;
-  const invalid=['autoxing','cenobots'].map(providerRuntimeStatus).filter((status) => status.liveEnabled && !status.ready);
+  const invalid=['autoxing','cenobots','crm-reference','service-reference'].map(providerRuntimeStatus).filter((status) => status.liveEnabled && !status.ready);
   if (invalid.length) throw new Error(`Live provider runtime configuration failed: ${invalid.map((item) => `${item.provider}: ${item.reasons.join(', ')}`).join('; ')}`);
 }
 function managedSecretStatus() {
@@ -115,6 +120,9 @@ function managedSecretStatus() {
     { name:'cenobots-webhook', enabled:Boolean(process.env.CENOBOTS_WEBHOOK_SECRET || process.env.CENOBOTS_WEBHOOK_SECRET_FILE), names:['CENOBOTS_WEBHOOK_SECRET'] },
     { name:'email', enabled:enabled(process.env.EMAIL_ALERTS_ENABLED) && Boolean(process.env.EMAIL_SMTP_USERNAME), names:['EMAIL_SMTP_PASSWORD'] },
     { name:'sms', enabled:enabled(process.env.SMS_ALERTS_ENABLED) && Boolean(process.env.SMS_ALERT_WEBHOOK_TOKEN || process.env.SMS_ALERT_WEBHOOK_TOKEN_FILE), names:['SMS_ALERT_WEBHOOK_TOKEN'] },
+    { name:'crm', enabled:enabled(process.env.CRM_INTEGRATION_LIVE), names:['CRM_INTEGRATION_TOKEN'] },
+    { name:'service', enabled:enabled(process.env.SERVICE_INTEGRATION_LIVE), names:['SERVICE_INTEGRATION_TOKEN'] },
+    { name:'service-webhook', enabled:Boolean(process.env.SERVICE_WEBHOOK_SECRET || process.env.SERVICE_WEBHOOK_SECRET_FILE), names:['SERVICE_WEBHOOK_SECRET'] },
     { name:'postgres',enabled:postgresPersistenceEnabled(),names:['PGPASSWORD'] },
     { name:'object-storage',enabled:OBJECT_STORAGE_DRIVER === 's3' && Boolean(process.env.OBJECT_STORAGE_ENDPOINT),names:['OBJECT_STORAGE_ACCESS_KEY','OBJECT_STORAGE_SECRET_KEY'] }
   ];
@@ -299,6 +307,7 @@ const state = {
   notificationReads: new Map(),
   workOrders: new Map(),
   cenobotsWebhookReceipts: new Map(),
+  serviceWebhookReceipts: new Map(),
   maintenanceSchedules: new Map(),
   alertEscalationRules: new Map(),
   alertEscalations: new Map(),
@@ -385,7 +394,7 @@ function persistedSnapshot() {
     sessions: mapEntries(authenticatedSessions).filter(([, session]) => session.expiresAt > Date.now()),
     state: {
       tenants: mapEntries(state.tenants), organizations: mapEntries(state.organizations), sites: mapEntries(state.sites), models: mapEntries(state.models), robots: mapEntries(state.robots),
-      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), notificationWorkflows:mapEntries(state.notificationWorkflows), notificationReads:mapEntries(state.notificationReads), workOrders:mapEntries(state.workOrders), cenobotsWebhookReceipts:mapEntries(state.cenobotsWebhookReceipts), maintenanceSchedules:mapEntries(state.maintenanceSchedules), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
+      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), notificationWorkflows:mapEntries(state.notificationWorkflows), notificationReads:mapEntries(state.notificationReads), workOrders:mapEntries(state.workOrders), cenobotsWebhookReceipts:mapEntries(state.cenobotsWebhookReceipts), serviceWebhookReceipts:mapEntries(state.serviceWebhookReceipts), maintenanceSchedules:mapEntries(state.maintenanceSchedules), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
       deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox, emailDeliveries:state.emailDeliveries, smsDeliveries:state.smsDeliveries, trackingSamples:mapEntries(state.trackingSamples),
       autoxing: { ...state.autoxing, pois: mapEntries(state.autoxing.pois), areas: mapEntries(state.autoxing.areas), maps: mapEntries(state.autoxing.maps), tasks: mapEntries(state.autoxing.tasks) },
       adapterRuntime: mapEntries(state.adapters).map(([provider, adapter]) => [provider, { lastSyncAt: adapter.lastSyncAt || null, lastSyncStatus: adapter.lastSyncStatus || 'never', lastError: adapter.lastError || null, lastSyncDurationMs:adapter.lastSyncDurationMs || null, lastSyncCount:adapter.lastSyncCount ?? null, lastSyncWarnings:adapter.lastSyncWarnings || 0, syncHistory:clone(adapter.syncHistory || []) }])
@@ -428,7 +437,7 @@ function hydratePersistedState(saved) {
   if (demoUsers['demo-technician']) demoUsers['demo-technician'].technicianId ||= 'technician-lena';
   initializeCredentialHashes();
   replaceMap(authenticatedSessions,(saved.sessions || []).filter(([,session]) => session.expiresAt > Date.now()));
-  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','notificationWorkflows','notificationReads','workOrders','cenobotsWebhookReceipts','maintenanceSchedules','alertEscalationRules','alertEscalations','trackingSamples']) replaceMap(state[name],saved.state[name]);
+  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','notificationWorkflows','notificationReads','workOrders','cenobotsWebhookReceipts','serviceWebhookReceipts','maintenanceSchedules','alertEscalationRules','alertEscalations','trackingSamples']) replaceMap(state[name],saved.state[name]);
   for (const name of ['documents','certificates','deployments','compatibilityRecords','events','audit','outbox','emailDeliveries','smsDeliveries']) if (Array.isArray(saved.state[name])) state[name]=saved.state[name];
   const autoXing=saved.state.autoxing || {};
   state.autoxing.businesses=autoXing.businesses || []; state.autoxing.buildings=autoXing.buildings || []; state.autoxing.lastSyncAt=autoXing.lastSyncAt || null; state.autoxing.resourceErrors=autoXing.resourceErrors || [];
@@ -552,6 +561,14 @@ function seed() {
     provider: 'mock-oem', version: '1.0.0', status: 'certified-test-adapter',
     capabilities: { read: ['identity', 'status'], event: ['status'], command: [] },
     sync: () => ({ externalId: 'MOCK-1001', modelId: 'model-mock-m3', serialNumber: 'MOCK-DEMO-001', status: 'active', battery: 100, eventType: 'online' })
+  });
+  state.adapters.set('crm-reference', {
+    provider:'crm-reference',version:'enterprise-contract-v1',status:enterpriseProviderConfiguration('crm').liveEnabled ? 'live-api-enabled' : 'mock-only',integration:'integrations/enterprise/adapter.js',
+    capabilities:{ read:['customer_identity','organization','site','account_owner'],event:['organization_changed'],command:[] },lastSyncAt:null,lastSyncStatus:'never',lastError:null,lastSyncDurationMs:null,lastSyncCount:null,lastSyncWarnings:0,syncHistory:[]
+  });
+  state.adapters.set('service-reference', {
+    provider:'service-reference',version:'enterprise-contract-v1',status:enterpriseProviderConfiguration('service').liveEnabled ? 'live-api-enabled' : 'mock-only',integration:'integrations/enterprise/adapter.js',
+    capabilities:{ read:['service_case','status','assignment','resolution','parts'],event:['service_case_changed'],command:[] },lastSyncAt:null,lastSyncStatus:'never',lastError:null,lastSyncDurationMs:null,lastSyncCount:null,lastSyncWarnings:0,syncHistory:[]
   });
 
   syncAdapter('autoxing', 'seed');
@@ -1088,12 +1105,60 @@ async function syncCenoBotsLive(actor) {
   return { provider:'cenobots',mode:'live',adapterVersion:'open-api-v1.0.16',source:bridge.wrapper || 'integrations/cenobots/client.py',robots:synced,count:synced.length,changes:{ created:createdCount,updated:updatedCount,unchanged:0,failed:0 },resources:clone(bridge.resources || {}),resourceErrors:clone(resourceErrors),commandCapabilitiesEnabled:cenoBotsControlConfiguration().ready };
 }
 
+function enterpriseRobot(record) {
+  if (record.robotSerialNumber) {
+    const serial=record.robotSerialNumber.toLowerCase();
+    const match=[...state.robots.values()].find((robot) => robot.serialNumber.toLowerCase() === serial);
+    if (match) return match;
+  }
+  if (record.robotExternalId) return [...state.robots.values()].find((robot) => robot.externalIdentities?.some((identity) => String(identity.externalId) === record.robotExternalId)) || null;
+  return null;
+}
+
+function applyEnterpriseServiceCase(record,actor,{ source='service-reference' }={}) {
+  const robot=enterpriseRobot(record); if (!robot || !visibleToActor(actor,robot)) return { status:'unmatched_robot',record };
+  const key=`${source}:${record.externalId}`; const existing=state.serviceCases.get(key); const previousStatus=existing?.status || null; const now=timestamp();
+  const serviceCase=existing || { id:ids(),robotId:robot.id,tenantId:robot.tenantId,provider:source,externalId:record.externalId,createdAt:now };
+  Object.assign(serviceCase,{ title:record.title,description:record.description,severity:record.severity,status:record.status,cause:record.cause,action:record.action,parts:record.parts,assignedTo:record.assignedTo,rawVersion:record.rawVersion,updatedAt:now,closedAt:record.status === 'closed' ? serviceCase.closedAt || now : null });
+  state.serviceCases.set(key,serviceCase);
+  if (!existing) appendPassportEntry(robot.id,{ type:record.status === 'closed' ? 'service_completion' : 'service_case',source,data:{ serviceCaseId:serviceCase.id,externalId:serviceCase.externalId,status:serviceCase.status,title:serviceCase.title } },actor);
+  else if (previousStatus !== serviceCase.status) appendPassportEntry(robot.id,{ type:serviceCase.status === 'closed' ? 'service_completion' : 'service_status_changed',source,data:{ serviceCaseId:serviceCase.id,externalId:serviceCase.externalId,from:previousStatus,to:serviceCase.status,cause:serviceCase.cause,action:serviceCase.action,parts:serviceCase.parts } },actor);
+  appendOutbox(existing ? 'service_case.updated' : 'service_case.linked','service_case',serviceCase.id,{ provider:source,externalId:serviceCase.externalId,status:serviceCase.status,previousStatus });
+  return { status:existing ? previousStatus === serviceCase.status ? 'unchanged' : 'updated' : 'created',serviceCase,robot };
+}
+
+async function syncCrmReference(actor) {
+  const adapter=state.adapters.get('crm-reference'); const startedAt=Date.now(); const payload=await fetchProviderRecords('crm'); let created=0; let updated=0; let sitesCreated=0;
+  for (const record of payload.records) {
+    let organization=[...state.organizations.values()].find((item) => item.tenantId === actor.tenantId && item.externalIdentities?.some((identity) => identity.system === 'crm-reference' && identity.externalId === record.externalId));
+    if (!organization) { organization={ id:ids(),tenantId:actor.tenantId,type:record.type,name:record.name,status:record.status,accountOwner:record.accountOwner,externalIdentities:[{ system:'crm-reference',externalId:record.externalId }],createdAt:timestamp(),updatedAt:timestamp() }; state.organizations.set(organization.id,organization); created += 1; }
+    else { Object.assign(organization,{ type:record.type,name:record.name,status:record.status,accountOwner:record.accountOwner,updatedAt:timestamp() }); updated += 1; }
+    for (const siteRecord of record.sites) {
+      let site=[...state.sites.values()].find((item) => item.tenantId === actor.tenantId && item.externalIdentities?.some((identity) => identity.system === 'crm-reference' && identity.externalId === siteRecord.externalId));
+      if (!site) { site={ id:ids(),tenantId:actor.tenantId,organizationId:organization.id,name:siteRecord.name,country:siteRecord.country,timezone:siteRecord.timezone,status:siteRecord.status,externalIdentities:[{ system:'crm-reference',externalId:siteRecord.externalId }],createdAt:timestamp(),updatedAt:timestamp() }; state.sites.set(site.id,site); sitesCreated += 1; }
+      else Object.assign(site,{ organizationId:organization.id,name:siteRecord.name,country:siteRecord.country,timezone:siteRecord.timezone,status:siteRecord.status,updatedAt:timestamp() });
+    }
+    appendOutbox('crm.organization.synchronized','organization',organization.id,{ externalId:record.externalId,rawVersion:record.rawVersion });
+  }
+  recordAdapterSync(adapter,{ status:'success',startedAt,count:payload.records.length,trigger:'manual' }); schedulePersist();
+  return { provider:'crm-reference',mode:payload.mode,count:payload.records.length,changes:{ created,updated,sitesCreated,failed:0 },commandCapabilitiesEnabled:false };
+}
+
+async function syncServiceReference(actor) {
+  const adapter=state.adapters.get('service-reference'); const startedAt=Date.now(); const payload=await fetchProviderRecords('service'); const changes={ created:0,updated:0,unchanged:0,unmatched:0,failed:0 };
+  for (const record of payload.records) { const result=applyEnterpriseServiceCase(record,actor); if (result.status === 'unmatched_robot') changes.unmatched += 1; else changes[result.status] += 1; }
+  recordAdapterSync(adapter,{ status:'success',startedAt,count:payload.records.length,warnings:changes.unmatched,trigger:'manual' }); schedulePersist();
+  return { provider:'service-reference',mode:payload.mode,count:payload.records.length,changes,resourceErrors:changes.unmatched ? [{ code:'UNMATCHED_ROBOT',count:changes.unmatched,message:'Service records could not be linked to a visible robot.' }] : [],commandCapabilitiesEnabled:false };
+}
+
 async function executeProviderSync(provider,actor,trigger='manual') {
   if (!state.adapters.has(provider)) throw httpError(404,`Unknown adapter: ${provider}`);
   const started=Date.now();
   try {
     if (provider === 'autoxing' && autoXingLiveEnabled()) return await syncAutoXingLive(actor);
     if (provider === 'cenobots' && cenoBotsLiveEnabled()) return await syncCenoBotsLive(actor);
+    if (provider === 'crm-reference') return await syncCrmReference(actor);
+    if (provider === 'service-reference') return await syncServiceReference(actor);
     return syncAdapter(provider,actor.id);
   } catch(error) {
     recordAdapterSync(state.adapters.get(provider),{ status:'error',startedAt:started,error:error.message,trigger });
@@ -1367,6 +1432,21 @@ async function handleCenoBotsWebhook(req,res) {
   return send(res,result.receipt.status === 'unmatched_robot' ? 202 : 200,{ received:true,duplicate:result.duplicate,eventId:result.receipt.id,status:result.receipt.status });
 }
 
+async function handleServiceWebhook(req,res) {
+  const signingSecret=secretEnvValue('SERVICE_WEBHOOK_SECRET'); if (!signingSecret) throw httpError(503,'Service webhook secret is not configured');
+  if (!String(req.headers['content-type'] || '').toLowerCase().includes('application/json')) throw httpError(415,'Service webhooks require application/json');
+  const timestampHeader=String(req.headers['x-altegro-timestamp'] || '').trim(); const signature=String(req.headers['x-altegro-signature'] || '').trim(); const raw=await readRawBody(req);
+  if (!verifySignedWebhook(raw,{ signature,timestamp:timestampHeader,secret:signingSecret,toleranceSeconds:Math.max(30,Number(process.env.SERVICE_WEBHOOK_FRESHNESS_SECONDS || 300)) })) throw httpError(401,'Service webhook signature is missing, stale, or invalid');
+  let payload; try { payload=JSON.parse(raw); } catch { throw httpError(400,'Service webhook body must be valid JSON'); }
+  const eventId=String(req.headers['x-altegro-event-id'] || payload.eventId || payload.id || '').trim(); if (!eventId) throw httpError(400,'Service webhook event ID is required');
+  const existing=state.serviceWebhookReceipts.get(eventId); if (existing) return send(res,200,{ received:true,duplicate:true,eventId,status:existing.status });
+  let record; try { record=normalizeServiceCase(payload.data || payload); } catch(error) { throw httpError(400,error.message); }
+  const actor={ id:'system-service-webhook',name:'Service Webhook',role:'platform_admin',tenantId:String(process.env.SERVICE_WEBHOOK_TENANT_ID || 'tenant-demo'),organizationId:'org-ef' };
+  const result=applyEnterpriseServiceCase(record,actor); const receipt={ id:eventId,status:result.status,externalId:record.externalId,robotId:result.robot?.id || null,receivedAt:timestamp() };
+  state.serviceWebhookReceipts.set(eventId,receipt); appendOutbox('service.webhook.received','service_webhook',eventId,receipt); recordAudit(actor,'service.webhook.ingest',result.robot ? 'robot' : 'service_case',result.robot?.id || record.externalId,result.status === 'unmatched_robot' ? 'warning' : 'success',{ eventId,externalId:record.externalId }); await persistState();
+  return send(res,result.status === 'unmatched_robot' ? 202 : 200,{ received:true,duplicate:false,eventId,status:result.status });
+}
+
 function notificationWorkflow(notificationId) {
   const workflow=state.notificationWorkflows.get(notificationId); if (workflow?.status === 'snoozed' && workflow.snoozeUntil && Date.parse(workflow.snoozeUntil) <= Date.now()) return { ...workflow,status:'open',snoozeUntil:null };
   return workflow || { status:'open',technicianId:null,technicianName:null,note:'',snoozeUntil:null,updatedAt:null,updatedBy:null };
@@ -1495,6 +1575,15 @@ function readBody(req) {
   });
 }
 
+function readRawBody(req) {
+  return new Promise((resolve,reject) => {
+    const chunks=[]; let bytes=0; let tooLarge=false;
+    req.on('data',(chunk) => { if (tooLarge) return; bytes += chunk.length; if (bytes > MAX_JSON_BODY_BYTES) { tooLarge=true; reject(httpError(413,'Request body is limited to 5 MB')); return; } chunks.push(Buffer.from(chunk)); });
+    req.on('end',() => { if (!tooLarge) resolve(Buffer.concat(chunks).toString('utf8')); });
+    req.on('error',reject);
+  });
+}
+
 function httpError(status, message, details) {
   const error = new Error(message); error.status = status; error.details = details; return error;
 }
@@ -1613,7 +1702,7 @@ function systemReadiness() {
   checks.push({ name:'persistence',ok:storageOk,detail:persistenceDetail });
   if (OBJECT_STORAGE_DRIVER === 's3') { const health=objectStore?.health() || { ready:false,error:'not initialized' }; checks.push({ name:'object-storage',ok:health.ready,detail:health.ready ? `s3 bucket ${health.bucket} ready` : `s3 unavailable: ${health.error}` }); }
   else checks.push({ name:'object-storage',ok:process.env.NODE_ENV !== 'production',detail:'inline legacy/test mode' });
-  for (const provider of ['autoxing','cenobots']) { const runtime=providerRuntimeStatus(provider); checks.push({ name:`provider-${provider}`,ok:runtime.ready,detail:runtime.liveEnabled ? runtime.ready ? 'live runtime ready' : runtime.reasons.join('; ') : 'mock mode' }); }
+  for (const provider of ['autoxing','cenobots','crm-reference','service-reference']) { const runtime=providerRuntimeStatus(provider); checks.push({ name:`provider-${provider}`,ok:runtime.ready,detail:runtime.liveEnabled ? runtime.ready ? 'live runtime ready' : runtime.reasons.join('; ') : 'mock mode' }); }
   return { ready:checks.every((check) => check.ok), checks };
 }
 
@@ -1686,6 +1775,7 @@ async function handle(req, res) {
   if (req.method === 'GET' && path === '/ready') { const readiness=systemReadiness(); return send(res,readiness.ready ? 200 : 503,{ status:readiness.ready ? 'ready' : 'not_ready',...readiness,now:timestamp() }); }
   if (req.method === 'GET' && path === '/metrics') { if (!metricsAuthorized(req)) throw httpError(401,'A valid monitoring token is required'); return sendPrometheusMetrics(res); }
   if (req.method === 'POST' && path === '/api/v1/webhooks/cenobots') return handleCenoBotsWebhook(req,res);
+  if (req.method === 'POST' && path === '/api/v1/webhooks/service') return handleServiceWebhook(req,res);
   if (req.method === 'GET' && path === '/api/v1/demo/tokens') {
     throw httpError(404, 'Static demo bearer tokens are disabled; sign in with username and password');
   }
@@ -1716,6 +1806,10 @@ async function handle(req, res) {
   const body = ['POST', 'PUT', 'PATCH'].includes(req.method) ? await readBody(req) : {};
 
   if (req.method === 'GET' && path === '/api/v1/operations/summary') return send(res, 200, { data: operationsSummary(actor) });
+  if (req.method === 'GET' && path === '/api/v1/integrations/enterprise') {
+    if (!hasPermission(actor,'integration.read')) throw httpError(403,'Integration read permission required');
+    return send(res,200,{ data:['crm','service'].map((kind) => { const config=enterpriseProviderConfiguration(kind); return { kind,provider:config.provider,mode:config.mode,ready:config.ready,reasons:config.reasons,baseUrlConfigured:config.baseUrlConfigured,tokenConfigured:config.tokenConfigured,recordsPath:config.recordsPath,lastSyncAt:state.adapters.get(config.provider)?.lastSyncAt || null,lastSyncStatus:state.adapters.get(config.provider)?.lastSyncStatus || 'never' }; }) });
+  }
   if (req.method === 'GET' && path === '/api/v1/tracking/live') return send(res,200,{ data:fleetTrackingSnapshot(actor) });
   if (req.method === 'GET' && path === '/api/v1/permissions') return send(res,200,{ data:{ role:actor.role,permissions:permissionsFor(actor),roles:Object.entries(ROLE_PERMISSIONS).map(([role,permissions]) => ({ role,permissions:[...permissions] })) } });
   if (req.method === 'GET' && path === '/api/v1/customer-dashboard') return send(res,200,{ data:customerDashboard(actor,url.searchParams.get('organizationId')) });
@@ -2063,7 +2157,7 @@ async function handle(req, res) {
   if (sync && req.method === 'POST') {
     if (!canWrite(actor)) throw httpError(403, 'Write permission required');
     if (!state.adapters.has(sync.id)) throw httpError(404,`Unknown adapter: ${sync.id}`);
-    if (asyncSyncEnabled()) { if (!['autoxing','cenobots'].includes(sync.id)) throw httpError(400,'Only live provider adapters can be queued'); const job=await enqueueProviderSync(sync.id,actor); return send(res,202,{ data:job }); }
+    if (asyncSyncEnabled() && ['autoxing','cenobots'].includes(sync.id)) { const job=await enqueueProviderSync(sync.id,actor); return send(res,202,{ data:job }); }
     const result=await executeProviderSync(sync.id,actor); recordAudit(actor,'adapter.sync','adapter',sync.id,'success',{ count:result.count ?? 1 }); return send(res,200,{ data:result });
   }
 

@@ -44,6 +44,7 @@
     </header>
 
     <main class="shell" id="mainContent" tabindex="-1">
+      <div class="dashboard-navigation">
       <nav class="dashboard-tabs" id="dashboardTabs" role="tablist" aria-label="Dashboard sections">
         <button id="overviewTab" type="button" role="tab" aria-selected="true" aria-controls="overviewView" data-dashboard-tab="overview" data-i18n="overview">Overview</button>
         <button id="trackingTab" type="button" role="tab" aria-selected="false" aria-controls="trackingView" data-dashboard-tab="tracking">Live Tracking</button>
@@ -56,6 +57,8 @@
         <button id="supportTab" type="button" role="tab" aria-selected="false" aria-controls="supportView" data-dashboard-tab="support" data-i18n="support">Support</button>
         <button id="adminTab" type="button" role="tab" aria-selected="false" aria-controls="adminView" data-dashboard-tab="admin" data-i18n="administration">Administration</button>
       </nav>
+      <button id="moreWorkspacesButton" class="more-workspaces-button" type="button" aria-expanded="false" aria-controls="dashboardTabs">More workspaces</button>
+      </div>
       <section class="hero" id="overviewView" data-dashboard-view="overview" role="tabpanel" aria-labelledby="overviewTab">
         <div>
           <p class="eyebrow" id="roleDashboardEyebrow">Operations center / Demo Customer Tenant</p>
@@ -63,14 +66,16 @@
           <p class="hero-copy" id="roleDashboardCopy">A manufacturer-neutral view of robots, lifecycle history, events and integrations.</p>
         </div>
         <div class="hero-actions">
-          <button class="button secondary" id="exportTenant">Export tenant</button>
-          <button class="button secondary" id="exportRobotsCsv">Export robots CSV</button>
           <button class="button primary sync-button" id="syncAll"><span class="button-label">Sync all robots</span></button>
-          <button class="button secondary sync-button" id="syncAutoXing"><span class="button-label">Sync AutoXing</span></button>
-          <button class="button secondary sync-button" id="syncCenoBots"><span class="button-label">Sync CenoBots</span></button>
-          <button class="button secondary" id="serviceTechniciansButton" type="button">Service Technicians</button>
-          <button class="button secondary" id="customizeDashboard" type="button" aria-haspopup="dialog" aria-controls="dashboardCustomizationDialog">Customize dashboard</button>
           <button class="button primary" id="newRobotButton">＋ Register robot</button>
+          <details class="hero-more-actions"><summary class="button secondary">More actions</summary><div>
+            <button class="button secondary" id="exportTenant">Export tenant</button>
+            <button class="button secondary" id="exportRobotsCsv">Export robots CSV</button>
+            <button class="button secondary sync-button" id="syncAutoXing"><span class="button-label">Sync AutoXing</span></button>
+            <button class="button secondary sync-button" id="syncCenoBots"><span class="button-label">Sync CenoBots</span></button>
+            <button class="button secondary" id="serviceTechniciansButton" type="button">Service Technicians</button>
+            <button class="button secondary" id="customizeDashboard" type="button" aria-haspopup="dialog" aria-controls="dashboardCustomizationDialog">Customize dashboard</button>
+          </div></details>
         </div>
       </section>
       <section class="role-dashboard panel" id="roleDashboard" data-dashboard-view="overview" data-dashboard-widget="priorities" aria-labelledby="roleDashboardHeading">
