@@ -12,10 +12,21 @@ services:
       EMAIL_SMTP_SECURE: "${EMAIL_SMTP_SECURE:-true}"
       EMAIL_SMTP_USERNAME: "${EMAIL_SMTP_USERNAME:?Set EMAIL_SMTP_USERNAME}"
       EMAIL_SMTP_PASSWORD_FILE: /run/secrets/altegro_smtp_password
-      ALTEGRO_PUBLIC_URL: "${ALTEGRO_PUBLIC_URL:-http://localhost:3000}"
+      SMS_ALERTS_ENABLED: "true"
+      SMS_ALERT_TRANSPORT: webhook
+      SMS_ALERT_RECIPIENTS: "${SMS_ALERT_RECIPIENTS:?Set SMS_ALERT_RECIPIENTS in E.164 format}"
+      SMS_ALERT_MIN_SEVERITY: "${SMS_ALERT_MIN_SEVERITY:-critical}"
+      SMS_ALERT_COOLDOWN_MINUTES: "${SMS_ALERT_COOLDOWN_MINUTES:-60}"
+      SMS_ALERT_WEBHOOK_URL: "${SMS_ALERT_WEBHOOK_URL:?Set the HTTPS SMS provider webhook URL}"
+      SMS_ALERT_WEBHOOK_TOKEN_FILE: /run/secrets/altegro_sms_webhook_token
+      SMS_ALERT_TIMEOUT_MS: "${SMS_ALERT_TIMEOUT_MS:-10000}"
+      ALTEGRO_PUBLIC_URL: "${ALTEGRO_PUBLIC_URL:-https://altegro.de}"
     secrets:
       - altegro_smtp_password
+      - altegro_sms_webhook_token
 
 secrets:
   altegro_smtp_password:
+    external: true
+  altegro_sms_webhook_token:
     external: true

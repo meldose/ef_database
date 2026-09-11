@@ -19,4 +19,10 @@ describe('role navigation', () => {
     expect(legacyWorkspacePath('service')).toBe('/dashboard/operations');
     expect(legacyWorkspacePath('reports')).toBe('/dashboard/reports');
   });
+
+  it('shows audit evidence only to roles with audit access', () => {
+    expect(navigationForRole('auditor').map((item) => item.id)).toContain('audit');
+    expect(navigationForRole('owner').map((item) => item.id)).toContain('audit');
+    expect(navigationForRole('robot_user').map((item) => item.id)).not.toContain('audit');
+  });
 });

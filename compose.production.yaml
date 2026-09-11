@@ -7,7 +7,7 @@ services:
       ALTEGRO_ENFORCE_HTTPS: "true"
       ALTEGRO_TRUST_PROXY: "true"
       ALTEGRO_ALLOWED_HOSTS: ${ALTEGRO_ALLOWED_HOSTS:-altegro.de,www.altegro.de}
-      ALTEGRO_ALLOWED_ORIGINS: ${ALTEGRO_ALLOWED_ORIGINS:-https://altegro.de}
+      ALTEGRO_ALLOWED_ORIGINS: ${ALTEGRO_ALLOWED_ORIGINS:-https://altegro.de,https://www.altegro.de}
       ALTEGRO_PUBLIC_URL: ${ALTEGRO_PUBLIC_URL:-https://altegro.de}
       ALTEGRO_HSTS_ENABLED: "true"
       ALTEGRO_HSTS_MAX_AGE: "31536000"
@@ -56,6 +56,34 @@ services:
         source: ${AUTOXING_REPO_HOST_PATH:-../autoxing}
         target: /opt/autoxing
         read_only: true
+
+  frontend:
+    image: ${ALTEGRO_FRONTEND_IMAGE:-altegro-frontend:local}
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: "3001"
+      ALTEGRO_API_ORIGIN: http://altegro:3000
+      LEGAL_OPERATOR_NAME: ${LEGAL_OPERATOR_NAME:-}
+      LEGAL_REPRESENTATIVE: ${LEGAL_REPRESENTATIVE:-}
+      LEGAL_STREET: ${LEGAL_STREET:-}
+      LEGAL_CITY: ${LEGAL_CITY:-}
+      LEGAL_COUNTRY: ${LEGAL_COUNTRY:-Deutschland}
+      LEGAL_EMAIL: ${LEGAL_EMAIL:-}
+      LEGAL_PHONE: ${LEGAL_PHONE:-}
+      LEGAL_REGISTER: ${LEGAL_REGISTER:-}
+      LEGAL_VAT_ID: ${LEGAL_VAT_ID:-}
+      LEGAL_CONTENT_RESPONSIBLE: ${LEGAL_CONTENT_RESPONSIBLE:-}
+    depends_on:
+      altegro:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    restart: unless-stopped
 
   postgres:
     environment:

@@ -5,15 +5,28 @@
   }
 }
 
-{$ALTEGRO_DOMAIN:altegro.de} {
+{$ALTEGRO_DOMAIN:altegro.de}, www.{$ALTEGRO_DOMAIN:altegro.de} {
   encode zstd gzip
   header {
     -Server
     Strict-Transport-Security "max-age=31536000; includeSubDomains"
   }
-  reverse_proxy altegro:3000 {
-    health_uri /ready
-    health_interval 30s
+  @www host www.{$ALTEGRO_DOMAIN:altegro.de}
+  redir @www https://{$ALTEGRO_DOMAIN:altegro.de}{uri} permanent
+
+  @backend path /api/* /health /ready /metrics /docs /docs/* /docs.js /openapi.json /styles.css
+  handle @backend {
+    reverse_proxy altegro:3000 {
+      health_uri /ready
+      health_interval 30s
+    }
+  }
+
+  handle {
+    reverse_proxy frontend:3001 {
+      health_uri /
+      health_interval 30s
+    }
   }
   log {
     output stdout

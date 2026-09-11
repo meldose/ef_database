@@ -1,6 +1,6 @@
 import type { AltegroRole } from './types';
 
-export type Workspace = 'overview' | 'robots' | 'service' | 'workforce' | 'reports' | 'integrations' | 'administration';
+export type Workspace = 'overview' | 'robots' | 'service' | 'workforce' | 'reports' | 'audit' | 'integrations' | 'administration';
 
 export interface NavigationItem {
   id: Workspace;
@@ -14,6 +14,7 @@ export const navigation: NavigationItem[] = [
   { id:'service',label:'Events & service' },
   { id:'workforce',label:'Technicians',roles:['platform_admin','data_admin','support_admin','technician','owner'] },
   { id:'reports',label:'Reports' },
+  { id:'audit',label:'Audit log',roles:['platform_admin','data_admin','support_admin','owner','technician','auditor'] },
   { id:'integrations',label:'Integrations',roles:['platform_admin','data_admin','support_admin'] },
   { id:'administration',label:'Administration',roles:['platform_admin','data_admin','support_admin'] }
 ];
@@ -23,5 +24,7 @@ export function navigationForRole(role: AltegroRole): NavigationItem[] {
 }
 
 export function legacyWorkspacePath(workspace: Workspace): string {
-  return `/dashboard/${workspace === 'service' ? 'operations' : workspace}`;
+  if (workspace === 'service') return '/dashboard/operations';
+  if (workspace === 'audit') return '/dashboard/administration';
+  return `/dashboard/${workspace}`;
 }

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './styles.css';
+import './features.css';
 
 export const metadata: Metadata = {
   title: 'Altegro · Robot Operations',

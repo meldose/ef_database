@@ -14,13 +14,39 @@ services:
     depends_on:
       altegro:
         condition: service_healthy
+      alertmanager:
+        condition: service_started
+      blackbox:
+        condition: service_started
     ports:
       - "127.0.0.1:${PROMETHEUS_HOST_PORT:-9090}:9090"
     restart: unless-stopped
 
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    entrypoint: ["/bin/sh", "/etc/alertmanager/entrypoint.sh"]
+    volumes:
+      - ./monitoring/alertmanager-entrypoint.sh:/etc/alertmanager/entrypoint.sh:ro
+      - altegro-alertmanager:/alertmanager
+    secrets:
+      - altegro_monitoring_webhook_url
+    ports:
+      - "127.0.0.1:${ALERTMANAGER_HOST_PORT:-9093}:9093"
+    restart: unless-stopped
+
+  blackbox:
+    image: prom/blackbox-exporter:v0.27.0
+    command: ["--config.file=/etc/blackbox/blackbox.yml"]
+    volumes:
+      - ./monitoring/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    restart: unless-stopped
+
 volumes:
   altegro-prometheus:
+  altegro-alertmanager:
 
 secrets:
   altegro_metrics_token:
+    external: true
+  altegro_monitoring_webhook_url:
     external: true

@@ -298,7 +298,7 @@ Run `npm run test:e2e` for the automated browser-facing customer journey and per
 
 ## Typed frontend migration
 
-The strict TypeScript Next.js/React application in `frontend/` is the incremental replacement for the large legacy `public/` frontend. It currently covers authentication/session handling, role-scoped navigation, fleet priorities, recent robots and provider health. Unmigrated journeys link back to the stable portal until parity tests pass.
+The strict TypeScript Next.js/React application in `frontend/` is the incremental replacement for the large legacy `public/` frontend. It covers authentication/session handling, role-scoped navigation, fleet priorities, recent robots, provider health, advanced analytics, predictive maintenance, automatically refreshed failure alerts, recurring maintenance scheduling, and detailed audit filtering/export. Unmigrated journeys link back to the stable portal until parity tests pass.
 
 ```bash
 npm run frontend:install

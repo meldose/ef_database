@@ -15,9 +15,53 @@ groups:
           severity: warning
         annotations:
           summary: "{{ $labels.provider }} synchronization is failing"
+      - alert: AltegroProviderRuntimeNotReady
+        expr: altegro_adapter_runtime_ready == 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.provider }} production runtime is not ready"
+          description: "The provider bridge or its managed credentials are unavailable."
+      - alert: AltegroProviderSyncStale
+        expr: altegro_adapter_last_sync_timestamp_seconds > 0 and (time() - altegro_adapter_last_sync_timestamp_seconds) > 900
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.provider }} has not synchronized for more than 15 minutes"
+      - alert: AltegroProviderSyncWarnings
+        expr: altegro_adapter_last_sync_warnings > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.provider }} synchronization has warnings"
       - alert: AltegroHttpErrors
         expr: increase(altegro_http_errors_total[10m]) > 5
         labels:
           severity: warning
         annotations:
           summary: Altegro returned more than five server errors in ten minutes
+      - alert: AltegroPublicHttpsUnavailable
+        expr: probe_success{job="altegro-public-https"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Public HTTPS health check is failing
+          description: The domain, certificate, proxy, or application is unavailable from outside the stack.
+      - alert: AltegroTlsCertificateExpiring
+        expr: probe_ssl_earliest_cert_expiry{job="altegro-public-https"} - time() < 1209600
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: altegro.de TLS certificate expires within 14 days
+      - alert: AltegroServiceBacklog
+        expr: altegro_service_cases_open > 25
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: Altegro has more than 25 open service cases

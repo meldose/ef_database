@@ -1,0 +1,91 @@
+/* Operational analytics, alert response, audit evidence and maintenance scheduling */
+.stack { display: grid; gap: 1rem; }
+.alert-button { display: flex; align-items: center; gap: .45rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 999px; background: white; color: var(--muted); font-weight: 750; }
+.alert-button strong { display: grid; place-items: center; min-width: 1.45rem; height: 1.45rem; padding: 0 .35rem; border-radius: 999px; background: var(--canvas); font-size: .75rem; }
+.alert-button.active { border-color: #e7a7b9; color: #9f2149; background: #fff2f6; }
+.alert-button.active strong { background: #b82956; color: white; }
+.compact-control { display: grid; gap: .3rem; color: var(--muted); font-size: .75rem; font-weight: 750; }
+.compact-control select, .filters input, .filters select, .schedule-form input, .schedule-form select, .schedule-form textarea, .audit-filters input, .audit-filters select { padding: .7rem; border: 1px solid var(--line); border-radius: .55rem; background: white; color: var(--ink); }
+.analytics-metrics { margin-bottom: 1rem; }
+.analytics-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+.analytics-grid > article { padding: 1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--canvas); }
+.analytics-grid h3 { margin: 0 0 .8rem; }
+.analytics-grid dl { margin: 0; }
+.analytics-grid dl div { display: flex; justify-content: space-between; gap: 1rem; padding: .45rem 0; border-top: 1px solid var(--line); }
+.analytics-grid dt { color: var(--muted); }
+.analytics-grid dd { margin: 0; font-weight: 800; }
+.trend { display: flex; align-items: flex-end; gap: .25rem; min-height: 12rem; margin-top: 1rem; padding: 1rem .75rem 0; border: 1px solid var(--line); border-radius: .8rem; overflow-x: auto; background: linear-gradient(to top, #eee8ed 1px, transparent 1px); background-size: 100% 25%; }
+.trend-day { display: flex; flex: 1 0 1.5rem; align-items: center; justify-content: flex-end; gap: .35rem; height: 10rem; flex-direction: column; }
+.trend-day span { display: block; width: 70%; min-height: .25rem; border-radius: .3rem .3rem 0 0; background: var(--good); }
+.trend-day span.has-error { background: #ce3737; }
+.trend-day small { color: var(--muted); font-size: .62rem; writing-mode: vertical-rl; }
+.panel-actions { display: flex; align-items: center; gap: .65rem; margin-top: 1rem; }
+.panel-actions small { margin-left: auto; color: var(--muted); }
+.button-link, .schedule-form > button, .audit-filters > button, .record-actions button { display: inline-flex; justify-content: center; padding: .65rem .85rem; border: 1px solid var(--accent); border-radius: .55rem; background: var(--accent); color: white; font-weight: 800; text-decoration: none; }
+.button-link.secondary, .record-actions button:last-child { border-color: var(--line); background: white; color: var(--ink); }
+.prediction-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+.prediction { padding: 1rem; border: 1px solid var(--line); border-left: 4px solid var(--good); border-radius: .75rem; }
+.prediction.risk-medium { border-left-color: #c0741a; }
+.prediction.risk-high, .prediction.risk-critical { border-left-color: #ce3737; }
+.prediction > div, .record-heading { display: flex; justify-content: space-between; gap: 1rem; }
+.prediction p, .alert p, .schedule-list p, .audit-list p { margin: .45rem 0; color: var(--muted); }
+.prediction small, .alert small, .schedule-list small, .audit-list time { color: var(--muted); }
+.filters { display: grid; grid-template-columns: 2fr 1fr; gap: .75rem; margin-bottom: 1rem; }
+.filters label, .schedule-form label, .audit-filters label { display: grid; gap: .3rem; color: var(--muted); font-size: .75rem; font-weight: 750; }
+.alert-list, .schedule-list, .audit-list { display: grid; }
+.alert, .schedule-list > article, .audit-list > article { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--line); }
+.alert { grid-template-columns: auto minmax(0, 1fr) auto; }
+.alert.read { opacity: .75; }
+.alert-marker { width: .7rem; height: .7rem; margin-top: .3rem; border-radius: 50%; background: #777; }
+.severity-warning .alert-marker { background: #c0741a; }
+.severity-error .alert-marker, .severity-critical .alert-marker { background: #ce3737; }
+.record-heading span { align-self: start; padding: .25rem .45rem; border-radius: 999px; background: var(--canvas); font-size: .7rem; font-weight: 800; text-transform: capitalize; }
+.severity-critical .record-heading span, .result-error { color: #a42828; background: #fff0f0 !important; }
+.record-actions { display: flex; align-items: center; justify-content: flex-end; gap: .45rem; }
+.record-actions button { padding: .5rem .65rem; font-size: .75rem; }
+.schedule-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; margin-bottom: 1.25rem; padding: 1rem; border: 1px solid var(--line); border-radius: .8rem; background: var(--canvas); }
+.schedule-form .wide { grid-column: span 2; }
+.schedule-form textarea { min-height: 4.8rem; resize: vertical; }
+.schedule-form > button { align-self: end; }
+.state-overdue { color: #a42828 !important; background: #fff0f0 !important; }
+.state-due_soon { color: #945011 !important; background: #fff4e8 !important; }
+.audit-filters { display: grid; grid-template-columns: 2fr repeat(4, minmax(7rem, 1fr)); gap: .7rem; margin-bottom: 1rem; }
+.audit-filters > button { align-self: end; }
+.audit-list details { margin-top: .65rem; }
+.audit-list summary { cursor: pointer; color: var(--accent); font-weight: 750; }
+.audit-list pre { max-height: 16rem; padding: .8rem; border-radius: .55rem; overflow: auto; background: var(--canvas); font-size: .75rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 3px solid #3b7ca6; outline-offset: 2px; }
+.legal-links { display: flex; gap: 1rem; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.legal-links a { color: var(--muted); font-size: .8rem; font-weight: 700; }
+.legal-page { min-height: 100vh; padding: clamp(1rem, 4vw, 3rem); }
+.legal-page > header { display: flex; align-items: center; justify-content: space-between; width: min(100%, 60rem); margin: 0 auto 1.5rem; }
+.legal-page .brand { color: var(--ink); text-decoration: none; }
+.legal-page nav { display: flex; flex-direction: row; gap: 1rem; padding: 0; border: 0; background: transparent; }
+.legal-page nav a { color: var(--accent); font-weight: 750; }
+.legal-document { width: min(100%, 60rem); margin: 0 auto; padding: clamp(1.5rem, 5vw, 4rem); border: 1px solid var(--line); border-radius: 1.25rem; background: var(--panel); box-shadow: 0 .5rem 2rem #3b193008; }
+.legal-document h1 { margin: .25rem 0 2rem; font-size: clamp(2rem, 5vw, 3.5rem); }
+.legal-document section { padding: 1.25rem 0; border-top: 1px solid var(--line); }
+.legal-document h2 { margin: 0 0 .6rem; font-size: 1.15rem; }
+.legal-document p, .legal-document address { margin: 0; color: var(--muted); font-style: normal; line-height: 1.7; }
+.legal-document a { color: var(--accent); }
+.legal-warning { margin-bottom: 1.5rem !important; padding: 1rem; border: 1px solid #e7b273; border-radius: .65rem; background: #fff7e8; color: #75420d !important; font-weight: 700; }
+.legal-updated { margin-top: 1.5rem !important; font-size: .8rem; }
+
+@media (max-width: 1050px) {
+  .analytics-grid { grid-template-columns: 1fr; }
+  .schedule-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .audit-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 700px) {
+  .prediction-grid, .filters, .schedule-form, .audit-filters { grid-template-columns: 1fr; }
+  .schedule-form .wide { grid-column: auto; }
+  .alert, .schedule-list > article { grid-template-columns: auto minmax(0, 1fr); }
+  .alert .record-actions, .schedule-list .record-actions { grid-column: 2; }
+  .panel-actions { align-items: flex-start; flex-wrap: wrap; }
+  .panel-actions small { width: 100%; margin-left: 0; }
+  .header-actions { gap: .45rem; }
+  .alert-button { padding: .5rem; font-size: 0; }
+  .alert-button strong { font-size: .75rem; }
+  .legal-page > header { align-items: flex-start; gap: 1rem; flex-direction: column; }
+}

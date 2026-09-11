@@ -4,6 +4,9 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
 import { legacyWorkspacePath, navigationForRole, type Workspace } from '@/lib/navigation';
 import type { AdapterSummary, OperationsSummary, RobotSummary, SessionUser } from '@/lib/types';
+import { AdvancedAnalytics } from '@/components/AdvancedAnalytics';
+import { AlertsMaintenance } from '@/components/AlertsMaintenance';
+import { AuditLog } from '@/components/AuditLog';
 
 function Login({ onLogin }: { onLogin: (user: SessionUser) => void }) {
   const [error, setError] = useState('');
@@ -35,6 +38,7 @@ function Login({ onLogin }: { onLogin: (user: SessionUser) => void }) {
           <button disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
           {error && <p className="error" role="alert">{error}</p>}
         </form>
+        <footer className="legal-links"><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a></footer>
       </section>
       <aside><p className="eyebrow">Manufacturer-neutral operations</p><h2>One clear workspace for every role.</h2><p>Registry, Passport, service evidence and integrations without exposing tools a user does not need.</p></aside>
     </main>
@@ -54,17 +58,19 @@ export function OperationsShell() {
   const [adapters, setAdapters] = useState<AdapterSummary[]>([]);
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
 
   const load = useCallback(async () => {
     setRefreshing(true);
     setError('');
     try {
-      const [summaryResult, robotsResult, adaptersResult] = await Promise.all([
-        api.summary(), api.robots(), api.adapters().catch(() => ({ data: [] }))
+      const [summaryResult, robotsResult, adaptersResult, notificationResult] = await Promise.all([
+        api.summary(), api.robots(), api.adapters().catch(() => ({ data: [] })), api.notifications().catch(() => ({ unreadCount: 0 }))
       ]);
       setSummary(summaryResult.data);
       setRobots(robotsResult.data);
       setAdapters(adaptersResult.data);
+      setUnreadAlerts(notificationResult.unreadCount);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) setUser(null);
       else setError(caught instanceof Error ? caught.message : 'The workspace could not be loaded');
@@ -72,6 +78,7 @@ export function OperationsShell() {
       setRefreshing(false);
     }
   }, []);
+  const updateUnreadAlerts = useCallback((count: number) => setUnreadAlerts(count), []);
 
   useEffect(() => {
     api.session().then(({ user: sessionUser }) => setUser(sessionUser)).catch(() => setUser(null)).finally(() => setLoadingSession(false));
@@ -86,7 +93,7 @@ export function OperationsShell() {
     <div className="app">
       <header>
         <div className="brand"><span>A</span><strong>altegro</strong><small>robot operations</small></div>
-        <div className="header-actions"><span className="environment">Phase 1 · Read-first</span><span>{user.name}<small>{user.role.replaceAll('_', ' ')}</small></span><button className="quiet" onClick={() => void load()} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button><button className="quiet" onClick={() => void api.logout().finally(() => setUser(null))}>Log out</button></div>
+        <div className="header-actions"><span className="environment">Phase 1 · Read-first</span><button className={`alert-button ${unreadAlerts ? 'active' : ''}`} onClick={() => setWorkspace('service')}>Alerts <strong>{unreadAlerts}</strong></button><span>{user.name}<small>{user.role.replaceAll('_', ' ')}</small></span><button className="quiet" onClick={() => void load()} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button><button className="quiet" onClick={() => void api.logout().finally(() => setUser(null))}>Log out</button></div>
       </header>
       <div className="workspace">
         <nav aria-label="Role workspace">{availableNavigation.map((item) => <button key={item.id} aria-current={workspace === item.id ? 'page' : undefined} onClick={() => setWorkspace(item.id)}>{item.label}</button>)}</nav>
@@ -103,8 +110,11 @@ export function OperationsShell() {
             <section className="grid"><article className="panel"><div className="panel-title"><div><p className="eyebrow">Recent fleet</p><h2>Robots</h2></div><button onClick={() => setWorkspace('robots')}>View registry</button></div><RobotList robots={robots.slice(0, 5)} /></article><article className="panel"><div className="panel-title"><div><p className="eyebrow">Integration health</p><h2>Providers</h2></div><button onClick={() => setWorkspace('integrations')}>Open integrations</button></div><AdapterList adapters={adapters} /></article></section>
           </>}
           {workspace === 'robots' && <section className="panel"><div className="panel-title"><div><p className="eyebrow">Canonical registry</p><h2>Visible robots</h2></div><span>{robots.length} loaded</span></div><RobotList robots={robots} /></section>}
+          {workspace === 'service' && <AlertsMaintenance robots={robots} user={user} onUnreadChange={updateUnreadAlerts} onDataChanged={load} />}
+          {workspace === 'reports' && <AdvancedAnalytics />}
+          {workspace === 'audit' && <AuditLog user={user} />}
           {workspace === 'integrations' && <section className="panel"><div className="panel-title"><div><p className="eyebrow">Integration plane</p><h2>Provider contracts</h2></div><span>Commands disabled by default</span></div><AdapterList adapters={adapters} /></section>}
-          {!['overview', 'robots', 'integrations'].includes(workspace) && <section className="panel empty"><h2>Migration workspace</h2><p>This typed workspace shell is ready for the next page migration. The complete operational page remains available in the existing portal until feature parity is verified.</p><a href={legacyWorkspacePath(workspace)}>Open current {workspace} workspace</a></section>}
+          {!['overview', 'robots', 'service', 'reports', 'audit', 'integrations'].includes(workspace) && <section className="panel empty"><h2>Migration workspace</h2><p>This typed workspace shell is ready for the next page migration. The complete operational page remains available in the existing portal until feature parity is verified.</p><a href={legacyWorkspacePath(workspace)}>Open current {workspace} workspace</a></section>}
         </main>
       </div>
     </div>
