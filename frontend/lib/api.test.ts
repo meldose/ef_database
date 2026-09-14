@@ -30,6 +30,19 @@ describe('typed operations API', () => {
   it('creates recurring maintenance through the guarded endpoint', async () => {
     const input = { robotId: 'robot-1', title: 'Quarterly inspection', nextDueAt: '2026-10-01T08:00:00.000Z', intervalDays: 90, reminderDays: 7, priority: 'high' as const };
     await api.createMaintenanceSchedule(input);
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/autoxing/maintenance-schedules', expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }));
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/maintenance-schedules', expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }));
+  });
+
+  it('loads every registry page for Passport and scheduling selection', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: 'robot-1' }], pagination: { pageCount: 2 } })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: 'robot-2' }], pagination: { pageCount: 2 } })));
+    expect((await api.robots()).data.map((robot) => robot.id)).toEqual(['robot-1', 'robot-2']);
+    expect(fetchMock).toHaveBeenLastCalledWith('/api/v1/robots?page=2&pageSize=100&sort=updatedAt&order=desc', expect.objectContaining({ credentials: 'include' }));
+  });
+
+  it('encodes Passport and support reply identifiers', async () => {
+    await api.passport('robot/one'); await api.replyTicket('ticket/one', { message: 'Checked', status: 'resolved' });
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/robots/robot%2Fone/passport', expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/support/tickets/ticket%2Fone/messages', expect.objectContaining({ method: 'POST' }));
   });
 });

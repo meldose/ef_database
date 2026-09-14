@@ -1,5 +1,19 @@
 /* Operational analytics, alert response, audit evidence and maintenance scheduling */
-.stack { display: grid; gap: 1rem; }
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+.stack > *, .workspace main, .panel, .schedule-form label { min-width: 0; }
+.evidence { padding: 1rem 0; border-top: 1px solid var(--line); }
+.evidence a, .certificate { display: block; margin-top: .5rem; }
+.panel pre { max-height: 25rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; }
+.message-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.calendar-grid { display: grid; grid-template-columns: repeat(7, minmax(10rem, 1fr)); min-width: 0; max-width: 100%; overflow-x: auto; gap: .6rem; }
+.calendar-grid > section { padding: .6rem; background: var(--canvas); border: 1px solid var(--line); border-radius: .6rem; }
+.calendar-order { padding: .7rem; margin-bottom: .6rem; border: 1px solid var(--line); border-radius: .5rem; background: white; }
+.calendar-order form, .calendar-order label { display: grid; gap: .4rem; margin-top: .5rem; }
+.calendar-order input, .calendar-order select { min-width: 0; width: 100%; }
+.table-scroll { overflow-x: auto; }
+.table-scroll table { border-collapse: collapse; width: 100%; min-width: 50rem; }
+.table-scroll th, .table-scroll td { padding: .7rem; text-align: left; border-bottom: 1px solid var(--line); }
+.table-scroll caption { text-align: left; padding: .5rem 0; color: var(--muted); }
 .alert-button { display: flex; align-items: center; gap: .45rem; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 999px; background: white; color: var(--muted); font-weight: 750; }
 .alert-button strong { display: grid; place-items: center; min-width: 1.45rem; height: 1.45rem; padding: 0 .35rem; border-radius: 999px; background: var(--canvas); font-size: .75rem; }
 .alert-button.active { border-color: #e7a7b9; color: #9f2149; background: #fff2f6; }
@@ -78,6 +92,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 }
 
 @media (max-width: 700px) {
+  .panel-title { flex-wrap: wrap; }
   .prediction-grid, .filters, .schedule-form, .audit-filters { grid-template-columns: 1fr; }
   .schedule-form .wide { grid-column: auto; }
   .alert, .schedule-list > article { grid-template-columns: auto minmax(0, 1fr); }

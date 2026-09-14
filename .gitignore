@@ -7,3 +7,6 @@ data/*.json
 data/*.tmp
 node_modules/
 .next/
+playwright-report/
+test-results/
+*.tsbuildinfo

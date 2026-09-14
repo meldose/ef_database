@@ -1191,7 +1191,7 @@ function getPassport(robotId) {
     documents: clone(state.documents.filter((item) => item.robotId === robotId).map(({ attachment, ...item }) => ({ ...item, attachment: attachment ? { name: attachment.name, contentType: attachment.contentType, size: attachment.size, sha256: attachment.sha256 } : null }))),
     certificates: clone(state.certificates.filter((item) => item.robotId === robotId)),
     deployments: clone(state.deployments.filter((item) => item.robotId === robotId)),
-    serviceCases: clone([...state.serviceCases.values()].filter((item) => item.robotId === robotId)),
+    serviceCases: [...state.serviceCases.values()].filter((item) => item.robotId === robotId).map(supportTicketView),
     compatibility: clone(state.compatibilityRecords.filter((item) => item.modelId === robot.modelId)),
     workforce: { requirements:workRequirementsForRobot(robot), assignedTechnicians:[...state.robotAssignments.values()].filter((item) => item.robotId === robotId && item.status === 'active').map((assignment) => { const technician = state.technicians.get(assignment.technicianId); return technician ? { assignment:clone(assignment), technician:{ id:technician.id, name:technician.name, email:technician.email, jobTitle:technician.jobTitle || 'Service Technician' }, eligibility:technicianEligibility(technician, robot) } : null; }).filter(Boolean) },
     completeness: calculateCompleteness(robot, entries)
@@ -1304,7 +1304,19 @@ function serviceCasesForActor(actor) {
 
 function supportTicketView(ticket) {
   const robot=state.robots.get(ticket.robotId);
-  return { ...clone(ticket),robotSerialNumber:robot?.serialNumber || null,category:ticket.category || 'technical',requesterName:ticket.requesterName || null,messages:Array.isArray(ticket.messages) ? clone(ticket.messages) : [] };
+  return { ...clone(ticket),robotSerialNumber:robot?.serialNumber || null,category:ticket.category || 'technical',requesterName:ticket.requesterName || null,messages:(ticket.messages || []).map((message) => ({ ...clone(message),attachment:publicAttachment(message.attachment) })) };
+}
+
+function fleetComparison(actor, searchParams) {
+  const days=Number(searchParams.get('days') || 30); const groupBy=searchParams.get('groupBy') || 'site';
+  if (!Number.isInteger(days) || days < 1 || days > 365) throw httpError(400,'days must be an integer between 1 and 365');
+  if (!['site','provider'].includes(groupBy)) throw httpError(400,'groupBy must be site or provider');
+  const now=Date.now(); const since=now-days*86400000; const previousSince=since-days*86400000;
+  const robots=[...state.robots.values()].filter((robot) => visibleToActor(actor,robot)); const groups=new Map();
+  for (const robot of robots) { const key=groupBy === 'site' ? robot.siteId || 'unassigned' : robotProvider(robot); if (!groups.has(key)) groups.set(key,[]); groups.get(key).push(robot); }
+  const metric=(ids,from,to) => { const events=state.events.filter((event) => ids.has(event.robotId) && Date.parse(event.occurredAt) >= from && Date.parse(event.occurredAt) < to); const cases=[...state.serviceCases.values()].filter((item) => ids.has(item.robotId)); return { events:events.length,incidents:events.filter((event) => ['error','critical'].includes(event.severity)).length,casesOpened:cases.filter((item) => Date.parse(item.createdAt) >= from && Date.parse(item.createdAt) < to).length,casesClosed:cases.filter((item) => Date.parse(item.closedAt) >= from && Date.parse(item.closedAt) < to).length,maintenanceCompleted:events.filter((event) => event.eventType === 'maintenance_completed').length }; };
+  const data=[...groups].map(([id,fleet]) => { const ids=new Set(fleet.map((robot) => robot.id)); const current=metric(ids,since,now); const previous=metric(ids,previousSince,since); return { id,label:groupBy === 'site' ? state.sites.get(id)?.name || id : id,robots:fleet.length,online:fleet.filter((robot) => robot.online === true).length,current,previous,change:Object.fromEntries(Object.keys(current).map((key) => [key,current[key]-previous[key]])) }; }).sort((a,b) => a.label.localeCompare(b.label));
+  return { groupBy,days,currentPeriod:{ from:new Date(since).toISOString(),to:new Date(now).toISOString() },previousPeriod:{ from:new Date(previousSince).toISOString(),to:new Date(since).toISOString() },data,generatedAt:timestamp() };
 }
 
 function canManageWorkforce(actor) {
@@ -1838,6 +1850,7 @@ async function handle(req, res) {
     const workflow={ notificationId,status:body.status,technicianId:technician?.id || null,technicianName:technician?.name || null,note:String(body.note || '').trim().slice(0,2000),snoozeUntil:snoozeUntil?.toISOString() || null,updatedAt:timestamp(),updatedBy:actor.name }; state.notificationWorkflows.set(notificationId,workflow); appendOutbox('notification.workflow.updated','notification',notificationId,workflow); recordAudit(actor,'notification.workflow.update',notification.robotId ? 'robot' : 'notification',notification.robotId || notificationId,'success',{ notificationId,status:workflow.status }); return send(res,200,{ data:workflow });
   }
   if (req.method === 'GET' && path === '/api/v1/reports/operations') return send(res,200,{ data:operationalReport(actor,url.searchParams.get('days')) });
+  if (req.method === 'GET' && path === '/api/v1/reports/comparison') return send(res,200,{ data:fleetComparison(actor,url.searchParams) });
   if (req.method === 'GET' && path === '/api/v1/reports/operations.json') { const report=operationalReport(actor,url.searchParams.get('days')); recordAudit(actor,'report.operations.export','tenant',actor.tenantId,'success',{ format:'json',days:report.period.days }); return sendDownload(res,'application/json; charset=utf-8',`altegro-operations-${report.period.days}d.json`,JSON.stringify(report,null,2)); }
   if (req.method === 'GET' && path === '/api/v1/reports/operations.csv') { const report=operationalReport(actor,url.searchParams.get('days')); const rows=[['date','events','errors','maintenance','tasks'],...report.daily.map((day) => [day.date,day.events,day.errors,day.maintenance,day.tasks])]; recordAudit(actor,'report.operations.export','tenant',actor.tenantId,'success',{ format:'csv',days:report.period.days }); return sendDownload(res,'text/csv; charset=utf-8',`altegro-operations-${report.period.days}d.csv`,`${rows.map((row) => row.map(csvCell).join(',')).join('\n')}\n`); }
   if (req.method === 'GET' && path === '/api/v1/cenobots/webhooks/status') { if (['robot_user','auditor'].includes(actor.role)) throw httpError(403,'Webhook configuration access is unavailable'); return send(res,200,{ data:cenoBotsWebhookConfiguration() }); }
@@ -1913,24 +1926,31 @@ async function handle(req, res) {
     state.compatibilityRecords.push(record); appendOutbox('compatibility.record.created', 'compatibility_record', record.id, record); recordAudit(actor, 'compatibility.create', 'compatibility_record', record.id);
     return send(res, 201, { data: record });
   }
-  if (req.method === 'GET' && path === '/api/v1/service-cases') return send(res, 200, { data: serviceCasesForActor(actor), count: serviceCasesForActor(actor).length });
+  if (req.method === 'GET' && path === '/api/v1/service-cases') return send(res, 200, { data: serviceCasesForActor(actor).map(supportTicketView), count: serviceCasesForActor(actor).length });
   if (req.method === 'GET' && path === '/api/v1/support/tickets') {
-    const data=serviceCasesForActor(actor).map(supportTicketView).sort((a,b) => Date.parse(b.updatedAt)-Date.parse(a.updatedAt)); return send(res,200,{ data,count:data.length,permissions:{ create:canUseSupportPortal(actor),reply:canUseSupportPortal(actor),manage:canWrite(actor) } });
+    const data=serviceCasesForActor(actor).map(supportTicketView).sort((a,b) => Date.parse(b.updatedAt)-Date.parse(a.updatedAt)); return send(res,200,{ data,count:data.length,permissions:{ create:canUseSupportPortal(actor),reply:canUseSupportPortal(actor),manage:hasPermission(actor,'support.manage') } });
   }
   if (req.method === 'POST' && path === '/api/v1/support/tickets') {
     if (!canUseSupportPortal(actor)) throw httpError(403,'Support ticket creation is unavailable');
     const robot=state.robots.get(body.robotId); if (!robot || !visibleToActor(actor,robot)) throw httpError(404,'Robot not found');
     const title=String(body.title || '').trim().slice(0,160); const description=String(body.description || '').trim().slice(0,4000); if (!title || !description) throw httpError(400,'Title and description are required');
     const category=String(body.category || 'technical'); if (!['technical','maintenance','integration','account','other'].includes(category)) throw httpError(400,'Invalid support category'); const severity=String(body.severity || 'warning'); if (!['info','warning','error','critical'].includes(severity)) throw httpError(400,'Invalid support priority');
-    const externalId=`SUP-${new Date().toISOString().slice(0,10).replaceAll('-','')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`; const createdAt=timestamp(); const ticket={ id:ids(),robotId:robot.id,tenantId:robot.tenantId,provider:'altegro-support',externalId,title,description,severity,status:'open',category,requesterId:actor.id,requesterName:actor.name,cause:null,action:null,parts:[],assignedTo:null,messages:[{ id:ids(),authorId:actor.id,authorName:actor.name,authorRole:actor.role,message:description,createdAt }],createdAt,updatedAt:createdAt,closedAt:null };
+    const attachment=await storeAttachment(validateEventAttachment(body.attachment),{ tenantId:robot.tenantId,robotId:robot.id });
+    const externalId=`SUP-${new Date().toISOString().slice(0,10).replaceAll('-','')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`; const createdAt=timestamp(); const ticket={ id:ids(),robotId:robot.id,tenantId:robot.tenantId,provider:'altegro-support',externalId,title,description,severity,status:'open',category,requesterId:actor.id,requesterName:actor.name,cause:null,action:null,parts:[],assignedTo:null,messages:[{ id:ids(),authorId:actor.id,authorName:actor.name,authorRole:actor.role,message:description,attachment,createdAt }],createdAt,updatedAt:createdAt,closedAt:null };
     state.serviceCases.set(`${ticket.provider}:${externalId}`,ticket); appendPassportEntry(robot.id,{ type:'support_ticket_opened',source:'altegro-support',data:{ serviceCaseId:ticket.id,externalId,title,category,severity } },actor); upsertEvent(robot.id,{ eventType:'support_ticket',sourceSystem:'altegro-support',sourceEventId:externalId,severity,title,description,payload:{ serviceCaseId:ticket.id,category } },actor); appendOutbox('support.ticket.opened','service_case',ticket.id,ticket); recordAudit(actor,'support.ticket.create','robot',robot.id,'success',{ ticketId:ticket.id,externalId }); return send(res,201,{ data:supportTicketView(ticket) });
   }
   const supportMessage=path.match(/^\/api\/v1\/support\/tickets\/([^/]+)\/messages$/);
   if (supportMessage && req.method === 'POST') {
     if (!canUseSupportPortal(actor)) throw httpError(403,'Support replies are unavailable'); const ticket=[...state.serviceCases.values()].find((item) => item.id === decodeURIComponent(supportMessage[1])); const robot=ticket ? state.robots.get(ticket.robotId) : null; if (!ticket || !robot || !visibleToActor(actor,robot)) throw httpError(404,'Support ticket not found');
-    const message=String(body.message || '').trim().slice(0,4000); if (!message) throw httpError(400,'A reply message is required'); const update={ id:ids(),authorId:actor.id,authorName:actor.name,authorRole:actor.role,message,createdAt:timestamp() }; ticket.messages=[...(ticket.messages || []),update]; ticket.updatedAt=update.createdAt;
-    if (body.status !== undefined) { if (!canWrite(actor)) throw httpError(403,'Only service staff can change ticket status'); if (!['open','in_progress','waiting','resolved','closed'].includes(body.status)) throw httpError(400,'Invalid support-ticket status'); ticket.status=body.status; if (body.status === 'closed') ticket.closedAt=timestamp(); }
+    if (body.status !== undefined) { if (!hasPermission(actor,'support.manage')) throw httpError(403,'Only service staff can change ticket status'); if (!['open','in_progress','waiting','resolved','closed'].includes(body.status)) throw httpError(400,'Invalid support-ticket status'); }
+    const message=String(body.message || '').trim().slice(0,4000); if (!message) throw httpError(400,'A reply message is required'); const attachment=await storeAttachment(validateEventAttachment(body.attachment),{ tenantId:robot.tenantId,robotId:robot.id }); const update={ id:ids(),authorId:actor.id,authorName:actor.name,authorRole:actor.role,message,attachment,createdAt:timestamp() }; ticket.messages=[...(ticket.messages || []),update]; ticket.updatedAt=update.createdAt;
+    if (body.status !== undefined) { ticket.status=body.status; ticket.closedAt=body.status === 'closed' ? timestamp() : null; }
     appendPassportEntry(robot.id,{ type:'support_ticket_updated',source:'altegro-support',data:{ serviceCaseId:ticket.id,externalId:ticket.externalId,messageId:update.id,status:ticket.status } },actor); appendOutbox('support.ticket.updated','service_case',ticket.id,{ messageId:update.id,status:ticket.status }); recordAudit(actor,'support.ticket.reply','robot',robot.id,'success',{ ticketId:ticket.id,status:ticket.status }); return send(res,201,{ data:supportTicketView(ticket) });
+  }
+  const supportAttachment=path.match(/^\/api\/v1\/support\/tickets\/([^/]+)\/messages\/([^/]+)\/attachment$/);
+  if (supportAttachment && req.method === 'GET') {
+    const ticket=serviceCasesForActor(actor).find((item) => item.id === decodeURIComponent(supportAttachment[1])); const message=ticket?.messages?.find((item) => item.id === decodeURIComponent(supportAttachment[2]));
+    if (!message?.attachment) throw httpError(404,'Attachment not found'); recordAudit(actor,'support.attachment.download','robot',ticket.robotId); return sendDownload(res,message.attachment.contentType,message.attachment.name,await attachmentContent(message.attachment));
   }
   if (req.method === 'GET' && path === '/api/v1/outbox') {
     if (!['platform_admin', 'data_admin'].includes(actor.role)) throw httpError(403, 'Outbox administration permission required');
@@ -2004,21 +2024,24 @@ async function handle(req, res) {
     if (execute) { appendPassportEntry(robot.id,{ type:action === 'schedule' ? 'provider_schedule_created' : 'provider_command',source:'cenobots',data:{ action,providerRequestId:result.result?.rid || null,task:result.task } },actor); upsertEvent(robot.id,{ eventType:action === 'schedule' ? 'schedule_created' : 'robot_command',sourceSystem:'cenobots',sourceEventId:`command:${action}:${result.result?.rid || ids()}`,severity:'info',title:`CenoBots ${action.replaceAll('-',' ')} accepted`,description:`Live command requested by ${actor.name}.`,payload:{ action,providerRequestId:result.result?.rid || null } },actor); }
     return send(res,execute ? 202 : 200,{ data:result,robot:{ id:robot.id,serialNumber:robot.serialNumber },control:cenoBotsControlConfiguration() });
   }
-  if (req.method === 'GET' && path === '/api/v1/autoxing/maintenance-schedules') {
+  if (req.method === 'GET' && ['/api/v1/maintenance-schedules','/api/v1/autoxing/maintenance-schedules'].includes(path)) {
     const robotIds=visibleRobotIds(actor); const schedules=[...state.maintenanceSchedules.values()].filter((schedule) => robotIds.has(schedule.robotId)).map(maintenanceScheduleView).sort((a,b) => Date.parse(a.nextDueAt)-Date.parse(b.nextDueAt)); return send(res,200,{ data:schedules,count:schedules.length,permissions:{ manage:canWrite(actor) } });
   }
-  if (req.method === 'POST' && path === '/api/v1/autoxing/maintenance-schedules') {
+  if (req.method === 'POST' && ['/api/v1/maintenance-schedules','/api/v1/autoxing/maintenance-schedules'].includes(path)) {
     if (!canWrite(actor)) throw httpError(403,'Maintenance scheduling permission required'); for (const field of ['robotId','title','nextDueAt','intervalDays']) if (!body[field]) throw httpError(400,`Missing required field: ${field}`);
-    const robot=state.robots.get(body.robotId); if (!robot || !visibleToActor(actor,robot) || !robot.externalIdentities?.some((identity) => identity.system === 'autoxing')) throw httpError(404,'AutoXing robot not found'); const nextDueAt=new Date(body.nextDueAt); if (Number.isNaN(nextDueAt.getTime())) throw httpError(400,'nextDueAt must be a valid date'); const intervalDays=Number(body.intervalDays); if (!Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 730) throw httpError(400,'intervalDays must be between 1 and 730');
+    const robot=state.robots.get(body.robotId); if (!robot || !visibleToActor(actor,robot) || path.includes('/autoxing/') && !robot.externalIdentities?.some((identity) => identity.system === 'autoxing')) throw httpError(404,'Robot not found'); if (!String(body.title).trim()) throw httpError(400,'Title is required'); const nextDueAt=new Date(body.nextDueAt); if (Number.isNaN(nextDueAt.getTime())) throw httpError(400,'nextDueAt must be a valid date'); const intervalDays=Number(body.intervalDays); if (!Number.isInteger(intervalDays) || intervalDays < 1 || intervalDays > 730) throw httpError(400,'intervalDays must be between 1 and 730');
     let technician=null; if (body.assignedTechnicianId) { technician=state.technicians.get(body.assignedTechnicianId); if (!technician || technician.tenantId !== actor.tenantId || !technicianEligibility(technician,robot).eligible) throw httpError(409,'Assigned technician must be qualified for this robot'); }
     const reminderDays=body.reminderDays == null ? 7 : Number(body.reminderDays); if (!Number.isInteger(reminderDays) || reminderDays < 1 || reminderDays > 90) throw httpError(400,'reminderDays must be between 1 and 90');
     const schedule={ id:ids(),tenantId:robot.tenantId,robotId:robot.id,title:String(body.title).trim().slice(0,160),description:String(body.description || '').trim().slice(0,2000),intervalDays,reminderDays,nextDueAt:nextDueAt.toISOString(),priority:['low','normal','high','critical'].includes(body.priority) ? body.priority : 'normal',assignedTechnicianId:technician?.id || null,status:'active',lastCompletedAt:null,createdAt:timestamp(),updatedAt:timestamp(),createdBy:actor.id };
     state.maintenanceSchedules.set(schedule.id,schedule); appendPassportEntry(robot.id,{ type:'maintenance_scheduled',source:'altegro',data:{ scheduleId:schedule.id,title:schedule.title,nextDueAt:schedule.nextDueAt,intervalDays,reminderDays,assignedTechnicianId:schedule.assignedTechnicianId } },actor); appendOutbox('maintenance.schedule.created','maintenance_schedule',schedule.id,schedule); recordAudit(actor,'maintenance.schedule.create','robot',robot.id,'success',{ scheduleId:schedule.id,reminderDays }); return send(res,201,{ data:maintenanceScheduleView(schedule) });
   }
-  const maintenanceScheduleUpdate=route(req.method,path,/^\/api\/v1\/autoxing\/maintenance-schedules\/([^/]+)$/);
+  const maintenanceScheduleUpdate=route(req.method,path,/^\/api\/v1\/(?:autoxing\/)?maintenance-schedules\/([^/]+)$/);
   if (maintenanceScheduleUpdate && req.method === 'PATCH') {
     if (!canWrite(actor)) throw httpError(403,'Maintenance scheduling permission required'); const schedule=state.maintenanceSchedules.get(maintenanceScheduleUpdate.id); const robot=schedule ? state.robots.get(schedule.robotId) : null; if (!schedule || !robot || !visibleToActor(actor,robot)) throw httpError(404,'Maintenance schedule not found');
-    if (body.status && !['active','paused','cancelled'].includes(body.status)) throw httpError(400,'Invalid maintenance schedule status'); if (body.status) schedule.status=body.status; if (body.nextDueAt) { const next=new Date(body.nextDueAt); if (Number.isNaN(next.getTime())) throw httpError(400,'nextDueAt must be a valid date'); schedule.nextDueAt=next.toISOString(); } if (body.reminderDays != null) { const reminderDays=Number(body.reminderDays); if (!Number.isInteger(reminderDays) || reminderDays < 1 || reminderDays > 90) throw httpError(400,'reminderDays must be between 1 and 90'); schedule.reminderDays=reminderDays; }
+    if (body.status && !['active','paused','cancelled'].includes(body.status)) throw httpError(400,'Invalid maintenance schedule status');
+    const next=body.nextDueAt ? new Date(body.nextDueAt) : null; if (next && Number.isNaN(next.getTime())) throw httpError(400,'nextDueAt must be a valid date');
+    const reminderDays=body.reminderDays != null ? Number(body.reminderDays) : null; if (reminderDays != null && (!Number.isInteger(reminderDays) || reminderDays < 1 || reminderDays > 90)) throw httpError(400,'reminderDays must be between 1 and 90');
+    if (body.status) schedule.status=body.status; if (next) schedule.nextDueAt=next.toISOString(); if (reminderDays != null) schedule.reminderDays=reminderDays;
     if (body.complete) { const completedAt=timestamp(); schedule.lastCompletedAt=completedAt; schedule.nextDueAt=new Date(Date.now()+schedule.intervalDays*86400000).toISOString(); schedule.status='active'; upsertEvent(robot.id,{ eventType:'maintenance_completed',sourceSystem:'altegro',sourceEventId:`maintenance:${schedule.id}:${completedAt}`,severity:'info',title:`Maintenance completed: ${schedule.title}`,description:String(body.completionNote || 'Scheduled maintenance completed.').slice(0,2000),occurredAt:completedAt,payload:{ scheduleId:schedule.id,nextDueAt:schedule.nextDueAt,technicianId:schedule.assignedTechnicianId } },actor); appendPassportEntry(robot.id,{ type:'maintenance_completion',source:'altegro',data:{ scheduleId:schedule.id,title:schedule.title,completedAt,nextDueAt:schedule.nextDueAt,note:String(body.completionNote || '').slice(0,2000) } },actor); const workflow=state.alertWorkflows.get(`maintenance:${schedule.id}`); if (workflow) state.alertWorkflows.set(`maintenance:${schedule.id}`,{ ...workflow,status:'resolved',updatedAt:timestamp(),updatedBy:actor.name }); }
     schedule.updatedAt=timestamp(); appendOutbox('maintenance.schedule.updated','maintenance_schedule',schedule.id,{ status:schedule.status,nextDueAt:schedule.nextDueAt,complete:Boolean(body.complete) }); recordAudit(actor,'maintenance.schedule.update','robot',robot.id,'success',{ scheduleId:schedule.id,complete:Boolean(body.complete) }); return send(res,200,{ data:maintenanceScheduleView(schedule) });
   }
@@ -2243,6 +2266,8 @@ async function handle(req, res) {
     return send(res,201,{ data:{ ...record,attachment:publicAttachment(record.attachment) || undefined } });
   }
   const passport = route(req.method, path, /^\/api\/v1\/robots\/([^/]+)\/passport$/);
+  const documentDownload=path.match(/^\/api\/v1\/robots\/([^/]+)\/documents\/([^/]+)\/attachment$/);
+  if (documentDownload && req.method === 'GET') { const robot=state.robots.get(decodeURIComponent(documentDownload[1])); const document=state.documents.find((item) => item.robotId === robot?.id && item.id === decodeURIComponent(documentDownload[2])); if (!robot || !visibleToActor(actor,robot) || !document?.attachment) throw httpError(404,'Document not found'); recordAudit(actor,'document.download','robot',robot.id); return sendDownload(res,document.attachment.contentType,document.attachment.name,await attachmentContent(document.attachment)); }
   if (passport && req.method === 'GET') {
     const item = state.robots.get(passport.id); if (!item || !visibleToActor(actor, item)) throw httpError(404, 'Robot not found');
     return send(res, 200, { data: getPassport(passport.id) });
@@ -2282,6 +2307,7 @@ async function handle(req, res) {
     const serviceCase = [...state.serviceCases.values()].find((item) => item.id === serviceCaseUpdate.id);
     if (!serviceCase) throw httpError(404, 'Service case not found');
     const robot = state.robots.get(serviceCase.robotId); if (!robot || !visibleToActor(actor, robot)) throw httpError(404, 'Service case not found');
+    if (serviceCase.provider === 'altegro-support' && !hasPermission(actor,'support.manage')) throw httpError(403,'Support-ticket management permission required');
     const allowedStatuses = ['open', 'in_progress', 'waiting', 'resolved', 'closed'];
     if (body.status && !allowedStatuses.includes(body.status)) throw httpError(400, 'Invalid service-case status');
     const previousStatus = serviceCase.status;
@@ -2296,14 +2322,16 @@ async function handle(req, res) {
       appendPassportEntry(robot.id, { type: 'service_status_changed', source: serviceCase.provider, data: { serviceCaseId: serviceCase.id, from: previousStatus, to: serviceCase.status } }, actor);
     }
     appendOutbox('service_case.updated', 'service_case', serviceCase.id, { previousStatus, status: serviceCase.status }); recordAudit(actor, 'service_case.update', 'robot', robot.id, 'success', { serviceCaseId: serviceCase.id, previousStatus, status: serviceCase.status });
-    return send(res, 200, { data: serviceCase });
+    return send(res, 200, { data: supportTicketView(serviceCase) });
   }
 
   if (req.method === 'POST' && path === '/api/v1/service-cases') {
     if (!canWrite(actor)) throw httpError(403, 'Write permission required');
     const item = state.robots.get(body.robotId); if (!item || !visibleToActor(actor, item)) throw httpError(404, 'Robot not found');
     if (!body.externalId || !body.provider || !body.status) throw httpError(400, 'robotId, provider, externalId, and status are required');
-    const key = `${body.provider}:${body.externalId}`; if (state.serviceCases.has(key)) return send(res, 200, { data: state.serviceCases.get(key), idempotent: true });
+    const key = `${body.provider}:${body.externalId}`;
+    if (state.serviceCases.has(key)) { const existing=state.serviceCases.get(key); const robot=state.robots.get(existing.robotId); if (!robot || !visibleToActor(actor,robot)) throw httpError(404,'Service case not found'); return send(res,200,{ data:supportTicketView(existing),idempotent:true }); }
+    if (body.provider === 'altegro-support') throw httpError(400,'Create Altegro support tickets through the support portal');
     if (!['open', 'in_progress', 'waiting', 'resolved', 'closed'].includes(body.status)) throw httpError(400, 'Invalid service-case status');
     const serviceCase = { id: ids(), robotId: item.id, tenantId: item.tenantId, provider: body.provider, externalId: body.externalId, title: body.title || `Service case ${body.externalId}`, description: body.description || '', severity: body.severity || 'info', status: body.status, cause: body.cause || null, action: body.action || null, parts: body.parts || [], assignedTo: body.assignedTo || null, createdAt: timestamp(), updatedAt: timestamp(), closedAt: body.status === 'closed' ? timestamp() : null };
     state.serviceCases.set(key, serviceCase); appendPassportEntry(item.id, { type: body.status === 'closed' ? 'service_completion' : 'service_case', source: body.provider, data: serviceCase }, actor); appendOutbox('service_case.linked', 'service_case', serviceCase.id, serviceCase); recordAudit(actor, 'service_case.link', 'robot', item.id); return send(res, 201, { data: serviceCase });

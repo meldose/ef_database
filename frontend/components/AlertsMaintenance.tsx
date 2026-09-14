@@ -21,7 +21,7 @@ export function AlertsMaintenance({ robots, user, onUnreadChange, onDataChanged 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const canManageAlerts = user.permissions.includes('notification.manage');
-  const autoXingRobots = useMemo(() => robots.filter((robot) => robot.externalIdentities?.some((identity) => identity.system === 'autoxing')), [robots]);
+  const autoXingRobots = robots;
 
   const load = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -115,7 +115,7 @@ export function AlertsMaintenance({ robots, user, onUnreadChange, onDataChanged 
     <section className="panel">
       <div className="panel-title"><div><p className="eyebrow">Preventive service</p><h2>Scheduled maintenance</h2></div><span>{schedules.length} schedules</span></div>
       {canManageSchedules && <form className="schedule-form" onSubmit={createSchedule}>
-        <label>AutoXing robot<select name="robotId" required defaultValue=""><option value="" disabled>Select robot</option>{autoXingRobots.map((robot) => <option value={robot.id} key={robot.id}>{robot.serialNumber}</option>)}</select></label>
+        <label>Maintenance robot<select name="robotId" required defaultValue=""><option value="" disabled>Select robot</option>{autoXingRobots.map((robot) => <option value={robot.id} key={robot.id}>{robot.serialNumber} · {robot.externalIdentities?.[0]?.system || 'manual'}</option>)}</select></label>
         <label>Service title<input name="title" required maxLength={160} placeholder="Quarterly inspection" /></label>
         <label>Next due<input name="nextDueAt" type="datetime-local" required defaultValue={new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 16)} /></label>
         <label>Repeat every (days)<input name="intervalDays" type="number" required min={1} max={730} defaultValue={90} /></label>
@@ -123,7 +123,7 @@ export function AlertsMaintenance({ robots, user, onUnreadChange, onDataChanged 
         <label>Priority<select name="priority" defaultValue="normal"><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="critical">Critical</option></select></label>
         <label className="wide">Description<textarea name="description" maxLength={2000} placeholder="Inspection scope and safety notes" /></label>
         <button disabled={saving || !autoXingRobots.length}>{saving ? 'Saving…' : 'Create schedule'}</button>
-        {!autoXingRobots.length && <small>No visible AutoXing robot is available for scheduling.</small>}
+        {!autoXingRobots.length && <small>No visible robot is available for scheduling.</small>}
       </form>}
       <div className="schedule-list">{schedules.map((schedule) => <article key={schedule.id}><div><div className="record-heading"><strong>{schedule.title}</strong><span className={`state-${schedule.dueState}`}>{schedule.reminderState.replaceAll('_', ' ')}</span></div><p>{schedule.robotSerialNumber} · due {new Date(schedule.nextDueAt).toLocaleString()} · every {schedule.intervalDays} days</p><small>Reminder {schedule.reminderDays} days before · {schedule.technicianName || 'unassigned'} · {schedule.priority} priority</small></div>{canManageSchedules && schedule.status !== 'cancelled' && <div className="record-actions"><button disabled={saving} onClick={() => void updateSchedule(schedule, 'complete')}>Complete</button><button disabled={saving} onClick={() => void updateSchedule(schedule, 'toggle')}>{schedule.status === 'active' ? 'Pause' : 'Resume'}</button></div>}</article>)}</div>
       {!schedules.length && <p className="empty">No recurring maintenance has been scheduled.</p>}

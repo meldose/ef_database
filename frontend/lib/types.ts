@@ -34,6 +34,37 @@ export interface RobotSummary {
   externalIdentities?: Array<{ system: string; externalId: string }>;
 }
 
+export interface Attachment { name: string; contentType: string; size: number; sha256: string }
+export interface AttachmentInput { name: string; contentType: string; contentBase64: string }
+export interface EvidenceRecord { id: string; title: string; description?: string; createdAt: string; status?: string; version?: string; issuer?: string; validUntil?: string; attachment?: Attachment | null }
+export interface SupportTicket {
+  id: string; robotId: string; robotSerialNumber: string; externalId: string; title: string; description: string; category: string; severity: string; status: string; updatedAt: string;
+  messages: Array<{ id: string; authorName: string; authorRole: string; message: string; createdAt: string; attachment?: Attachment | null }>;
+}
+export interface RobotPassportData {
+  robot: RobotSummary; model: { name?: string }; owner: { name?: string }; operator: { name?: string }; site: { name?: string };
+  entries: Array<{ id: string; type: string; source: string; occurredAt?: string; createdAt?: string; data: Record<string, unknown> }>;
+  documents: EvidenceRecord[]; certificates: EvidenceRecord[]; deployments: EvidenceRecord[]; serviceCases: SupportTicket[];
+  compatibility: Array<{ id: string; capability: string; status: string; evidence: string }>;
+  workforce: { requirements: Record<string, unknown>; assignedTechnicians: Array<{ technician: { id: string; name: string }; eligibility: { eligible: boolean } }> };
+  completeness: { percentage: number; checks: Record<string, boolean> };
+}
+export interface Technician {
+  id: string; name: string; email: string; jobTitle: string; status: string;
+  skills: Array<{ code: string; level: string }>; certificates: Array<{ type: string; issuer: string; validUntil: string }>;
+  availability: { status: string; workingDays: string[]; dailyCapacityHours: number; notes?: string };
+}
+export interface WorkforceMatrix {
+  technicians: Technician[]; permissions: { manage: boolean };
+  rows: Array<{ robot: { id: string }; technician: { id: string }; eligibility: { eligible: boolean; missingSkills: string[]; missingCertificates: string[] } }>;
+}
+export interface WorkOrder { id: string; robotId: string; technicianId: string; robotSerialNumber: string; technicianName: string; title: string; description: string; priority: string; status: string; startsAt: string; endsAt: string; completionNote?: string }
+export interface ComparisonMetrics { events: number; incidents: number; casesOpened: number; casesClosed: number; maintenanceCompleted: number }
+export interface FleetComparisonData {
+  groupBy: 'site' | 'provider'; days: number; currentPeriod: { from: string; to: string }; previousPeriod: { from: string; to: string };
+  data: Array<{ id: string; label: string; robots: number; online: number; current: ComparisonMetrics; previous: ComparisonMetrics; change: ComparisonMetrics }>;
+}
+
 export interface AdapterSummary {
   provider: string;
   status: string;

@@ -31,9 +31,35 @@ jobs:
       - run: npm test
       - run: docker build --tag altegro:test .
 
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run check
+      - run: npm --prefix frontend test
+      - run: npm --prefix frontend run build
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm --prefix frontend run test:browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-test-results
+          path: |
+            frontend/playwright-report/
+            frontend/test-results/
+          retention-days: 14
+
   publish:
     if: github.event_name == 'push'
-    needs: test
+    needs: [test, browser]
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.image.outputs.value }}

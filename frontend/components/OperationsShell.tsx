@@ -7,6 +7,10 @@ import type { AdapterSummary, OperationsSummary, RobotSummary, SessionUser } fro
 import { AdvancedAnalytics } from '@/components/AdvancedAnalytics';
 import { AlertsMaintenance } from '@/components/AlertsMaintenance';
 import { AuditLog } from '@/components/AuditLog';
+import { RobotPassport } from '@/components/RobotPassport';
+import { SupportPortal } from '@/components/SupportPortal';
+import { TechnicianCalendar } from '@/components/TechnicianCalendar';
+import { FleetComparison } from '@/components/FleetComparison';
 
 function Login({ onLogin }: { onLogin: (user: SessionUser) => void }) {
   const [error, setError] = useState('');
@@ -109,12 +113,14 @@ export function OperationsShell() {
             </section>
             <section className="grid"><article className="panel"><div className="panel-title"><div><p className="eyebrow">Recent fleet</p><h2>Robots</h2></div><button onClick={() => setWorkspace('robots')}>View registry</button></div><RobotList robots={robots.slice(0, 5)} /></article><article className="panel"><div className="panel-title"><div><p className="eyebrow">Integration health</p><h2>Providers</h2></div><button onClick={() => setWorkspace('integrations')}>Open integrations</button></div><AdapterList adapters={adapters} /></article></section>
           </>}
-          {workspace === 'robots' && <section className="panel"><div className="panel-title"><div><p className="eyebrow">Canonical registry</p><h2>Visible robots</h2></div><span>{robots.length} loaded</span></div><RobotList robots={robots} /></section>}
+          {workspace === 'robots' && <RobotPassport robots={robots} user={user} onDataChanged={load} />}
           {workspace === 'service' && <AlertsMaintenance robots={robots} user={user} onUnreadChange={updateUnreadAlerts} onDataChanged={load} />}
-          {workspace === 'reports' && <AdvancedAnalytics />}
+          {workspace === 'support' && <SupportPortal robots={robots} onDataChanged={load} />}
+          {workspace === 'workforce' && <TechnicianCalendar robots={robots} user={user} />}
+          {workspace === 'reports' && <div className="stack"><AdvancedAnalytics /><FleetComparison /></div>}
           {workspace === 'audit' && <AuditLog user={user} />}
           {workspace === 'integrations' && <section className="panel"><div className="panel-title"><div><p className="eyebrow">Integration plane</p><h2>Provider contracts</h2></div><span>Commands disabled by default</span></div><AdapterList adapters={adapters} /></section>}
-          {!['overview', 'robots', 'service', 'reports', 'audit', 'integrations'].includes(workspace) && <section className="panel empty"><h2>Migration workspace</h2><p>This typed workspace shell is ready for the next page migration. The complete operational page remains available in the existing portal until feature parity is verified.</p><a href={legacyWorkspacePath(workspace)}>Open current {workspace} workspace</a></section>}
+          {workspace === 'administration' && <section className="panel empty"><h2>Migration workspace</h2><p>The complete administration page remains available in the existing portal.</p><a href={legacyWorkspacePath(workspace)}>Open current {workspace} workspace</a></section>}
         </main>
       </div>
     </div>
