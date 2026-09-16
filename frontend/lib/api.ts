@@ -8,6 +8,7 @@ import type {
   OperationalNotification,
   OperationsReport,
   OperationsSummary,
+  ReportSubscription,
   RobotSummary,
   SessionUser
 } from './types';
@@ -59,6 +60,16 @@ export interface MaintenanceScheduleInput {
   description?: string;
 }
 
+export interface ReportSubscriptionInput {
+  name: string;
+  cadence: ReportSubscription['cadence'];
+  days: ReportSubscription['days'];
+  hourUtc: number;
+  weekday: number;
+  monthDay: number;
+  active?: boolean;
+}
+
 export const api = {
   passport: (id: string) => request<{ data: RobotPassportData }>(`/api/v1/robots/${encodeURIComponent(id)}/passport`),
   addDocument: (id: string, input: { title: string; description: string; attachment?: AttachmentInput }) => request(`/api/v1/robots/${encodeURIComponent(id)}/lifecycle-records`, { method: 'POST', body: JSON.stringify({ recordType: 'document', ...input }) }),
@@ -87,6 +98,11 @@ export const api = {
   },
   adapters: () => request<{ data: AdapterSummary[] }>('/api/v1/adapters'),
   operationsReport: (days: number) => request<{ data: OperationsReport }>(withQuery('/api/v1/reports/operations', { days })),
+  reportSubscriptions: () => request<{ data: ReportSubscription[]; count: number; delivery: { enabled: boolean; configured: boolean; configurationError: string | null } }>('/api/v1/report-subscriptions'),
+  createReportSubscription: (input: ReportSubscriptionInput) => request<{ data: ReportSubscription }>('/api/v1/report-subscriptions', { method: 'POST', body: JSON.stringify(input) }),
+  updateReportSubscription: (id: string, input: Partial<ReportSubscriptionInput>) => request<{ data: ReportSubscription }>(`/api/v1/report-subscriptions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  sendReportNow: (id: string) => request<{ data: ReportSubscription; delivery: { id: string; status: string; sentAt: string; recipientCount: number } }>(`/api/v1/report-subscriptions/${encodeURIComponent(id)}/send-now`, { method: 'POST', body: '{}' }),
+  deleteReportSubscription: (id: string) => request<{ deleted: boolean; id: string }>(`/api/v1/report-subscriptions/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   maintenancePredictions: () => request<{ data: MaintenancePrediction[]; summary: { total: number; critical: number; high: number; attention: number }; generatedAt: string }>('/api/v1/maintenance/predictions'),
   notifications: (filters: { q?: string; severity?: string; status?: string } = {}) => request<{ data: OperationalNotification[]; count: number; activeCount: number; unreadCount: number; generatedAt: string }>(withQuery('/api/v1/notifications', filters)),
   markNotificationsRead: (notificationIds: string[]) => request<{ readCount: number; unreadCount: number; readAt: string }>('/api/v1/notifications/read', { method: 'POST', body: JSON.stringify({ notificationIds }) }),

@@ -56,6 +56,18 @@ test('fleet comparisons switch site, provider and periods', async ({ page }) => 
   await page.getByLabel('Compare by').selectOption('provider'); await page.getByLabel('Comparison period').selectOption('90'); await expect(page.getByRole('table')).toContainText('autoxing'); await expect(page.getByRole('table')).toContainText('cenobots');
 });
 
+test('scheduled reports can be created, paused and deleted', async ({ page }, testInfo) => {
+  await login(page); await page.getByRole('navigation').getByRole('button', { name: 'Reports', exact: true }).click();
+  const name=`Browser report ${testInfo.project.name}`; await page.getByLabel('Report name').fill(name); await page.getByLabel('Frequency').selectOption('monthly'); await page.getByLabel('Day of month').fill('12'); await page.getByRole('button',{ name:'Create report',exact:true }).click();
+  const schedule=page.locator('.schedule-list > article').filter({ hasText:name }); await expect(schedule).toBeVisible(); await expect(schedule).toContainText('admin@demo.altegro.local'); await schedule.getByRole('button',{ name:'Pause',exact:true }).click(); await expect(schedule).toContainText('Paused');
+  page.once('dialog',(dialog) => dialog.accept()); await schedule.getByRole('button',{ name:'Delete',exact:true }).click(); await expect(schedule).toHaveCount(0);
+});
+
+test('German language option localizes the modern workspace', async ({ page }) => {
+  await login(page); await page.getByRole('combobox',{ name:'Language',exact:true }).selectOption('de'); await expect(page.locator('html')).toHaveAttribute('lang','de'); await expect(page.getByRole('heading',{ name:'Flottenprioritäten auf einen Blick' })).toBeVisible();
+  await page.getByRole('navigation').getByRole('button',{ name:'Berichte',exact:true }).click(); await expect(page.getByRole('heading',{ name:'Geplante E-Mail-Berichte',exact:true })).toBeVisible(); await page.getByRole('combobox',{ name:'Sprache',exact:true }).selectOption('en'); await expect(page.locator('html')).toHaveAttribute('lang','en');
+});
+
 test('technician availability and qualifications update', async ({ page }, testInfo) => {
   await login(page); await page.getByRole('navigation').getByRole('button', { name: 'Technicians', exact: true }).click();
   const availability = page.getByRole('combobox', { name: 'Availability for Elvis Heil', exact: true });

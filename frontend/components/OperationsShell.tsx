@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api } from '@/lib/api';
 import { legacyWorkspacePath, navigationForRole, type Workspace } from '@/lib/navigation';
 import type { AdapterSummary, OperationsSummary, RobotSummary, SessionUser } from '@/lib/types';
@@ -11,8 +11,11 @@ import { RobotPassport } from '@/components/RobotPassport';
 import { SupportPortal } from '@/components/SupportPortal';
 import { TechnicianCalendar } from '@/components/TechnicianCalendar';
 import { FleetComparison } from '@/components/FleetComparison';
+import { ScheduledReports } from '@/components/ScheduledReports';
+import { useI18n } from '@/lib/i18n';
 
 function Login({ onLogin }: { onLogin: (user: SessionUser) => void }) {
+  const { locale,setLocale,t }=useI18n();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -30,19 +33,19 @@ function Login({ onLogin }: { onLogin: (user: SessionUser) => void }) {
     }
   }
   return (
-    <main className="login-layout">
+    <main className="login-layout" id="main-content"><a className="skip-link" href="#login-form">{t('Skip to main content')}</a>
       <section className="login-card">
         <div className="brand"><span>A</span><strong>altegro</strong></div>
         <p className="eyebrow">Secure platform access</p>
         <h1>Sign in to Altegro</h1>
         <p>Open the workspace for your organization, role and assigned robots.</p>
-        <form onSubmit={submit}>
+        <form onSubmit={submit} id="login-form" aria-busy={busy}>
           <label>Email<input name="email" type="email" autoComplete="username" required /></label>
           <label>Password<input name="password" type="password" autoComplete="current-password" required /></label>
           <button disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
           {error && <p className="error" role="alert">{error}</p>}
         </form>
-        <footer className="legal-links"><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a></footer>
+        <footer className="legal-links"><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><label>{t('Language')}<select aria-label={t('Language')} value={locale} onChange={(event) => setLocale(event.target.value as 'de' | 'en')}><option value="de">Deutsch</option><option value="en">English</option></select></label></footer>
       </section>
       <aside><p className="eyebrow">Manufacturer-neutral operations</p><h2>One clear workspace for every role.</h2><p>Registry, Passport, service evidence and integrations without exposing tools a user does not need.</p></aside>
     </main>
@@ -54,6 +57,7 @@ function Metric({ label, value, hint, tone }: { label: string; value: number | s
 }
 
 export function OperationsShell() {
+  const { locale,setLocale,t }=useI18n();
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loadingSession, setLoadingSession] = useState(true);
   const [workspace, setWorkspace] = useState<Workspace>('overview');
@@ -63,6 +67,7 @@ export function OperationsShell() {
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const workspaceHeading=useRef<HTMLHeadingElement>(null); const initialWorkspace=useRef(true);
 
   const load = useCallback(async () => {
     setRefreshing(true);
@@ -88,22 +93,23 @@ export function OperationsShell() {
     api.session().then(({ user: sessionUser }) => setUser(sessionUser)).catch(() => setUser(null)).finally(() => setLoadingSession(false));
   }, []);
   useEffect(() => { if (user) void load(); }, [user, load]);
+  useEffect(() => { if (initialWorkspace.current) { initialWorkspace.current=false; return; } workspaceHeading.current?.focus(); },[workspace]);
 
   const availableNavigation = useMemo(() => user ? navigationForRole(user.role) : [], [user]);
   if (loadingSession) return <main className="centered" aria-live="polite">Loading Altegro…</main>;
   if (!user) return <Login onLogin={setUser} />;
 
   return (
-    <div className="app">
+    <div className="app"><a className="skip-link" href="#main-content">{t('Skip to main content')}</a>
       <header>
         <div className="brand"><span>A</span><strong>altegro</strong><small>robot operations</small></div>
-        <div className="header-actions"><span className="environment">Phase 1 · Read-first</span><button className={`alert-button ${unreadAlerts ? 'active' : ''}`} onClick={() => setWorkspace('service')}>Alerts <strong>{unreadAlerts}</strong></button><span>{user.name}<small>{user.role.replaceAll('_', ' ')}</small></span><button className="quiet" onClick={() => void load()} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button><button className="quiet" onClick={() => void api.logout().finally(() => setUser(null))}>Log out</button></div>
+        <div className="header-actions"><span className="environment">Phase 1 · Read-first</span><label className="language-control"><span>{t('Language')}</span><select aria-label={t('Language')} value={locale} onChange={(event) => setLocale(event.target.value as 'de' | 'en')}><option value="de">DE</option><option value="en">EN</option></select></label><button className={`alert-button ${unreadAlerts ? 'active' : ''}`} onClick={() => setWorkspace('service')}>Alerts <strong>{unreadAlerts}</strong></button><span>{user.name}<small>{user.role.replaceAll('_', ' ')}</small></span><button className="quiet" onClick={() => void load()} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button><button className="quiet" onClick={() => void api.logout().finally(() => setUser(null))}>Log out</button></div>
       </header>
       <div className="workspace">
-        <nav aria-label="Role workspace">{availableNavigation.map((item) => <button key={item.id} aria-current={workspace === item.id ? 'page' : undefined} onClick={() => setWorkspace(item.id)}>{item.label}</button>)}</nav>
-        <main>
+        <nav aria-label={t('Role workspace')}>{availableNavigation.map((item) => <button key={item.id} aria-current={workspace === item.id ? 'page' : undefined} onClick={() => setWorkspace(item.id)}>{t(item.label)}</button>)}</nav>
+        <main id="main-content" tabIndex={-1} aria-busy={refreshing}>
           {error && <div className="banner error" role="alert">{error} <button onClick={() => void load()}>Retry</button></div>}
-          <section className="hero"><div><p className="eyebrow">{user.role.replaceAll('_', ' ')} workspace</p><h1>{workspace === 'overview' ? 'Fleet priorities at a glance' : availableNavigation.find((item) => item.id === workspace)?.label}</h1><p>Data and actions are limited to your tenant, role and robot assignments.</p></div><time>{summary ? `Updated ${new Date(summary.generatedAt).toLocaleTimeString()}` : 'Waiting for data'}</time></section>
+          <section className="hero"><div><p className="eyebrow">{user.role.replaceAll('_', ' ')} workspace</p><h1 ref={workspaceHeading} tabIndex={-1}>{t(workspace === 'overview' ? 'Fleet priorities at a glance' : availableNavigation.find((item) => item.id === workspace)?.label || '')}</h1><p>Data and actions are limited to your tenant, role and robot assignments.</p></div><time aria-live="polite">{summary ? `${t('Updated')} ${new Date(summary.generatedAt).toLocaleTimeString(locale === 'de' ? 'de-DE' : 'en-GB')}` : t('Waiting for data')}</time></section>
           {workspace === 'overview' && <>
             <section className="metrics">
               <Metric label="Robots" value={summary?.robots.total ?? '—'} hint={`${summary?.robots.online ?? 0} online`} tone="good" />
@@ -117,7 +123,7 @@ export function OperationsShell() {
           {workspace === 'service' && <AlertsMaintenance robots={robots} user={user} onUnreadChange={updateUnreadAlerts} onDataChanged={load} />}
           {workspace === 'support' && <SupportPortal robots={robots} onDataChanged={load} />}
           {workspace === 'workforce' && <TechnicianCalendar robots={robots} user={user} />}
-          {workspace === 'reports' && <div className="stack"><AdvancedAnalytics /><FleetComparison /></div>}
+          {workspace === 'reports' && <div className="stack"><AdvancedAnalytics /><FleetComparison /><ScheduledReports user={user} /></div>}
           {workspace === 'audit' && <AuditLog user={user} />}
           {workspace === 'integrations' && <section className="panel"><div className="panel-title"><div><p className="eyebrow">Integration plane</p><h2>Provider contracts</h2></div><span>Commands disabled by default</span></div><AdapterList adapters={adapters} /></section>}
           {workspace === 'administration' && <section className="panel empty"><h2>Migration workspace</h2><p>The complete administration page remains available in the existing portal.</p><a href={legacyWorkspacePath(workspace)}>Open current {workspace} workspace</a></section>}

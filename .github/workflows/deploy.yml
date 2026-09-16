@@ -62,7 +62,8 @@ jobs:
     needs: [test, browser]
     runs-on: ubuntu-latest
     outputs:
-      image: ${{ steps.image.outputs.value }}
+      backend_image: ${{ steps.images.outputs.backend }}
+      frontend_image: ${{ steps.images.outputs.frontend }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -70,13 +71,23 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - id: image
-        run: echo "value=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - id: images
+        run: |
+          echo "backend=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          echo "frontend=ghcr.io/${GITHUB_REPOSITORY,,}-frontend:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Publish backend image
+        uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ steps.image.outputs.value }}
+          tags: ${{ steps.images.outputs.backend }}
+      - name: Publish frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: frontend
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ steps.images.outputs.frontend }}
 
   deploy:
     if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
@@ -99,23 +110,42 @@ jobs:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '222' }}
         run: |
-          ssh -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH/scripts' '$DEPLOY_PATH/deployment' '$DEPLOY_PATH/monitoring'"
-          scp -i ~/.ssh/altegro_deploy compose.yaml compose.production.yaml compose.proxy.yaml compose.monitoring.yaml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-          scp -i ~/.ssh/altegro_deploy deployment/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/deployment/"
-          scp -i ~/.ssh/altegro_deploy monitoring/prometheus.yml monitoring/alerts.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/"
-          scp -i ~/.ssh/altegro_deploy scripts/deploy-production.sh "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/scripts/"
+          printf -v prepare 'mkdir -p %q %q %q' "$DEPLOY_PATH/scripts" "$DEPLOY_PATH/deployment" "$DEPLOY_PATH/monitoring"
+          ssh -p "$DEPLOY_PORT" -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "$prepare"
+          scp -P "$DEPLOY_PORT" -i ~/.ssh/altegro_deploy compose.yaml compose.production.yaml compose.proxy.yaml compose.monitoring.yaml compose.email.yaml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
+          scp -P "$DEPLOY_PORT" -i ~/.ssh/altegro_deploy deployment/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/deployment/"
+          scp -P "$DEPLOY_PORT" -i ~/.ssh/altegro_deploy monitoring/prometheus.yml monitoring/alerts.yml monitoring/blackbox.yml monitoring/alertmanager-entrypoint.sh "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/"
+          scp -P "$DEPLOY_PORT" -i ~/.ssh/altegro_deploy scripts/deploy-production.sh "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/scripts/"
       - name: Deploy immutable image and verify readiness
         env:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
-          DEPLOY_IMAGE: ${{ needs.publish.outputs.image }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '222' }}
+          DEPLOY_IMAGE: ${{ needs.publish.outputs.backend_image }}
+          DEPLOY_FRONTEND_IMAGE: ${{ needs.publish.outputs.frontend_image }}
           GHCR_READ_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
           ALTEGRO_DOMAIN: ${{ vars.ALTEGRO_DOMAIN }}
           ACME_EMAIL: ${{ vars.ACME_EMAIL }}
           AUTOXING_REPO_HOST_PATH: ${{ vars.AUTOXING_REPO_HOST_PATH }}
           CENOBOTS_ROBOT_OPEN_IDS: ${{ secrets.CENOBOTS_ROBOT_OPEN_IDS }}
+          ALTEGRO_ENABLE_MONITORING: ${{ vars.ALTEGRO_ENABLE_MONITORING || 'true' }}
+          ALTEGRO_ENABLE_ALERTS: ${{ vars.ALTEGRO_ENABLE_ALERTS || 'true' }}
+          LEGAL_OPERATOR_NAME: ${{ vars.LEGAL_OPERATOR_NAME }}
+          LEGAL_REPRESENTATIVE: ${{ vars.LEGAL_REPRESENTATIVE }}
+          LEGAL_STREET: ${{ vars.LEGAL_STREET }}
+          LEGAL_CITY: ${{ vars.LEGAL_CITY }}
+          LEGAL_EMAIL: ${{ vars.LEGAL_EMAIL }}
+          EMAIL_ALERT_FROM: ${{ vars.EMAIL_ALERT_FROM }}
+          EMAIL_ALERT_RECIPIENTS: ${{ vars.EMAIL_ALERT_RECIPIENTS }}
+          EMAIL_SMTP_HOST: ${{ vars.EMAIL_SMTP_HOST }}
+          EMAIL_SMTP_USERNAME: ${{ vars.EMAIL_SMTP_USERNAME }}
+          SMS_ALERT_RECIPIENTS: ${{ vars.SMS_ALERT_RECIPIENTS }}
+          SMS_ALERT_WEBHOOK_URL: ${{ vars.SMS_ALERT_WEBHOOK_URL }}
         run: |
-          printf '%s' "$GHCR_READ_TOKEN" | ssh -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
-          ssh -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && chmod +x scripts/deploy-production.sh && ALTEGRO_IMAGE='$DEPLOY_IMAGE' ALTEGRO_DOMAIN='$ALTEGRO_DOMAIN' ACME_EMAIL='$ACME_EMAIL' AUTOXING_REPO_HOST_PATH='$AUTOXING_REPO_HOST_PATH' CENOBOTS_ROBOT_OPEN_IDS='$CENOBOTS_ROBOT_OPEN_IDS' scripts/deploy-production.sh"
+          printf -v login_command 'docker login ghcr.io -u %q --password-stdin' '${{ github.actor }}'
+          printf '%s' "$GHCR_READ_TOKEN" | ssh -p "$DEPLOY_PORT" -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "$login_command"
+          printf -v deploy_command 'cd %q && chmod +x scripts/deploy-production.sh && ALTEGRO_IMAGE=%q ALTEGRO_FRONTEND_IMAGE=%q ALTEGRO_DOMAIN=%q ACME_EMAIL=%q AUTOXING_REPO_HOST_PATH=%q CENOBOTS_ROBOT_OPEN_IDS=%q ALTEGRO_ENABLE_MONITORING=%q ALTEGRO_ENABLE_ALERTS=%q LEGAL_OPERATOR_NAME=%q LEGAL_REPRESENTATIVE=%q LEGAL_STREET=%q LEGAL_CITY=%q LEGAL_EMAIL=%q EMAIL_ALERT_FROM=%q EMAIL_ALERT_RECIPIENTS=%q EMAIL_SMTP_HOST=%q EMAIL_SMTP_USERNAME=%q SMS_ALERT_RECIPIENTS=%q SMS_ALERT_WEBHOOK_URL=%q scripts/deploy-production.sh' "$DEPLOY_PATH" "$DEPLOY_IMAGE" "$DEPLOY_FRONTEND_IMAGE" "$ALTEGRO_DOMAIN" "$ACME_EMAIL" "$AUTOXING_REPO_HOST_PATH" "$CENOBOTS_ROBOT_OPEN_IDS" "$ALTEGRO_ENABLE_MONITORING" "$ALTEGRO_ENABLE_ALERTS" "$LEGAL_OPERATOR_NAME" "$LEGAL_REPRESENTATIVE" "$LEGAL_STREET" "$LEGAL_CITY" "$LEGAL_EMAIL" "$EMAIL_ALERT_FROM" "$EMAIL_ALERT_RECIPIENTS" "$EMAIL_SMTP_HOST" "$EMAIL_SMTP_USERNAME" "$SMS_ALERT_RECIPIENTS" "$SMS_ALERT_WEBHOOK_URL"
+          ssh -p "$DEPLOY_PORT" -i ~/.ssh/altegro_deploy "$DEPLOY_USER@$DEPLOY_HOST" "$deploy_command"

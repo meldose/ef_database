@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 Object.assign(process.env, { NODE_ENV:'test', ALTEGRO_ENV_FILE:'/dev/null', ALTEGRO_PERSISTENCE_DRIVER:'memory', ALTEGRO_PERSISTENCE:'false', OBJECT_STORAGE_DRIVER:'inline', ALTEGRO_SYNC_MODE:'inline', AUTOXING_LIVE:'false', CENOBOTS_LIVE:'false', EMAIL_ALERTS_ENABLED:'false', SMS_ALERTS_ENABLED:'false' });
-const { server, state } = require('./server');
+const { server, state, evaluateScheduledReports } = require('./server');
 
 (async () => {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve)); const origin = `http://127.0.0.1:${server.address().port}`;
@@ -53,6 +53,13 @@ const { server, state } = require('./server');
     result=await request('/api/v1/reports/comparison?groupBy=site&days=30'); assert.equal(result.status,200); const group=result.body.data.data.find((item)=>item.id==='site-comparison'); assert.equal(group.current.incidents,1); assert.equal(group.previous.incidents,1); assert.equal(group.change.incidents,0); assert.ok(!result.body.data.data.some((item)=>item.id==='foreign-site'));
     result=await request('/api/v1/reports/comparison?groupBy=provider&days=30','GET',undefined,'demo-robot-ax-001'); assert.equal(result.body.data.data.length,1); assert.equal(result.body.data.data[0].id,'autoxing');
     for (const query of ['days=1.5','days=366','days=invalid','groupBy=tenant']) { result=await request(`/api/v1/reports/comparison?${query}`); assert.equal(result.status,400); }
-    console.log('Modern workflow API tests passed: attachments, authorization, atomic validation, cross-provider maintenance and period comparisons.');
+    Object.assign(process.env,{ EMAIL_ALERTS_ENABLED:'true',EMAIL_ALERT_TRANSPORT:'capture',EMAIL_ALERT_FROM:'reports@altegro.test',EMAIL_ALERT_RECIPIENTS:'global@altegro.test' });
+    result=await request('/api/v1/report-subscriptions','POST',{ name:'Weekly operations',cadence:'weekly',days:30,hourUtc:7,weekday:1,monthDay:1 }); assert.equal(result.status,201); const reportSubscriptionId=result.body.data.id; assert.equal(result.body.data.email,'admin@demo.altegro.local'); assert.ok(Date.parse(result.body.data.nextRunAt)>Date.now());
+    result=await request(`/api/v1/report-subscriptions/${reportSubscriptionId}`,'PATCH',{ hourUtc:7.5 }); assert.equal(result.status,400); assert.equal(state.reportSubscriptions.get(reportSubscriptionId).hourUtc,7);
+    result=await request(`/api/v1/report-subscriptions/${reportSubscriptionId}`,'PATCH',{ active:false },'demo-owner'); assert.equal(result.status,404);
+    result=await request(`/api/v1/report-subscriptions/${reportSubscriptionId}/send-now`,'POST',{}); assert.equal(result.status,200); assert.equal(result.body.delivery.status,'sent'); const immediateDelivery=state.emailDeliveries.find((item)=>item.id===result.body.delivery.id); assert.deepEqual(immediateDelivery.recipients,['admin@demo.altegro.local']); assert.equal(immediateDelivery.type,'scheduled_report');
+    const subscription=state.reportSubscriptions.get(reportSubscriptionId); subscription.nextRunAt=new Date(Date.now()-1000).toISOString(); const scheduled=await evaluateScheduledReports(); assert.equal(scheduled[0].status,'sent'); assert.ok(Date.parse(subscription.nextRunAt)>Date.now());
+    result=await request(`/api/v1/report-subscriptions/${reportSubscriptionId}`,'DELETE'); assert.equal(result.status,200); assert.equal(state.reportSubscriptions.has(reportSubscriptionId),false);
+    console.log('Modern workflow API tests passed: attachments, authorization, validation, maintenance, comparisons and scheduled reports.');
   } finally { await new Promise((resolve)=>server.close(resolve)); }
 })().catch((error)=>{ console.error(error); process.exitCode=1; });

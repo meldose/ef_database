@@ -3,12 +3,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import type { MaintenancePrediction, OperationsReport } from '@/lib/types';
+import { useI18n } from '@/lib/i18n';
 
 function value(number: number | null | undefined, suffix = '') {
   return number == null ? '—' : `${number}${suffix}`;
 }
 
 export function AdvancedAnalytics() {
+  const { locale,t }=useI18n();
   const [days, setDays] = useState(30);
   const [report, setReport] = useState<OperationsReport | null>(null);
   const [predictions, setPredictions] = useState<MaintenancePrediction[]>([]);
@@ -38,7 +40,7 @@ export function AdvancedAnalytics() {
   if (loading && !report) return <section className="panel empty" aria-live="polite">Loading operational analytics…</section>;
   return <div className="stack">
     {error && <div className="banner error" role="alert">{error}<button onClick={() => void load()}>Retry</button></div>}
-    <section className="panel">
+    <section className="panel" aria-busy={loading}>
       <div className="panel-title">
         <div><p className="eyebrow">Decision metrics</p><h2>Advanced analytics</h2></div>
         <label className="compact-control">Period<select value={days} onChange={(event) => setDays(Number(event.target.value))}><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option></select></label>
@@ -54,10 +56,11 @@ export function AdvancedAnalytics() {
         <article><h3>Provider distribution</h3><dl>{report?.fleet.providers.map((provider) => <div key={provider.provider}><dt>{provider.provider}</dt><dd>{provider.count}</dd></div>)}</dl></article>
         <article><h3>Workforce capacity</h3><dl><div><dt>Available</dt><dd>{report?.workforce.available ?? 0}</dd></div><div><dt>Availability</dt><dd>{value(report?.workforce.availabilityPercent, '%')}</dd></div><div><dt>On leave</dt><dd>{report?.workforce.onLeave ?? 0}</dd></div><div><dt>Total technicians</dt><dd>{report?.workforce.technicians ?? 0}</dd></div></dl></article>
       </div>
-      <div className="trend" aria-label={`Daily event trend for ${days} days`}>
+      <div className="trend" aria-hidden="true">
         {report?.daily.map((item) => <div className="trend-day" key={item.date} title={`${item.date}: ${item.events} events, ${item.errors} errors`}><span className={item.errors ? 'has-error' : ''} style={{ height: `${Math.max(4, item.events / maxEvents * 100)}%` }} /><small>{item.date.slice(5)}</small></div>)}
       </div>
-      <div className="panel-actions"><a className="button-link" href={`/api/v1/reports/operations.csv?days=${days}`}>Export CSV</a><a className="button-link secondary" href={`/api/v1/reports/operations.json?days=${days}`}>Export JSON</a><small>{report ? `Updated ${new Date(report.generatedAt).toLocaleString()}` : ''}</small></div>
+      <details className="trend-data"><summary>{t('View daily data')}</summary><div className="table-scroll" tabIndex={0} role="region" aria-label={t('Daily event trend')}><table><caption>{t('Daily event trend')}</caption><thead><tr><th scope="col">{t('Date')}</th><th scope="col">{t('Events')}</th><th scope="col">{t('Errors')}</th><th scope="col">{t('Maintenance')}</th><th scope="col">{t('Tasks')}</th></tr></thead><tbody>{report?.daily.map((item) => <tr key={item.date}><th scope="row">{new Date(`${item.date}T00:00:00Z`).toLocaleDateString(locale === 'de' ? 'de-DE' : 'en-GB')}</th><td>{item.events}</td><td>{item.errors}</td><td>{item.maintenance}</td><td>{item.tasks}</td></tr>)}</tbody></table></div></details>
+      <div className="panel-actions"><a className="button-link" href={`/api/v1/reports/operations.csv?days=${days}`}>Export CSV</a><a className="button-link secondary" href={`/api/v1/reports/operations.json?days=${days}`}>Export JSON</a><small aria-live="polite">{report ? `${t('Updated')} ${new Date(report.generatedAt).toLocaleString(locale === 'de' ? 'de-DE' : 'en-GB')}` : ''}</small></div>
     </section>
     <section className="panel">
       <div className="panel-title"><div><p className="eyebrow">Predictive maintenance</p><h2>Highest-risk robots</h2></div><span>{predictions.filter((item) => item.score >= 25).length} need review</span></div>

@@ -12,6 +12,17 @@ DEPLOY_DOMAIN=${ALTEGRO_DOMAIN:-altegro.de}
 : "${LEGAL_EMAIL:?Set the legal contact email}"
 DEPLOY_URL=${ALTEGRO_HEALTH_URL:-https://${DEPLOY_DOMAIN}/ready}
 
+if ! printf '%s\n' "$DEPLOY_DOMAIN" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$'; then
+  echo "ALTEGRO_DOMAIN must be a fully qualified domain name" >&2
+  exit 1
+fi
+for image in "$DEPLOY_IMAGE" "$DEPLOY_FRONTEND_IMAGE"; do
+  if ! printf '%s\n' "$image" | grep -Eq '(@sha256:[0-9a-f]{64}$|:[0-9a-f]{40,64}$)'; then
+    echo "Production images must use a digest or immutable 40-64 character commit tag: $image" >&2
+    exit 1
+  fi
+done
+
 export ALTEGRO_IMAGE="$DEPLOY_IMAGE"
 export ALTEGRO_FRONTEND_IMAGE="$DEPLOY_FRONTEND_IMAGE"
 export ALTEGRO_DOMAIN="$DEPLOY_DOMAIN"
@@ -47,18 +58,30 @@ docker compose "$@" pull
 docker compose "$@" up -d --no-build --remove-orphans
 
 attempt=1
+READY=false
 while [ "$attempt" -le 30 ]; do
   if command -v curl >/dev/null 2>&1 && curl --fail --silent --show-error "$DEPLOY_URL" >/dev/null; then
-    echo "Altegro deployment is ready: $DEPLOY_IMAGE"
-    exit 0
+    READY=true
+    break
   fi
   if command -v wget >/dev/null 2>&1 && wget -q -O /dev/null "$DEPLOY_URL"; then
-    echo "Altegro deployment is ready: $DEPLOY_IMAGE"
-    exit 0
+    READY=true
+    break
   fi
   sleep 2
   attempt=$((attempt + 1))
 done
+
+if [ "$READY" = "true" ]; then
+  for path in /health / /impressum /datenschutz; do
+    url="https://${DEPLOY_DOMAIN}${path}"
+    if command -v curl >/dev/null 2>&1; then curl --fail --silent --show-error --max-time 15 "$url" >/dev/null
+    else wget -q -T 15 -O /dev/null "$url"
+    fi
+  done
+  echo "Altegro deployment is ready over verified HTTPS: $DEPLOY_IMAGE / $DEPLOY_FRONTEND_IMAGE"
+  exit 0
+fi
 
 docker compose "$@" ps
 docker compose "$@" logs --tail=100 altegro frontend caddy

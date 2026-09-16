@@ -110,6 +110,25 @@ export interface OperationsReport {
   generatedAt: string;
 }
 
+export interface ReportSubscription {
+  id: string;
+  name: string;
+  email: string;
+  cadence: 'daily' | 'weekly' | 'monthly';
+  days: 7 | 30 | 90 | 365;
+  hourUtc: number;
+  weekday: number;
+  monthDay: number;
+  active: boolean;
+  nextRunAt: string;
+  lastRunAt: string | null;
+  lastStatus: 'never' | 'sent' | 'failed';
+  lastDeliveryId: string | null;
+  lastError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface MaintenancePrediction {
   robotId: string;
   serialNumber: string;

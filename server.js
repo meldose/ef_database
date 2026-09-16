@@ -172,7 +172,7 @@ function emailAlertConfiguration() {
 }
 
 function smtpMessage(delivery,config) {
-  const subject=`[Altegro ${delivery.severity.toUpperCase()}] ${delivery.title}`.replace(/[\r\n]+/g,' ').slice(0,180); const encodedSubject=`=?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`;
+  const label=delivery.type === 'scheduled_report' ? 'REPORT' : delivery.severity.toUpperCase(); const subject=`[Altegro ${label}] ${delivery.title}`.replace(/[\r\n]+/g,' ').slice(0,180); const encodedSubject=`=?UTF-8?B?${Buffer.from(subject).toString('base64')}?=`;
   const text=[delivery.title,'',delivery.message,delivery.robotSerialNumber ? `Robot: ${delivery.robotSerialNumber}` : null,`Severity: ${delivery.severity}`,`Occurred: ${delivery.occurredAt}`,process.env.ALTEGRO_PUBLIC_URL ? `Open Altegro: ${String(process.env.ALTEGRO_PUBLIC_URL).replace(/\/$/,'')}` : null,'',`Notification ID: ${delivery.notificationKey}`].filter((line) => line !== null).join('\r\n');
   return `Date: ${new Date().toUTCString()}\r\nMessage-ID: <${delivery.id}@altegro.local>\r\nFrom: ${config.from}\r\nTo: ${delivery.recipients.join(', ')}\r\nSubject: ${encodedSubject}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n${text}`;
 }
@@ -195,11 +195,12 @@ async function sendSmtpEmail(delivery,config) {
   } finally { socket.end(); }
 }
 
-function createEmailDelivery(notification) {
+function createEmailDelivery(notification,{ enqueue=true }={}) {
   const config=emailAlertConfiguration();
-  const delivery={ id:ids(),notificationKey:String(notification.notificationKey),type:notification.type || 'operational_alert',severity:notification.severity || 'error',title:String(notification.title || 'Altegro alert').slice(0,180),message:String(notification.message || '').slice(0,4000),robotId:notification.robotId || null,robotSerialNumber:notification.robotSerialNumber || null,recipients:[...config.recipients],status:'pending',attempts:0,lastError:null,createdAt:timestamp(),occurredAt:notification.occurredAt || timestamp(),sentAt:null,nextAttemptAt:null };
+  const requestedRecipients=Array.isArray(notification.recipients) ? notification.recipients.map(emailAddress).filter(Boolean) : []; const recipients=[...new Set(requestedRecipients.length ? requestedRecipients : config.recipients)];
+  const delivery={ id:ids(),notificationKey:String(notification.notificationKey),type:notification.type || 'operational_alert',severity:notification.severity || 'error',title:String(notification.title || 'Altegro alert').slice(0,180),message:String(notification.message || '').slice(0,4000),robotId:notification.robotId || null,robotSerialNumber:notification.robotSerialNumber || null,recipients,status:'pending',attempts:0,lastError:null,createdAt:timestamp(),occurredAt:notification.occurredAt || timestamp(),sentAt:null,nextAttemptAt:null };
   state.emailDeliveries.push(delivery); state.emailDeliveries=state.emailDeliveries.slice(-200); schedulePersist();
-  if (databaseStore) databaseStore.enqueueEmailJob(delivery).then(() => setImmediate(processEmailQueue)).catch((error) => console.error(`Could not enqueue email delivery: ${error.message}`));
+  if (databaseStore && enqueue) databaseStore.enqueueEmailJob(delivery).then(() => setImmediate(processEmailQueue)).catch((error) => console.error(`Could not enqueue email delivery: ${error.message}`));
   return delivery;
 }
 
@@ -309,6 +310,7 @@ const state = {
   cenobotsWebhookReceipts: new Map(),
   serviceWebhookReceipts: new Map(),
   maintenanceSchedules: new Map(),
+  reportSubscriptions: new Map(),
   alertEscalationRules: new Map(),
   alertEscalations: new Map(),
   emailDeliveries: [],
@@ -394,7 +396,7 @@ function persistedSnapshot() {
     sessions: mapEntries(authenticatedSessions).filter(([, session]) => session.expiresAt > Date.now()),
     state: {
       tenants: mapEntries(state.tenants), organizations: mapEntries(state.organizations), sites: mapEntries(state.sites), models: mapEntries(state.models), robots: mapEntries(state.robots),
-      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), notificationWorkflows:mapEntries(state.notificationWorkflows), notificationReads:mapEntries(state.notificationReads), workOrders:mapEntries(state.workOrders), cenobotsWebhookReceipts:mapEntries(state.cenobotsWebhookReceipts), serviceWebhookReceipts:mapEntries(state.serviceWebhookReceipts), maintenanceSchedules:mapEntries(state.maintenanceSchedules), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
+      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), notificationWorkflows:mapEntries(state.notificationWorkflows), notificationReads:mapEntries(state.notificationReads), workOrders:mapEntries(state.workOrders), cenobotsWebhookReceipts:mapEntries(state.cenobotsWebhookReceipts), serviceWebhookReceipts:mapEntries(state.serviceWebhookReceipts), maintenanceSchedules:mapEntries(state.maintenanceSchedules), reportSubscriptions:mapEntries(state.reportSubscriptions), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
       deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox, emailDeliveries:state.emailDeliveries, smsDeliveries:state.smsDeliveries, trackingSamples:mapEntries(state.trackingSamples),
       autoxing: { ...state.autoxing, pois: mapEntries(state.autoxing.pois), areas: mapEntries(state.autoxing.areas), maps: mapEntries(state.autoxing.maps), tasks: mapEntries(state.autoxing.tasks) },
       adapterRuntime: mapEntries(state.adapters).map(([provider, adapter]) => [provider, { lastSyncAt: adapter.lastSyncAt || null, lastSyncStatus: adapter.lastSyncStatus || 'never', lastError: adapter.lastError || null, lastSyncDurationMs:adapter.lastSyncDurationMs || null, lastSyncCount:adapter.lastSyncCount ?? null, lastSyncWarnings:adapter.lastSyncWarnings || 0, syncHistory:clone(adapter.syncHistory || []) }])
@@ -437,7 +439,7 @@ function hydratePersistedState(saved) {
   if (demoUsers['demo-technician']) demoUsers['demo-technician'].technicianId ||= 'technician-lena';
   initializeCredentialHashes();
   replaceMap(authenticatedSessions,(saved.sessions || []).filter(([,session]) => session.expiresAt > Date.now()));
-  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','notificationWorkflows','notificationReads','workOrders','cenobotsWebhookReceipts','serviceWebhookReceipts','maintenanceSchedules','alertEscalationRules','alertEscalations','trackingSamples']) replaceMap(state[name],saved.state[name]);
+  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','notificationWorkflows','notificationReads','workOrders','cenobotsWebhookReceipts','serviceWebhookReceipts','maintenanceSchedules','reportSubscriptions','alertEscalationRules','alertEscalations','trackingSamples']) replaceMap(state[name],saved.state[name]);
   for (const name of ['documents','certificates','deployments','compatibilityRecords','events','audit','outbox','emailDeliveries','smsDeliveries']) if (Array.isArray(saved.state[name])) state[name]=saved.state[name];
   const autoXing=saved.state.autoxing || {};
   state.autoxing.businesses=autoXing.businesses || []; state.autoxing.buildings=autoXing.buildings || []; state.autoxing.lastSyncAt=autoXing.lastSyncAt || null; state.autoxing.resourceErrors=autoXing.resourceErrors || [];
@@ -1514,6 +1516,58 @@ function operationalReport(actor,days=30) {
   return { period:{ days,from:new Date(since).toISOString(),to:timestamp() },fleet:{ total:robots.length,online:robots.filter((item) => item.online === true).length,offline:robots.filter((item) => item.online === false).length,availabilityPercent,averageBattery:batteryValues.length ? Math.round(batteryValues.reduce((sum,value) => sum+value,0)/batteryValues.length) : null,lowBattery,attentionRobots,healthScore,providers:providerBreakdown },tasks:{ total:periodTasks.length,completed,failed,running:periodTasks.filter((item) => item.running).length,successRate,cleanedArea:Math.round(periodTasks.map((item) => item.cleanedArea).filter(Number.isFinite).reduce((sum,value) => sum+value,0)),averageDurationMinutes:(() => { const values=periodTasks.map((item) => item.durationMinutes).filter(Number.isFinite); return values.length ? Math.round(values.reduce((sum,value) => sum+value,0)/values.length) : null; })() },service:{ casesOpened:serviceCases.length,casesClosed:closedCases.length,caseClosureRate:serviceCases.length ? Math.round(closedCases.length/serviceCases.length*100) : null,averageResolutionHours:resolutionHours.length ? Math.round(resolutionHours.reduce((sum,value) => sum+value,0)/resolutionHours.length*10)/10 : null,schedules:schedules.length,overdue,costTrackingAvailable:false },maintenance:{ predictedAttention:predictions.filter((item) => item.score >= 25).length,predictedHighRisk:predictions.filter((item) => ['high','critical'].includes(item.risk)).length,highestRiskScore:Math.max(0,...predictions.map((item) => item.score)) },workforce:{ technicians:technicians.length,available:availableTechnicians.length,onLeave:technicians.filter((item) => technicianAvailabilityView(item).status === 'on_leave').length,availabilityPercent:technicians.length ? Math.round(availableTechnicians.length/technicians.length*100) : null },events:{ total:events.length,critical:criticalEvents,errors:events.filter((item) => item.severity === 'error').length,incidentsPerRobot:robots.length ? Math.round(events.filter((item) => ['error','critical'].includes(item.severity)).length/robots.length*10)/10 : null },daily,generatedAt:timestamp() };
 }
 
+function reportSubscriptionView(subscription) {
+  const { actor:actorSnapshot,...view }=subscription; return clone(view);
+}
+
+function reportScheduleInput(input,current={}) {
+  const cadence=input.cadence ?? current.cadence ?? 'weekly'; const days=Number(input.days ?? current.days ?? 30); const hourUtc=Number(input.hourUtc ?? current.hourUtc ?? 7); const weekday=Number(input.weekday ?? current.weekday ?? 1); const monthDay=Number(input.monthDay ?? current.monthDay ?? 1);
+  if (!['daily','weekly','monthly'].includes(cadence)) throw httpError(400,'cadence must be daily, weekly, or monthly');
+  if (![7,30,90,365].includes(days)) throw httpError(400,'days must be 7, 30, 90, or 365');
+  if (!Number.isInteger(hourUtc) || hourUtc < 0 || hourUtc > 23) throw httpError(400,'hourUtc must be an integer from 0 to 23');
+  if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) throw httpError(400,'weekday must be an integer from 0 to 6');
+  if (!Number.isInteger(monthDay) || monthDay < 1 || monthDay > 28) throw httpError(400,'monthDay must be an integer from 1 to 28');
+  const rawName=String(input.name ?? current.name ?? 'Operations report').trim(); if (!rawName || rawName.length > 120) throw httpError(400,'name must contain 1 to 120 characters');
+  return { name:rawName,cadence,days,hourUtc,weekday,monthDay,active:input.active === undefined ? current.active !== false : input.active === true };
+}
+
+function nextReportRun(subscription,after=Date.now()) {
+  const reference=new Date(after); let candidate;
+  if (subscription.cadence === 'monthly') {
+    candidate=new Date(Date.UTC(reference.getUTCFullYear(),reference.getUTCMonth(),subscription.monthDay,subscription.hourUtc));
+    if (candidate.getTime() <= after) candidate=new Date(Date.UTC(reference.getUTCFullYear(),reference.getUTCMonth()+1,subscription.monthDay,subscription.hourUtc));
+  } else if (subscription.cadence === 'weekly') {
+    candidate=new Date(Date.UTC(reference.getUTCFullYear(),reference.getUTCMonth(),reference.getUTCDate(),subscription.hourUtc)); const delta=(subscription.weekday-candidate.getUTCDay()+7)%7; candidate.setUTCDate(candidate.getUTCDate()+delta); if (candidate.getTime() <= after) candidate.setUTCDate(candidate.getUTCDate()+7);
+  } else {
+    candidate=new Date(Date.UTC(reference.getUTCFullYear(),reference.getUTCMonth(),reference.getUTCDate(),subscription.hourUtc)); if (candidate.getTime() <= after) candidate.setUTCDate(candidate.getUTCDate()+1);
+  }
+  return candidate.toISOString();
+}
+
+function scheduledReportMessage(report) {
+  const value=(item,suffix='') => item === null || item === undefined ? 'not available' : `${item}${suffix}`;
+  return [`Reporting period: ${report.period.days} days (${report.period.from.slice(0,10)} to ${report.period.to.slice(0,10)})`,'',`Fleet: ${report.fleet.total} robots; ${report.fleet.online} online; availability ${value(report.fleet.availabilityPercent,'%')}; health score ${value(report.fleet.healthScore,'%')}.`,`Tasks: ${report.tasks.completed}/${report.tasks.total} completed; success rate ${value(report.tasks.successRate,'%')}; ${report.tasks.failed} failed.`,`Service: ${report.service.casesOpened} cases opened; ${report.service.casesClosed} closed; ${report.service.overdue} maintenance schedules overdue.`,`Maintenance: ${report.maintenance.predictedHighRisk} high-risk predictions; highest risk score ${report.maintenance.highestRiskScore}%.`,`Workforce: ${report.workforce.available}/${report.workforce.technicians} technicians available.`,`Events: ${report.events.total} total; ${report.events.critical} critical; ${report.events.errors} errors.`].join('\n');
+}
+
+async function sendScheduledReport(subscription) {
+  const config=emailAlertConfiguration(); if (!config.enabled || !config.configured) throw httpError(503,config.configurationError || 'Email delivery is not configured');
+  const report=operationalReport(subscription.actor,subscription.days); const delivery=createEmailDelivery({ notificationKey:`scheduled-report:${subscription.id}:${Date.now()}`,type:'scheduled_report',severity:'info',title:subscription.name,message:scheduledReportMessage(report),recipients:[subscription.email],occurredAt:timestamp() },{ enqueue:false });
+  await deliverEmailNotification(delivery); return delivery;
+}
+
+let reportSchedulerRunning=false;
+async function evaluateScheduledReports(now=Date.now()) {
+  if (reportSchedulerRunning || !emailAlertConfiguration().enabled) return []; reportSchedulerRunning=true; const results=[];
+  try {
+    for (const subscription of [...state.reportSubscriptions.values()].filter((item) => item.active && Date.parse(item.nextRunAt) <= now).slice(0,50)) {
+      try { const delivery=await sendScheduledReport(subscription); subscription.lastStatus='sent'; subscription.lastDeliveryId=delivery.id; results.push({ id:subscription.id,status:'sent',deliveryId:delivery.id }); }
+      catch(error) { subscription.lastStatus='failed'; subscription.lastError=String(error.message || error).slice(0,500); results.push({ id:subscription.id,status:'failed',error:subscription.lastError }); }
+      subscription.lastRunAt=new Date(now).toISOString(); subscription.nextRunAt=nextReportRun(subscription,now+1000); subscription.updatedAt=timestamp();
+    }
+    if (results.length) schedulePersist(); return results;
+  } finally { reportSchedulerRunning=false; }
+}
+
 function pdfText(value) {
   return String(value ?? '').normalize('NFKD').replace(/[^\x20-\x7e]/g,'?').replaceAll('\\','\\\\').replaceAll('(','\\(').replaceAll(')','\\)');
 }
@@ -1848,6 +1902,24 @@ async function handle(req, res) {
     let technician=null; if (body.technicianId) { technician=state.technicians.get(body.technicianId); if (!technician || technician.tenantId !== actor.tenantId || technician.status !== 'active') throw httpError(400,'Select an active technician'); if (notification.robotId && !technicianEligibility(technician,state.robots.get(notification.robotId)).eligible) throw httpError(400,'The technician is not qualified for this robot'); }
     const snoozeUntil=body.status === 'snoozed' ? new Date(body.snoozeUntil || Date.now()+3600000) : null; if (snoozeUntil && Number.isNaN(snoozeUntil.getTime())) throw httpError(400,'Provide a valid snooze time');
     const workflow={ notificationId,status:body.status,technicianId:technician?.id || null,technicianName:technician?.name || null,note:String(body.note || '').trim().slice(0,2000),snoozeUntil:snoozeUntil?.toISOString() || null,updatedAt:timestamp(),updatedBy:actor.name }; state.notificationWorkflows.set(notificationId,workflow); appendOutbox('notification.workflow.updated','notification',notificationId,workflow); recordAudit(actor,'notification.workflow.update',notification.robotId ? 'robot' : 'notification',notification.robotId || notificationId,'success',{ notificationId,status:workflow.status }); return send(res,200,{ data:workflow });
+  }
+  if (req.method === 'GET' && path === '/api/v1/report-subscriptions') {
+    if (!hasPermission(actor,'report.read')) throw httpError(403,'Report permission required'); const config=emailAlertConfiguration(); const data=[...state.reportSubscriptions.values()].filter((item) => item.userId === actor.id).map(reportSubscriptionView).sort((a,b) => a.createdAt.localeCompare(b.createdAt));
+    return send(res,200,{ data,count:data.length,delivery:{ enabled:config.enabled,configured:config.configured,configurationError:config.configurationError } });
+  }
+  if (req.method === 'POST' && path === '/api/v1/report-subscriptions') {
+    if (!hasPermission(actor,'report.read')) throw httpError(403,'Report permission required'); if (!emailAddress(actor.email)) throw httpError(400,'Your account does not have a valid delivery email'); if ([...state.reportSubscriptions.values()].filter((item) => item.userId === actor.id).length >= 5) throw httpError(409,'A maximum of five report schedules is allowed per user');
+    const schedule=reportScheduleInput(body); const createdAt=timestamp(); const subscription={ id:ids(),userId:actor.id,tenantId:actor.tenantId,email:actor.email,...schedule,actor:{ id:actor.id,name:actor.name,email:actor.email,role:actor.role,tenantId:actor.tenantId,organizationId:actor.organizationId || null,technicianId:actor.technicianId || null,robotSystem:actor.robotSystem || null,robotExternalId:actor.robotExternalId || null,robotSerialNumber:actor.robotSerialNumber || null,robotSerialNumbers:clone(actor.robotSerialNumbers || []) },nextRunAt:null,lastRunAt:null,lastStatus:'never',lastDeliveryId:null,lastError:null,createdAt,updatedAt:createdAt }; subscription.nextRunAt=nextReportRun(subscription); state.reportSubscriptions.set(subscription.id,subscription); appendOutbox('report.subscription.created','report_subscription',subscription.id,{ userId:actor.id,cadence:subscription.cadence }); recordAudit(actor,'report.subscription.create','report_subscription',subscription.id); return send(res,201,{ data:reportSubscriptionView(subscription) });
+  }
+  const reportSendNow=path.match(/^\/api\/v1\/report-subscriptions\/([^/]+)\/send-now$/);
+  if (reportSendNow && req.method === 'POST') {
+    const subscription=state.reportSubscriptions.get(decodeURIComponent(reportSendNow[1])); if (!subscription || subscription.userId !== actor.id) throw httpError(404,'Report schedule not found'); const delivery=await sendScheduledReport(subscription); subscription.lastRunAt=timestamp(); subscription.lastStatus='sent'; subscription.lastDeliveryId=delivery.id; subscription.lastError=null; subscription.updatedAt=timestamp(); recordAudit(actor,'report.subscription.send','report_subscription',subscription.id,'success',{ deliveryId:delivery.id }); return send(res,200,{ data:reportSubscriptionView(subscription),delivery:{ id:delivery.id,status:delivery.status,sentAt:delivery.sentAt,recipientCount:delivery.recipients.length } });
+  }
+  const reportSubscriptionRoute=route(req.method,path,/^\/api\/v1\/report-subscriptions\/([^/]+)$/);
+  if (reportSubscriptionRoute) {
+    const subscription=state.reportSubscriptions.get(decodeURIComponent(reportSubscriptionRoute.id)); if (!subscription || subscription.userId !== actor.id) throw httpError(404,'Report schedule not found');
+    if (req.method === 'PATCH') { const update=reportScheduleInput(body,subscription); Object.assign(subscription,update,{ nextRunAt:nextReportRun(update),updatedAt:timestamp() }); appendOutbox('report.subscription.updated','report_subscription',subscription.id,{ active:subscription.active,cadence:subscription.cadence }); recordAudit(actor,'report.subscription.update','report_subscription',subscription.id); return send(res,200,{ data:reportSubscriptionView(subscription) }); }
+    if (req.method === 'DELETE') { state.reportSubscriptions.delete(subscription.id); appendOutbox('report.subscription.deleted','report_subscription',subscription.id,{ userId:actor.id }); recordAudit(actor,'report.subscription.delete','report_subscription',subscription.id); return send(res,200,{ deleted:true,id:subscription.id }); }
   }
   if (req.method === 'GET' && path === '/api/v1/reports/operations') return send(res,200,{ data:operationalReport(actor,url.searchParams.get('days')) });
   if (req.method === 'GET' && path === '/api/v1/reports/comparison') return send(res,200,{ data:fleetComparison(actor,url.searchParams) });
@@ -2370,7 +2442,7 @@ const notificationSocketTimer=setInterval(broadcastNotificationUpdates,2000); no
 
 const providerPollTimers=[];
 let emailQueueTimer = null;
-function startEmailDeliveryWorker() { if (!emailAlertConfiguration().enabled && !smsAlertConfiguration().enabled) return; processEmailQueue(); const processAlerts=async () => { await processEmailQueue(); for (const delivery of state.smsDeliveries.filter((item) => ['pending','failed'].includes(item.status) && item.attempts < 3 && (!item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= Date.now())).slice(0,20)) await deliverSmsNotification(delivery).catch(() => {}); }; processAlerts(); emailQueueTimer=setInterval(processAlerts,60000); emailQueueTimer.unref?.(); }
+function startEmailDeliveryWorker() { if (!emailAlertConfiguration().enabled && !smsAlertConfiguration().enabled) return; const processAlerts=async () => { await processEmailQueue(); await evaluateScheduledReports(); for (const delivery of state.smsDeliveries.filter((item) => ['pending','failed'].includes(item.status) && item.attempts < 3 && (!item.nextAttemptAt || Date.parse(item.nextAttemptAt) <= Date.now())).slice(0,20)) await deliverSmsNotification(delivery).catch(() => {}); }; processAlerts(); emailQueueTimer=setInterval(processAlerts,Math.max(10000,Number(process.env.REPORT_SCHEDULER_INTERVAL_MS || 60000))); emailQueueTimer.unref?.(); }
 let operationsAutomationTimer=null;
 function startOperationsAutomationWorker() { operationsAutomationTimer=setInterval(() => { for (const tenantId of state.tenants.keys()) evaluateAlertEscalations(tenantId); },60000); operationsAutomationTimer.unref?.(); }
 let syncWorkerTimer=null; let syncWorkerRunning=false;
@@ -2414,4 +2486,4 @@ if (require.main === module) {
   process.once('SIGTERM', () => shutdown('SIGTERM'));
 }
 
-module.exports={ server,state,persistState,DATA_FILE,initializeInfrastructure };
+module.exports={ server,state,persistState,DATA_FILE,initializeInfrastructure,evaluateScheduledReports,nextReportRun };
