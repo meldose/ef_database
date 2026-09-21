@@ -57,8 +57,8 @@ class PostgresStore {
   async replaceCoreProjections(client,snapshot) {
     const state=snapshot.state || {}; const users=Object.entries(snapshot.users || {}); const sessions=snapshot.sessions || []; const robots=state.robots || [];
     const passports=(state.passportEntries || []).flatMap(([robotId,entries]) => (entries || []).map((entry) => ({ robotId,entry })));
-    const events=state.events || []; const audit=state.audit || []; const tasks=state.autoxing?.tasks || [];
-    for (const table of ['users','authenticated_sessions','robots','passport_entries','events','audit_entries','provider_tasks']) await client.query(`DELETE FROM ${table}`);
+    const events=state.events || []; const audit=state.audit || []; const tasks=state.autoxing?.tasks || []; const costs=state.costEntries || [];
+    for (const table of ['users','authenticated_sessions','robots','passport_entries','events','audit_entries','provider_tasks','cost_entries']) await client.query(`DELETE FROM ${table}`);
     for (const [key,value] of users) await client.query('INSERT INTO users(user_token,id,email,tenant_id,role,data) VALUES($1,$2,$3,$4,$5,$6)',[key,value.id,value.email,value.tenantId,value.role,value]);
     for (const [tokenHash,value] of sessions) await client.query('INSERT INTO authenticated_sessions(token_hash,user_token,expires_at,data) VALUES($1,$2,to_timestamp($3 / 1000.0),$4)',[tokenHash,value.userToken,value.expiresAt,value]);
     for (const [id,value] of robots) await client.query('INSERT INTO robots(id,tenant_id,serial_number,model_id,status,data,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7)',[id,value.tenantId,value.serialNumber,value.modelId,value.status,value,value.updatedAt || new Date().toISOString()]);
@@ -66,6 +66,7 @@ class PostgresStore {
     for (const value of events) await client.query('INSERT INTO events(id,tenant_id,robot_id,event_type,severity,occurred_at,data) VALUES($1,$2,$3,$4,$5,$6,$7)',[value.eventId,value.tenantId,value.robotId,value.eventType,value.severity,value.occurredAt,value]);
     for (const value of audit) await client.query('INSERT INTO audit_entries(id,tenant_id,actor_id,action,object_type,object_id,occurred_at,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',[value.id || crypto.randomUUID(),value.tenantId || null,value.actorId,value.action,value.objectType,value.objectId,value.occurredAt || value.createdAt || new Date().toISOString(),value]);
     for (const [taskId,value] of tasks) await client.query('INSERT INTO provider_tasks(provider,task_id,robot_external_id,data) VALUES($1,$2,$3,$4)', ['autoxing',String(taskId),String(value.robotId || value.deviceId || value.robot_id || ''),value]);
+    for (const [id,value] of costs) await client.query('INSERT INTO cost_entries(id,tenant_id,robot_id,category,description,quantity,unit_cost_cents,net_cents,tax_cents,gross_cents,currency,status,occurred_at,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)',[id,value.tenantId,value.robotId,value.category,value.description,value.quantity,value.unitCostCents,value.netCents,value.taxCents,value.grossCents,value.currency,value.status,value.occurredAt,value]);
   }
 
   async recordAttachment(metadata) {

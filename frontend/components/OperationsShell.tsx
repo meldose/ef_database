@@ -12,6 +12,7 @@ import { SupportPortal } from '@/components/SupportPortal';
 import { TechnicianCalendar } from '@/components/TechnicianCalendar';
 import { FleetComparison } from '@/components/FleetComparison';
 import { ScheduledReports } from '@/components/ScheduledReports';
+import { CostTracking } from '@/components/CostTracking';
 import { useI18n } from '@/lib/i18n';
 
 function Login({ onLogin }: { onLogin: (user: SessionUser) => void }) {
@@ -123,7 +124,7 @@ export function OperationsShell() {
           {workspace === 'service' && <AlertsMaintenance robots={robots} user={user} onUnreadChange={updateUnreadAlerts} onDataChanged={load} />}
           {workspace === 'support' && <SupportPortal robots={robots} onDataChanged={load} />}
           {workspace === 'workforce' && <TechnicianCalendar robots={robots} user={user} />}
-          {workspace === 'reports' && <div className="stack"><AdvancedAnalytics /><FleetComparison /><ScheduledReports user={user} /></div>}
+          {workspace === 'reports' && <div className="stack"><AdvancedAnalytics /><FleetComparison /><CostTracking user={user} robots={robots} /><ScheduledReports user={user} /></div>}
           {workspace === 'audit' && <AuditLog user={user} />}
           {workspace === 'integrations' && <section className="panel"><div className="panel-title"><div><p className="eyebrow">Integration plane</p><h2>Provider contracts</h2></div><span>Commands disabled by default</span></div><AdapterList adapters={adapters} /></section>}
           {workspace === 'administration' && <section className="panel empty"><h2>Migration workspace</h2><p>The complete administration page remains available in the existing portal.</p><a href={legacyWorkspacePath(workspace)}>Open current {workspace} workspace</a></section>}

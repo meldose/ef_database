@@ -1,5 +1,5 @@
 import type {
-  AttachmentInput, RobotPassportData, SupportTicket, WorkforceMatrix, WorkOrder, FleetComparisonData,
+  AttachmentInput, RobotPassportData, SupportTicket, WorkforceMatrix, WorkOrder, FleetComparisonData, CostReport, CostEntry,
   AdapterSummary,
   AuditEntry,
   AuditFacets,
@@ -98,6 +98,9 @@ export const api = {
   },
   adapters: () => request<{ data: AdapterSummary[] }>('/api/v1/adapters'),
   operationsReport: (days: number) => request<{ data: OperationsReport }>(withQuery('/api/v1/reports/operations', { days })),
+  costs: (days: number) => request<{ data: CostReport }>(withQuery('/api/v1/costs', { days })),
+  createCost: (input: { robotId: string; category: CostEntry['category']; description: string; quantity: number; unitCostCents: number; taxRateBasisPoints: number; occurredAt: string; vendor?: string; reference?: string }) => request<{ data: CostEntry }>('/api/v1/costs', { method:'POST',body:JSON.stringify(input) }),
+  voidCost: (id: string,reason: string) => request<{ data: CostEntry }>(`/api/v1/costs/${encodeURIComponent(id)}`, { method:'PATCH',body:JSON.stringify({ reason }) }),
   reportSubscriptions: () => request<{ data: ReportSubscription[]; count: number; delivery: { enabled: boolean; configured: boolean; configurationError: string | null } }>('/api/v1/report-subscriptions'),
   createReportSubscription: (input: ReportSubscriptionInput) => request<{ data: ReportSubscription }>('/api/v1/report-subscriptions', { method: 'POST', body: JSON.stringify(input) }),
   updateReportSubscription: (id: string, input: Partial<ReportSubscriptionInput>) => request<{ data: ReportSubscription }>(`/api/v1/report-subscriptions/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) }),

@@ -102,6 +102,8 @@ export interface OperationsReport {
     averageResolutionHours: number | null;
     schedules: number;
     overdue: number;
+    costTrackingAvailable: boolean;
+    costs: { currency: string; netCents: number; taxCents: number; grossCents: number; count: number; voidedCount: number } | null;
   };
   maintenance: { predictedAttention: number; predictedHighRisk: number; highestRiskScore: number };
   workforce: { technicians: number; available: number; onLeave: number; availabilityPercent: number | null };
@@ -127,6 +129,18 @@ export interface ReportSubscription {
   lastError: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface CostEntry {
+  id: string; robotId: string; robotSerialNumber: string; category: 'labor' | 'parts' | 'travel' | 'subscription' | 'other'; description: string;
+  quantity: number; unitCostCents: number; taxRateBasisPoints: number; netCents: number; taxCents: number; grossCents: number; currency: string;
+  serviceCaseId: string | null; workOrderId: string | null; vendor: string | null; reference: string | null; occurredAt: string; status: 'active' | 'voided';
+  createdByName: string; createdAt: string; voidReason: string | null;
+}
+export interface CostReport {
+  period: { days: number; from: string; to: string }; currency: string; totals: { netCents: number; taxCents: number; grossCents: number }; count: number; voidedCount: number;
+  byCategory: Array<{ category: CostEntry['category']; grossCents: number; count: number }>; byRobot: Array<{ robotId: string; serialNumber: string; grossCents: number; count: number }>;
+  entries: CostEntry[]; permissions: { manage: boolean }; generatedAt: string;
 }
 
 export interface MaintenancePrediction {

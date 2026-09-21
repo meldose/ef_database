@@ -53,7 +53,7 @@ test('qualified scheduling rejects conflicting visits and records completion', a
 
 test('fleet comparisons switch site, provider and periods', async ({ page }) => {
   await login(page); await page.getByRole('navigation').getByRole('button', { name: 'Reports', exact: true }).click(); await expect(page.getByRole('heading', { name: 'Fleet comparison', exact: true })).toBeVisible();
-  await page.getByLabel('Compare by').selectOption('provider'); await page.getByLabel('Comparison period').selectOption('90'); await expect(page.getByRole('table')).toContainText('autoxing'); await expect(page.getByRole('table')).toContainText('cenobots');
+  await page.getByLabel('Compare by').selectOption('provider'); await page.getByLabel('Comparison period').selectOption('90'); const comparison=page.getByRole('table',{ name:/Current \/ previous totals/ }); await expect(comparison).toContainText('autoxing'); await expect(comparison).toContainText('cenobots');
 });
 
 test('scheduled reports can be created, paused and deleted', async ({ page }, testInfo) => {
@@ -61,6 +61,12 @@ test('scheduled reports can be created, paused and deleted', async ({ page }, te
   const name=`Browser report ${testInfo.project.name}`; await page.getByLabel('Report name').fill(name); await page.getByLabel('Frequency').selectOption('monthly'); await page.getByLabel('Day of month').fill('12'); await page.getByRole('button',{ name:'Create report',exact:true }).click();
   const schedule=page.locator('.schedule-list > article').filter({ hasText:name }); await expect(schedule).toBeVisible(); await expect(schedule).toContainText('admin@demo.altegro.local'); await schedule.getByRole('button',{ name:'Pause',exact:true }).click(); await expect(schedule).toContainText('Paused');
   page.once('dialog',(dialog) => dialog.accept()); await schedule.getByRole('button',{ name:'Delete',exact:true }).click(); await expect(schedule).toHaveCount(0);
+});
+
+test('costs are calculated, displayed and voided with an audit reason', async ({ page }, testInfo) => {
+  await login(page); await page.getByRole('navigation').getByRole('button',{ name:'Reports',exact:true }).click(); await expect(page.getByRole('heading',{ name:'Cost tracking',exact:true })).toBeVisible();
+  const description=`Filter replacement ${testInfo.project.name}`; const form=page.locator('form').filter({ has:page.getByRole('button',{ name:'Record cost',exact:true }) }); await expect(form).toBeVisible(); await form.locator('select[name="robotId"]').selectOption({ label:'AX-DEMO-001' }); await form.locator('select[name="category"]').selectOption('parts'); await form.getByLabel('Description',{ exact:true }).fill(description); await form.getByLabel('Quantity',{ exact:true }).fill('2'); await form.getByLabel('Unit cost (EUR)',{ exact:true }).fill('10'); await form.getByRole('button',{ name:'Record cost',exact:true }).click();
+  const row=page.getByRole('row').filter({ hasText:description }); await expect(row).toContainText('€23.80'); page.once('dialog',async (dialog) => dialog.accept('Duplicate invoice')); await row.getByRole('button',{ name:'Void',exact:true }).click(); await expect(row).toContainText('voided');
 });
 
 test('German language option localizes the modern workspace', async ({ page }) => {
