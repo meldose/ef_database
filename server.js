@@ -208,7 +208,16 @@ function queueEmailAlert(notification,{ force=false }={}) {
   const config=emailAlertConfiguration(); if (!config.enabled || !config.configured) return null;
   const severityRank={ info:0,warning:1,error:2,critical:3 }; if (!force && (severityRank[notification.severity] ?? 0) < severityRank[config.minimumSeverity]) return null;
   const cutoff=Date.now()-config.cooldownMinutes*60000; const duplicate=state.emailDeliveries.find((item) => item.notificationKey === notification.notificationKey && Date.parse(item.createdAt) >= cutoff && ['pending','sending','sent'].includes(item.status)); if (duplicate) return duplicate;
-  const delivery=createEmailDelivery(notification); if (!databaseStore) setImmediate(() => processEmailQueue()); return delivery;
+  const optedInRecipients=[];
+  for (const [userId,preference] of state.notificationPreferences) {
+    const minimum=severityRank[preference.minimumSeverity] ?? severityRank.warning;
+    if (!preference.email || (severityRank[notification.severity] ?? 0) < minimum || preference.types?.length && !preference.types.includes(notification.type)) continue;
+    const hour=new Date().getUTCHours(); const [startHour]=String(preference.quietHours?.start || '22:00').split(':').map(Number); const [endHour]=String(preference.quietHours?.end || '07:00').split(':').map(Number);
+    const quiet=preference.quietHours?.enabled && (startHour > endHour ? hour >= startHour || hour < endHour : hour >= startHour && hour < endHour);
+    if (quiet) continue;
+    const user=Object.values(demoUsers).find((item) => item.id === userId); const address=emailAddress(user?.email); if (address) optedInRecipients.push(address);
+  }
+  const delivery=createEmailDelivery({ ...notification,recipients:[...config.recipients,...optedInRecipients] }); if (!databaseStore) setImmediate(() => processEmailQueue()); return delivery;
 }
 
 let emailQueueRunning=false;
@@ -306,6 +315,7 @@ const state = {
   alertWorkflows: new Map(),
   notificationWorkflows: new Map(),
   notificationReads: new Map(),
+  notificationPreferences: new Map(),
   workOrders: new Map(),
   costEntries: new Map(),
   cenobotsWebhookReceipts: new Map(),
@@ -397,7 +407,7 @@ function persistedSnapshot() {
     sessions: mapEntries(authenticatedSessions).filter(([, session]) => session.expiresAt > Date.now()),
     state: {
       tenants: mapEntries(state.tenants), organizations: mapEntries(state.organizations), sites: mapEntries(state.sites), models: mapEntries(state.models), robots: mapEntries(state.robots),
-      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments: mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), notificationWorkflows:mapEntries(state.notificationWorkflows), notificationReads:mapEntries(state.notificationReads), workOrders:mapEntries(state.workOrders), costEntries:mapEntries(state.costEntries), cenobotsWebhookReceipts:mapEntries(state.cenobotsWebhookReceipts), serviceWebhookReceipts:mapEntries(state.serviceWebhookReceipts), maintenanceSchedules:mapEntries(state.maintenanceSchedules), reportSubscriptions:mapEntries(state.reportSubscriptions), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
+      passportEntries: mapEntries(state.passportEntries), serviceCases: mapEntries(state.serviceCases), technicians: mapEntries(state.technicians), modelRequirements: mapEntries(state.modelRequirements), robotAssignments:mapEntries(state.robotAssignments), alertWorkflows:mapEntries(state.alertWorkflows), notificationWorkflows:mapEntries(state.notificationWorkflows), notificationReads:mapEntries(state.notificationReads), notificationPreferences:mapEntries(state.notificationPreferences), workOrders:mapEntries(state.workOrders), costEntries:mapEntries(state.costEntries), cenobotsWebhookReceipts:mapEntries(state.cenobotsWebhookReceipts), serviceWebhookReceipts:mapEntries(state.serviceWebhookReceipts), maintenanceSchedules:mapEntries(state.maintenanceSchedules), reportSubscriptions:mapEntries(state.reportSubscriptions), alertEscalationRules:mapEntries(state.alertEscalationRules), alertEscalations:mapEntries(state.alertEscalations), documents: state.documents, certificates: state.certificates,
       deployments: state.deployments, compatibilityRecords: state.compatibilityRecords, events: state.events, audit: state.audit, outbox: state.outbox, emailDeliveries:state.emailDeliveries, smsDeliveries:state.smsDeliveries, trackingSamples:mapEntries(state.trackingSamples),
       autoxing: { ...state.autoxing, pois: mapEntries(state.autoxing.pois), areas: mapEntries(state.autoxing.areas), maps: mapEntries(state.autoxing.maps), tasks: mapEntries(state.autoxing.tasks) },
       adapterRuntime: mapEntries(state.adapters).map(([provider, adapter]) => [provider, { lastSyncAt: adapter.lastSyncAt || null, lastSyncStatus: adapter.lastSyncStatus || 'never', lastError: adapter.lastError || null, lastSyncDurationMs:adapter.lastSyncDurationMs || null, lastSyncCount:adapter.lastSyncCount ?? null, lastSyncWarnings:adapter.lastSyncWarnings || 0, syncHistory:clone(adapter.syncHistory || []) }])
@@ -440,7 +450,7 @@ function hydratePersistedState(saved) {
   if (demoUsers['demo-technician']) demoUsers['demo-technician'].technicianId ||= 'technician-lena';
   initializeCredentialHashes();
   replaceMap(authenticatedSessions,(saved.sessions || []).filter(([,session]) => session.expiresAt > Date.now()));
-  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','notificationWorkflows','notificationReads','workOrders','costEntries','cenobotsWebhookReceipts','serviceWebhookReceipts','maintenanceSchedules','reportSubscriptions','alertEscalationRules','alertEscalations','trackingSamples']) replaceMap(state[name],saved.state[name]);
+  for (const name of ['tenants','organizations','sites','models','robots','passportEntries','serviceCases','technicians','modelRequirements','robotAssignments','alertWorkflows','notificationWorkflows','notificationReads','notificationPreferences','workOrders','costEntries','cenobotsWebhookReceipts','serviceWebhookReceipts','maintenanceSchedules','reportSubscriptions','alertEscalationRules','alertEscalations','trackingSamples']) replaceMap(state[name],saved.state[name]);
   for (const name of ['documents','certificates','deployments','compatibilityRecords','events','audit','outbox','emailDeliveries','smsDeliveries']) if (Array.isArray(saved.state[name])) state[name]=saved.state[name];
   const autoXing=saved.state.autoxing || {};
   state.autoxing.businesses=autoXing.businesses || []; state.autoxing.buildings=autoXing.buildings || []; state.autoxing.lastSyncAt=autoXing.lastSyncAt || null; state.autoxing.resourceErrors=autoXing.resourceErrors || [];
@@ -1541,6 +1551,28 @@ function operationalReport(actor,days=30) {
   return { period:{ days,from:new Date(since).toISOString(),to:timestamp() },fleet:{ total:robots.length,online:robots.filter((item) => item.online === true).length,offline:robots.filter((item) => item.online === false).length,availabilityPercent,averageBattery:batteryValues.length ? Math.round(batteryValues.reduce((sum,value) => sum+value,0)/batteryValues.length) : null,lowBattery,attentionRobots,healthScore,providers:providerBreakdown },tasks:{ total:periodTasks.length,completed,failed,running:periodTasks.filter((item) => item.running).length,successRate,cleanedArea:Math.round(periodTasks.map((item) => item.cleanedArea).filter(Number.isFinite).reduce((sum,value) => sum+value,0)),averageDurationMinutes:(() => { const values=periodTasks.map((item) => item.durationMinutes).filter(Number.isFinite); return values.length ? Math.round(values.reduce((sum,value) => sum+value,0)/values.length) : null; })() },service:{ casesOpened:serviceCases.length,casesClosed:closedCases.length,caseClosureRate:serviceCases.length ? Math.round(closedCases.length/serviceCases.length*100) : null,averageResolutionHours:resolutionHours.length ? Math.round(resolutionHours.reduce((sum,value) => sum+value,0)/resolutionHours.length*10)/10 : null,schedules:schedules.length,overdue,costTrackingAvailable:Boolean(costSummary),costs:costSummary ? { currency:costSummary.currency,...costSummary.totals,count:costSummary.count,voidedCount:costSummary.voidedCount } : null },maintenance:{ predictedAttention:predictions.filter((item) => item.score >= 25).length,predictedHighRisk:predictions.filter((item) => ['high','critical'].includes(item.risk)).length,highestRiskScore:Math.max(0,...predictions.map((item) => item.score)) },workforce:{ technicians:technicians.length,available:availableTechnicians.length,onLeave:technicians.filter((item) => technicianAvailabilityView(item).status === 'on_leave').length,availabilityPercent:technicians.length ? Math.round(availableTechnicians.length/technicians.length*100) : null },events:{ total:events.length,critical:criticalEvents,errors:events.filter((item) => item.severity === 'error').length,incidentsPerRobot:robots.length ? Math.round(events.filter((item) => ['error','critical'].includes(item.severity)).length/robots.length*10)/10 : null },daily,generatedAt:timestamp() };
 }
 
+function notificationPreferenceView(actor) {
+  const saved=state.notificationPreferences.get(actor.id) || {};
+  return {
+    inApp: saved.inApp !== false,
+    email: saved.email === true,
+    minimumSeverity: ['info','warning','error','critical'].includes(saved.minimumSeverity) ? saved.minimumSeverity : 'warning',
+    types: Array.isArray(saved.types) ? saved.types : [],
+    quietHours: saved.quietHours || { enabled:false,start:'22:00',end:'07:00',timezone:'UTC' },
+    updatedAt: saved.updatedAt || null
+  };
+}
+
+function notificationPreferenceInput(input,current) {
+  const minimumSeverity=String(input.minimumSeverity ?? current.minimumSeverity);
+  if (!['info','warning','error','critical'].includes(minimumSeverity)) throw httpError(400,'Invalid minimum notification severity');
+  const types=Array.isArray(input.types) ? [...new Set(input.types.map(String).filter((value) => /^[a-z_]{2,64}$/.test(value)))].slice(0,20) : current.types;
+  const quietHours=input.quietHours && typeof input.quietHours === 'object' ? input.quietHours : current.quietHours;
+  const time=/^([01]\d|2[0-3]):[0-5]\d$/;
+  if (!quietHours || !time.test(String(quietHours.start)) || !time.test(String(quietHours.end))) throw httpError(400,'Quiet hours require valid start and end times');
+  return { inApp:input.inApp === undefined ? current.inApp : input.inApp === true, email:input.email === undefined ? current.email : input.email === true, minimumSeverity,types,quietHours:{ enabled:quietHours.enabled === true,start:String(quietHours.start),end:String(quietHours.end),timezone:String(quietHours.timezone || 'UTC').slice(0,64) } };
+}
+
 function reportSubscriptionView(subscription) {
   const { actor:actorSnapshot,...view }=subscription; return clone(view);
 }
@@ -1914,6 +1946,12 @@ async function handle(req, res) {
     const activeCount=data.filter(activeNotification).length; const unreadCount=data.filter((item) => activeNotification(item) && !item.read).length;
     return send(res, 200, { data, count:data.length,activeCount,unreadCount,generatedAt:timestamp() });
   }
+  if (req.method === 'GET' && path === '/api/v1/notification-preferences') return send(res,200,{ data:notificationPreferenceView(actor),emailAvailable:emailAlertConfiguration().enabled && emailAlertConfiguration().configured });
+  if (req.method === 'PATCH' && path === '/api/v1/notification-preferences') {
+    const current=notificationPreferenceView(actor); const preference={ ...notificationPreferenceInput(body,current),userId:actor.id,updatedAt:timestamp() };
+    state.notificationPreferences.set(actor.id,preference); schedulePersist(); recordAudit(actor,'notification.preferences.update','user',actor.id,'success',{ email:preference.email,minimumSeverity:preference.minimumSeverity });
+    return send(res,200,{ data:notificationPreferenceView(actor),emailAvailable:emailAlertConfiguration().enabled && emailAlertConfiguration().configured });
+  }
   if (req.method === 'POST' && path === '/api/v1/notifications/read') {
     const notifications=notificationsWithReadState(actor); const requestedIds=Array.isArray(body.notificationIds) ? new Set(body.notificationIds.map(String)) : null; const visibleIds=new Set(notifications.map((item) => item.id)); const readAt=timestamp(); let readCount=0;
     if (requestedIds && [...requestedIds].some((id) => !visibleIds.has(id))) throw httpError(400,'One or more notifications are not visible');
@@ -1960,6 +1998,7 @@ async function handle(req, res) {
   if (req.method === 'GET' && path === '/api/v1/reports/comparison') return send(res,200,{ data:fleetComparison(actor,url.searchParams) });
   if (req.method === 'GET' && path === '/api/v1/reports/operations.json') { const report=operationalReport(actor,url.searchParams.get('days')); recordAudit(actor,'report.operations.export','tenant',actor.tenantId,'success',{ format:'json',days:report.period.days }); return sendDownload(res,'application/json; charset=utf-8',`altegro-operations-${report.period.days}d.json`,JSON.stringify(report,null,2)); }
   if (req.method === 'GET' && path === '/api/v1/reports/operations.csv') { const report=operationalReport(actor,url.searchParams.get('days')); const rows=[['date','events','errors','maintenance','tasks'],...report.daily.map((day) => [day.date,day.events,day.errors,day.maintenance,day.tasks])]; recordAudit(actor,'report.operations.export','tenant',actor.tenantId,'success',{ format:'csv',days:report.period.days }); return sendDownload(res,'text/csv; charset=utf-8',`altegro-operations-${report.period.days}d.csv`,`${rows.map((row) => row.map(csvCell).join(',')).join('\n')}\n`); }
+  if (req.method === 'GET' && path === '/api/v1/reports/operations.pdf') { const report=operationalReport(actor,url.searchParams.get('days')); const pdf=simplePdf(`Altegro operations report · ${report.period.days} days`,scheduledReportMessage(report).split('\n')); recordAudit(actor,'report.operations.export','tenant',actor.tenantId,'success',{ format:'pdf',days:report.period.days }); return sendDownload(res,'application/pdf',`altegro-operations-${report.period.days}d.pdf`,pdf); }
   if (req.method === 'GET' && path === '/api/v1/cenobots/webhooks/status') { if (['robot_user','auditor'].includes(actor.role)) throw httpError(403,'Webhook configuration access is unavailable'); return send(res,200,{ data:cenoBotsWebhookConfiguration() }); }
   if (req.method === 'GET' && path === '/api/v1/workforce/matrix') { const data = workforceMatrix(actor, url.searchParams.get('robotId')); return send(res, 200, { data }); }
   if (req.method === 'GET' && path === '/api/v1/work-orders') { if (!hasPermission(actor,'work_order.read')) throw httpError(403,'Work-order access permission required'); const data=workOrdersForActor(actor); return send(res,200,{ data,count:data.length,permissions:{ manage:hasPermission(actor,'work_order.manage'),updateAssigned:hasPermission(actor,'work_order.update_assigned') } }); }

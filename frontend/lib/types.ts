@@ -178,6 +178,15 @@ export interface OperationalNotification {
   workflow: NotificationWorkflow;
 }
 
+export interface NotificationPreferences {
+  inApp: boolean;
+  email: boolean;
+  minimumSeverity: 'info' | 'warning' | 'error' | 'critical';
+  types: string[];
+  quietHours: { enabled: boolean; start: string; end: string; timezone: string };
+  updatedAt: string | null;
+}
+
 export interface MaintenanceSchedule {
   id: string;
   robotId: string;
