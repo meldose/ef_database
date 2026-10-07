@@ -22,6 +22,12 @@ export interface OperationsSummary {
   passport: { complete: number; percentage: number; certificatesDue: number };
   generatedAt: string;
 }
+export interface CustomerDashboard {
+  customer:{ id:string; name:string }; customers:Array<{ id:string; name:string }>;
+  fleet:{ total:number; online:number; offline:number; averageBattery:number | null; providers:Array<{ provider:string; count:number }> };
+  service:{ open:number; closed:number }; maintenance:{ attention:number; highRisk:number };
+  sites:Array<{ id:string; name:string; total:number; online:number; attention:number }>; generatedAt:string;
+}
 
 export interface RobotSummary {
   id: string;

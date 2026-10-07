@@ -63,8 +63,8 @@ export function AdvancedAnalytics() {
       <div className="panel-actions"><a className="button-link" href={`/api/v1/reports/operations.pdf?days=${days}`}>Download PDF</a><a className="button-link secondary" href={`/api/v1/reports/operations.csv?days=${days}`}>Export CSV</a><a className="button-link secondary" href={`/api/v1/reports/operations.json?days=${days}`}>Export JSON</a><small aria-live="polite">{report ? `${t('Updated')} ${new Date(report.generatedAt).toLocaleString(locale === 'de' ? 'de-DE' : 'en-GB')}` : ''}</small></div>
     </section>
     <section className="panel">
-      <div className="panel-title"><div><p className="eyebrow">Predictive maintenance</p><h2>Highest-risk robots</h2></div><span>{predictions.filter((item) => item.score >= 25).length} need review</span></div>
-      <div className="prediction-grid">{predictions.slice(0, 8).map((item) => <article className={`prediction risk-${item.risk}`} key={item.robotId}><div><strong>{item.serialNumber}</strong><span>{item.risk} · {item.score}%</span></div><p>{item.factors.join(' · ') || 'No current warning factors.'}</p><small>Recommended inspection within {item.predictedWindowDays} days</small></article>)}</div>
+      <div className="panel-title"><div><p className="eyebrow">AI-assisted maintenance</p><h2>Recommended next actions</h2></div><span>{predictions.filter((item) => item.score >= 25).length} need review</span></div>
+      <p>Recommendations are generated from fleet telemetry, recent errors, battery signals and maintenance schedules. They support—not replace—qualified technician decisions.</p><div className="prediction-grid">{predictions.slice(0, 8).map((item) => <article className={`prediction risk-${item.risk}`} key={item.robotId}><div><strong>{item.serialNumber}</strong><span>{item.risk} · {item.score}%</span></div><p>{item.factors.join(' · ') || 'No current warning factors.'}</p><small>{item.recommendedAction} Inspection window: {item.predictedWindowDays} days.</small></article>)}</div>
       {!predictions.length && <p className="empty">No robot data is available for predictions.</p>}
     </section>
   </div>;

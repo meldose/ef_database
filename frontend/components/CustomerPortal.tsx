@@ -1,0 +1,11 @@
+'use client';
+import { useCallback, useEffect, useState } from 'react';
+import { api } from '@/lib/api';
+import type { CustomerDashboard } from '@/lib/types';
+
+export function CustomerPortal() {
+  const [data,setData]=useState<CustomerDashboard | null>(null); const [customer,setCustomer]=useState(''); const [error,setError]=useState('');
+  const load=useCallback(async (organizationId=customer) => { try { setError(''); setData((await api.customerDashboard(organizationId || undefined)).data); } catch (caught) { setError(caught instanceof Error ? caught.message : 'Customer portal could not be loaded'); } },[customer]);
+  useEffect(() => { void load(); },[load]);
+  return <div className="stack">{error && <p className="banner error" role="alert">{error}</p>}{data && <><section className="panel"><div className="panel-title"><div><p className="eyebrow">Read-only customer workspace</p><h2>{data.customer.name}</h2></div>{data.customers.length > 0 && <select value={customer || data.customer.id} onChange={(event) => { setCustomer(event.target.value); void load(event.target.value); }}>{data.customers.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</div><div className="metrics"><article className="metric good"><span>Fleet online</span><strong>{data.fleet.online}/{data.fleet.total}</strong><small>{data.fleet.offline} offline</small></article><article className="metric"><span>Open service</span><strong>{data.service.open}</strong><small>{data.service.closed} closed</small></article><article className="metric attention"><span>Maintenance attention</span><strong>{data.maintenance.attention}</strong><small>{data.maintenance.highRisk} high risk</small></article><article className="metric"><span>Average battery</span><strong>{data.fleet.averageBattery ?? '—'}%</strong><small>Current fleet telemetry</small></article></div></section><section className="panel"><div className="panel-title"><div><p className="eyebrow">Sites</p><h2>Fleet by location</h2></div></div><div className="records">{data.sites.map((site) => <article key={site.id}><div><strong>{site.name}</strong><small>{site.total} robots · {site.online} online</small></div><em>{site.attention} need attention</em></article>)}</div>{!data.sites.length && <p className="empty">No fleet sites are available.</p>}</section></>}</div>;
+}

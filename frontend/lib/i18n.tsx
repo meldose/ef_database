@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
-export type Locale = 'de' | 'en';
+export type Locale = 'de' | 'en' | 'fr';
 
 const de: Record<string, string> = {
   'Financial operations':'Finanzbetrieb','Cost tracking':'Kostenverfolgung','Gross costs':'Bruttokosten','active entries':'aktive Einträge','Net costs':'Nettokosten','Before tax':'Vor Steuern','Tax':'Steuer','voided entries':'stornierte Einträge','Record cost':'Kosten erfassen','Robot':'Roboter','Quantity':'Menge','Unit cost (EUR)':'Stückkosten (EUR)','VAT':'MwSt.','Vendor':'Lieferant','Reference':'Referenz','Cost entries':'Kosteneinträge','Net':'Netto','Gross':'Brutto','Status':'Status','Actions':'Aktionen','Void':'Stornieren','No costs recorded for this period.':'Für diesen Zeitraum wurden keine Kosten erfasst.','Cost entry recorded.':'Kosteneintrag erfasst.','Cost entry voided.':'Kosteneintrag storniert.','Reason for voiding this cost entry':'Grund für die Stornierung dieses Kosteneintrags',
@@ -18,24 +18,26 @@ const de: Record<string, string> = {
   'Scheduled email reports':'Geplante E-Mail-Berichte','Create report schedule':'Berichtszeitplan erstellen','Report name':'Berichtsname','Operations summary':'Betriebsübersicht','Frequency':'Häufigkeit','Daily':'Täglich','Weekly':'Wöchentlich','Monthly':'Monatlich','Report period':'Berichtszeitraum','Delivery hour (UTC)':'Versandstunde (UTC)','Weekday':'Wochentag','Day of month':'Tag im Monat','Create report':'Bericht erstellen','Delivery email':'Versandadresse','Next delivery':'Nächster Versand','Last delivery':'Letzter Versand','Send now':'Jetzt senden','Delete':'Löschen','No report schedules yet.':'Noch keine Berichtszeitpläne.','Email delivery is not configured. An administrator must configure SMTP before reports can be sent.':'Der E-Mail-Versand ist nicht konfiguriert. Ein Administrator muss SMTP einrichten, bevor Berichte gesendet werden können.','English':'Englisch','German':'Deutsch','Language':'Sprache','Skip to main content':'Zum Hauptinhalt springen'
 };
 
+const fr: Record<string, string> = { 'Overview':'Vue d’ensemble','Robots':'Robots','Events & service':'Événements et service','Support':'Assistance','Technicians':'Techniciens','Reports':'Rapports','Audit log':'Journal d’audit','Integrations':'Intégrations','Administration':'Administration','Language':'Langue','Sign in':'Se connecter','Log out':'Se déconnecter','Refresh':'Actualiser','Alerts':'Alertes','Maintenance':'Maintenance','Scheduled maintenance':'Maintenance planifiée','Download PDF':'Télécharger le PDF','Save preferences':'Enregistrer les préférences' };
+
 type I18nValue = { locale: Locale; setLocale: (locale: Locale) => void; t: (text: string) => string; formatDate: (value: string | Date) => string; formatDateTime: (value: string | Date) => string };
 const I18nContext=createContext<I18nValue | null>(null);
 
 const originalText=new Map<Text,string>();
 function translateTextNode(node: Text, locale: Locale) {
-  const raw=node.nodeValue || ''; const trimmed=raw.trim(); if (!trimmed) return; let original=originalText.get(node) || trimmed; const previousTranslation=de[original] || original; if (trimmed !== original && trimmed !== previousTranslation) original=trimmed; originalText.set(node,original); const translated=locale === 'de' ? de[original] || original : original; if (translated !== trimmed) node.nodeValue=raw.replace(trimmed,translated);
+  const raw=node.nodeValue || ''; const trimmed=raw.trim(); if (!trimmed) return; let original=originalText.get(node) || trimmed; const previousTranslation=(locale === 'fr' ? fr[original] : de[original]) || original; if (trimmed !== original && trimmed !== previousTranslation) original=trimmed; originalText.set(node,original); const translated=locale === 'de' ? de[original] || original : locale === 'fr' ? fr[original] || original : original; if (translated !== trimmed) node.nodeValue=raw.replace(trimmed,translated);
 }
 
 function localizeTree(root: ParentNode,locale: Locale) {
   const walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT); let current: Node | null; while ((current=walker.nextNode())) { const parent=current.parentElement; if (!parent || ['SCRIPT','STYLE','CODE','PRE'].includes(parent.tagName) || parent.closest('[data-no-translate]')) continue; translateTextNode(current as Text,locale); }
-  root.querySelectorAll?.<HTMLElement>('[placeholder],[title],[aria-label]').forEach((element) => { for (const attribute of ['placeholder','title','aria-label']) { const value=element.getAttribute(attribute); if (!value) continue; const key=`i18n${attribute.replaceAll('-','')}`; const original=element.dataset[key] || value; element.dataset[key]=original; element.setAttribute(attribute,locale === 'de' ? de[original] || original : original); } });
+  root.querySelectorAll?.<HTMLElement>('[placeholder],[title],[aria-label]').forEach((element) => { for (const attribute of ['placeholder','title','aria-label']) { const value=element.getAttribute(attribute); if (!value) continue; const key=`i18n${attribute.replaceAll('-','')}`; const original=element.dataset[key] || value; element.dataset[key]=original; element.setAttribute(attribute,locale === 'de' ? de[original] || original : locale === 'fr' ? fr[original] || original : original); } });
 }
 
 export function I18nProvider({ children }: { children: ReactNode }) {
   const [locale,setLocaleState]=useState<Locale>('en');
-  useEffect(() => { const saved=window.localStorage.getItem('altegro-locale'); if (saved === 'en' || saved === 'de') setLocaleState(saved); },[]);
+  useEffect(() => { const saved=window.localStorage.getItem('altegro-locale'); if (saved === 'en' || saved === 'de' || saved === 'fr') setLocaleState(saved); },[]);
   useEffect(() => { document.documentElement.lang=locale; window.localStorage.setItem('altegro-locale',locale); if (locale === 'en') { for (const [node,original] of originalText) { if (!node.isConnected) { originalText.delete(node); continue; } const raw=node.nodeValue || ''; const trimmed=raw.trim(); if (trimmed && trimmed !== original) node.nodeValue=raw.replace(trimmed,original); } return; } let applying=false; const apply=(root: ParentNode=document.body) => { if (applying) return; applying=true; localizeTree(root,locale); applying=false; }; apply(); const observer=new MutationObserver((mutations) => { if (applying) return; for (const mutation of mutations) { if (mutation.type === 'characterData' && mutation.target.parentNode) apply(mutation.target.parentNode as ParentNode); for (const node of mutation.addedNodes) if (node.nodeType === Node.ELEMENT_NODE) apply(node as ParentNode); } }); observer.observe(document.body,{ childList:true,subtree:true,characterData:true }); return () => observer.disconnect(); },[locale]);
-  const value=useMemo<I18nValue>(() => ({ locale,setLocale:(next) => setLocaleState(next),t:(text) => locale === 'de' ? de[text] || text : text,formatDate:(input) => new Date(input).toLocaleDateString(locale === 'de' ? 'de-DE' : 'en-GB'),formatDateTime:(input) => new Date(input).toLocaleString(locale === 'de' ? 'de-DE' : 'en-GB') }),[locale]);
+  const value=useMemo<I18nValue>(() => ({ locale,setLocale:(next) => setLocaleState(next),t:(text) => locale === 'de' ? de[text] || text : locale === 'fr' ? fr[text] || text : text,formatDate:(input) => new Date(input).toLocaleDateString(locale === 'de' ? 'de-DE' : locale === 'fr' ? 'fr-FR' : 'en-GB'),formatDateTime:(input) => new Date(input).toLocaleString(locale === 'de' ? 'de-DE' : locale === 'fr' ? 'fr-FR' : 'en-GB') }),[locale]);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 

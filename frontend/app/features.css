@@ -70,6 +70,7 @@
 .preferences-grid input[type="time"], .preferences-grid select { width:100%; padding:.7rem; border:1px solid var(--line); border-radius:.55rem; background:white; color:var(--ink); }
 .admin-metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.75rem; margin:1rem 0; }
 .admin-metrics div { padding:.85rem; border:1px solid var(--line); border-radius:.65rem; background:var(--canvas); }.admin-metrics dt { color:var(--muted); font-size:.75rem; font-weight:750; }.admin-metrics dd { margin:.35rem 0 0; font-weight:800; }
+.mobile-priorities { display:none; }.maintenance-calendar { display:grid; grid-template-columns:repeat(7,minmax(0,1fr)); gap:.4rem; }.maintenance-calendar article { min-height:5rem; padding:.45rem; border:1px solid var(--line); border-radius:.5rem; background:var(--canvas); }.maintenance-calendar strong { display:block; }.maintenance-calendar span { display:block; margin-top:.25rem; padding:.15rem .25rem; overflow:hidden; border-radius:.25rem; background:#eaf4ee; font-size:.68rem; text-overflow:ellipsis; white-space:nowrap; }.calendar-legend { color:var(--muted); font-size:.8rem; }
 .state-overdue { color: #a42828 !important; background: #fff0f0 !important; }
 .state-due_soon { color: #945011 !important; background: #fff4e8 !important; }
 .audit-filters { display: grid; grid-template-columns: 2fr repeat(4, minmax(7rem, 1fr)); gap: .7rem; margin-bottom: 1rem; }
@@ -119,6 +120,7 @@ section[id], h1[id], h2[id], h3[id] { scroll-margin-top: 6rem; }
 }
 
 @media (max-width: 700px) {
+  .mobile-priorities { display:flex; justify-content:space-between; align-items:center; gap:.75rem; padding:.9rem 1rem; border:1px solid var(--line); border-radius:.75rem; background:#fff7e8; }.mobile-priorities button { min-height:2.5rem; white-space:nowrap; }.maintenance-calendar { grid-template-columns:repeat(4,minmax(0,1fr)); }.maintenance-calendar article { min-height:4.25rem; }
   .panel-title { flex-wrap: wrap; }
   .prediction-grid, .filters, .schedule-form, .preferences-grid, .audit-filters { grid-template-columns: 1fr; }
   .schedule-form .wide { grid-column: auto; }

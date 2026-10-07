@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type AuditFilters } from '@/lib/api';
 import type { AuditEntry, AuditFacets, SessionUser } from '@/lib/types';
+import { SecurityAudit } from '@/components/SecurityAudit';
 
 const emptyFacets: AuditFacets = { actions: [], actors: [], objectTypes: [], results: [] };
 
@@ -37,7 +38,7 @@ export function AuditLog({ user }: { user: SessionUser }) {
     return `/api/v1/audit.csv${query.size ? `?${query}` : ''}`;
   }, [filters]);
 
-  return <section className="panel">
+  return <div className="stack"><SecurityAudit user={user} /><section className="panel">
     <div className="panel-title"><div><p className="eyebrow">Immutable operational evidence</p><h2>Detailed audit log</h2></div>{user.permissions.includes('audit.export') && <a className="button-link secondary" href={exportUrl}>Export CSV</a>}</div>
     {error && <div className="banner error" role="alert">{error}<button onClick={() => void load()}>Retry</button></div>}
     <form className="audit-filters" onSubmit={submit}>
@@ -51,5 +52,5 @@ export function AuditLog({ user }: { user: SessionUser }) {
     </form>
     <div className="audit-list">{entries.map((entry) => <article key={entry.id || `${entry.occurredAt}:${entry.action}:${entry.objectId}`}><div><div className="record-heading"><strong>{entry.action.replaceAll('.', ' ')}</strong><span className={`result-${entry.result}`}>{entry.result}</span></div><p>{entry.actorName} · {entry.objectType} · {entry.objectId}</p><time dateTime={entry.occurredAt}>{new Date(entry.occurredAt).toLocaleString()}</time>{entry.details && Object.keys(entry.details).length > 0 && <details><summary>View recorded details</summary><pre>{JSON.stringify(entry.details, null, 2)}</pre></details>}</div></article>)}</div>
     {!loading && !entries.length && <p className="empty">No audit records match these filters.</p>}
-  </section>;
+  </section></div>;
 }

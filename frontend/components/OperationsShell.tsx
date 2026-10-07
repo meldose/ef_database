@@ -14,6 +14,7 @@ import { FleetComparison } from '@/components/FleetComparison';
 import { ScheduledReports } from '@/components/ScheduledReports';
 import { CostTracking } from '@/components/CostTracking';
 import { AdministrationPanel } from '@/components/AdministrationPanel';
+import { CustomerPortal } from '@/components/CustomerPortal';
 import { useI18n } from '@/lib/i18n';
 
 function Login({ onLogin }: { onLogin: (user: SessionUser) => void }) {
@@ -47,7 +48,7 @@ function Login({ onLogin }: { onLogin: (user: SessionUser) => void }) {
           <button disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
           {error && <p className="error" role="alert">{error}</p>}
         </form>
-        <footer className="legal-links"><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><label>{t('Language')}<select aria-label={t('Language')} value={locale} onChange={(event) => setLocale(event.target.value as 'de' | 'en')}><option value="de">Deutsch</option><option value="en">English</option></select></label></footer>
+        <footer className="legal-links"><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><label>{t('Language')}<select aria-label={t('Language')} value={locale} onChange={(event) => setLocale(event.target.value as 'de' | 'en' | 'fr')}><option value="de">Deutsch</option><option value="en">English</option><option value="fr">Français</option></select></label></footer>
       </section>
       <aside><p className="eyebrow">Manufacturer-neutral operations</p><h2>One clear workspace for every role.</h2><p>Registry, Passport, service evidence and integrations without exposing tools a user does not need.</p></aside>
     </main>
@@ -69,6 +70,7 @@ export function OperationsShell() {
   const [error, setError] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const [darkMode,setDarkMode]=useState(false);
   const workspaceHeading=useRef<HTMLHeadingElement>(null); const initialWorkspace=useRef(true);
 
   const load = useCallback(async () => {
@@ -95,6 +97,7 @@ export function OperationsShell() {
     api.session().then(({ user: sessionUser }) => setUser(sessionUser)).catch(() => setUser(null)).finally(() => setLoadingSession(false));
   }, []);
   useEffect(() => { if (user) void load(); }, [user, load]);
+  useEffect(() => { const saved=window.localStorage.getItem('altegro-theme') === 'dark'; setDarkMode(saved); document.documentElement.dataset.theme=saved ? 'dark' : 'light'; },[]);
   useEffect(() => { if (initialWorkspace.current) { initialWorkspace.current=false; return; } workspaceHeading.current?.focus(); },[workspace]);
 
   const availableNavigation = useMemo(() => user ? navigationForRole(user.role) : [], [user]);
@@ -105,7 +108,7 @@ export function OperationsShell() {
     <div className="app"><a className="skip-link" href="#main-content">{t('Skip to main content')}</a>
       <header>
         <div className="brand"><span>A</span><strong>altegro</strong><small>robot operations</small></div>
-        <div className="header-actions"><span className="environment">Phase 1 · Read-first</span><label className="language-control"><span>{t('Language')}</span><select aria-label={t('Language')} value={locale} onChange={(event) => setLocale(event.target.value as 'de' | 'en')}><option value="de">DE</option><option value="en">EN</option></select></label><button className={`alert-button ${unreadAlerts ? 'active' : ''}`} onClick={() => setWorkspace('service')}>Alerts <strong>{unreadAlerts}</strong></button><span>{user.name}<small>{user.role.replaceAll('_', ' ')}</small></span><button className="quiet" onClick={() => void load()} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button><button className="quiet" onClick={() => void api.logout().finally(() => setUser(null))}>Log out</button></div>
+        <div className="header-actions"><span className="environment">Phase 1 · Read-first</span><label className="language-control"><span>{t('Language')}</span><select aria-label={t('Language')} value={locale} onChange={(event) => setLocale(event.target.value as 'de' | 'en' | 'fr')}><option value="de">DE</option><option value="en">EN</option><option value="fr">FR</option></select></label><button className="quiet" onClick={() => { const next=!darkMode; setDarkMode(next); document.documentElement.dataset.theme=next ? 'dark' : 'light'; window.localStorage.setItem('altegro-theme',next ? 'dark' : 'light'); }}>{darkMode ? 'Light' : 'Dark'}</button><button className={`alert-button ${unreadAlerts ? 'active' : ''}`} onClick={() => setWorkspace('service')}>Alerts <strong>{unreadAlerts}</strong></button><span>{user.name}<small>{user.role.replaceAll('_', ' ')}</small></span><button className="quiet" onClick={() => void load()} disabled={refreshing}>{refreshing ? 'Refreshing…' : 'Refresh'}</button><button className="quiet" onClick={() => void api.logout().finally(() => setUser(null))}>Log out</button></div>
       </header>
       <div className="workspace">
         <nav aria-label={t('Role workspace')}>{availableNavigation.map((item) => <button key={item.id} aria-current={workspace === item.id ? 'page' : undefined} onClick={() => setWorkspace(item.id)}>{t(item.label)}</button>)}</nav>
@@ -119,8 +122,10 @@ export function OperationsShell() {
               <Metric label="Open service" value={summary?.service.open ?? '—'} hint={`${summary?.service.closed ?? 0} closed`} />
               <Metric label="Passport coverage" value={`${summary?.passport.percentage ?? 0}%`} hint={`${summary?.passport.certificatesDue ?? 0} certificates due`} />
             </section>
+            <section className="mobile-priorities"><strong>{(summary?.robots.offline ?? 0) + (summary?.events.activeErrors ?? 0)} items need attention</strong><button onClick={() => setWorkspace('service')}>Review alerts</button></section>
             <section className="grid"><article className="panel"><div className="panel-title"><div><p className="eyebrow">Recent fleet</p><h2>Robots</h2></div><button onClick={() => setWorkspace('robots')}>View registry</button></div><RobotList robots={robots.slice(0, 5)} /></article><article className="panel"><div className="panel-title"><div><p className="eyebrow">Integration health</p><h2>Providers</h2></div><button onClick={() => setWorkspace('integrations')}>Open integrations</button></div><AdapterList adapters={adapters} /></article></section>
           </>}
+          {workspace === 'customer' && <CustomerPortal />}
           {workspace === 'robots' && <RobotPassport robots={robots} user={user} onDataChanged={load} />}
           {workspace === 'service' && <AlertsMaintenance robots={robots} user={user} onUnreadChange={updateUnreadAlerts} onDataChanged={load} />}
           {workspace === 'support' && <SupportPortal robots={robots} onDataChanged={load} />}

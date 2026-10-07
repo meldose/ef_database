@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '@/lib/api';
 import type { MaintenanceSchedule, OperationalNotification, RobotSummary, SessionUser } from '@/lib/types';
 import { NotificationPreferences } from '@/components/NotificationPreferences';
+import { MaintenanceCalendar } from '@/components/MaintenanceCalendar';
 
 interface Props {
   robots: RobotSummary[];
@@ -108,6 +109,7 @@ export function AlertsMaintenance({ robots, user, onUnreadChange, onDataChanged 
       <article className="metric good"><span>Active schedules</span><strong>{schedules.filter((item) => item.status === 'active').length}</strong><small>Recurring maintenance plans</small></article>
     </section>
     <NotificationPreferences />
+    <MaintenanceCalendar />
     <section className="panel">
       <div className="panel-title"><div><p className="eyebrow">Automatic monitoring · 30-second refresh</p><h2>Failure alerts</h2></div><button className="quiet" disabled={saving} onClick={() => void markAllRead()}>Mark all read</button></div>
       <div className="filters"><label>Search<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Robot, failure or source" /></label><label>Severity<select value={severity} onChange={(event) => setSeverity(event.target.value)}><option value="">All severities</option><option value="critical">Critical</option><option value="error">Error</option><option value="warning">Warning</option><option value="info">Information</option></select></label></div>

@@ -1,6 +1,6 @@
 import type { AltegroRole } from './types';
 
-export type Workspace = 'overview' | 'robots' | 'service' | 'support' | 'workforce' | 'reports' | 'audit' | 'integrations' | 'administration';
+export type Workspace = 'overview' | 'customer' | 'robots' | 'service' | 'support' | 'workforce' | 'reports' | 'audit' | 'integrations' | 'administration';
 
 export interface NavigationItem {
   id: Workspace;
@@ -10,6 +10,7 @@ export interface NavigationItem {
 
 export const navigation: NavigationItem[] = [
   { id:'overview',label:'Overview' },
+  { id:'customer',label:'Customer portal',roles:['owner','auditor','robot_user','platform_admin','data_admin','support_admin'] },
   { id:'robots',label:'Robots' },
   { id:'service',label:'Events & service' },
   { id:'support',label:'Support' },

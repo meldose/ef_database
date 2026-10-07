@@ -9,6 +9,7 @@ import type {
   NotificationPreferences,
   OperationsReport,
   OperationsSummary,
+  CustomerDashboard,
   ReportSubscription,
   RobotSummary,
   SessionUser
@@ -92,6 +93,7 @@ export const api = {
     }),
   logout: () => request<{ loggedOut: boolean }>('/api/v1/auth/logout', { method: 'POST', body: '{}' }),
   summary: () => request<{ data: OperationsSummary }>('/api/v1/operations/summary'),
+  customerDashboard: (organizationId?: string) => request<{ data: CustomerDashboard }>(withQuery('/api/v1/customer-dashboard',{ organizationId })),
   robots: async () => {
     const data: RobotSummary[] = []; let page = 1; let totalPages = 1;
     do { const result = await request<{ data: RobotSummary[]; pagination: { pageCount: number } }>(`/api/v1/robots?page=${page}&pageSize=100&sort=updatedAt&order=desc`); data.push(...result.data); totalPages = result.pagination.pageCount; page += 1; } while (page <= totalPages);
