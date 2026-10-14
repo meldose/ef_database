@@ -36,6 +36,7 @@ const blocks = [];
 for (const raw of markdown.split(/\r?\n/)) {
   const line = raw.trim();
   if (!line) { blocks.push({ type: 'space' }); continue; }
+  if (line === '<!-- PAGE_BREAK -->') { blocks.push({ type: 'page-break' }); continue; }
   if (line.startsWith('### ')) blocks.push({ type: 'h3', text: line.slice(4) });
   else if (line.startsWith('## ')) blocks.push({ type: 'h2', text: line.slice(3) });
   else if (line.startsWith('# ')) blocks.push({ type: 'h1', text: line.slice(2) });
@@ -73,6 +74,7 @@ function addTextLines(lines, options) {
 startPage();
 let previousWasSpace = false;
 for (const block of blocks) {
+  if (block.type === 'page-break') { startPage(); previousWasSpace = false; continue; }
   if (block.type === 'space') {
     if (!previousWasSpace) y -= 4;
     previousWasSpace = true;

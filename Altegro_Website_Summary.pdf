@@ -1,0 +1,105 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 4732 >>
+stream
+q 0.914 0.184 0.51 rg 0 816 595 26 re f Q
+BT /F2 8 Tf 1 1 1 rg 1 0 0 1 48 825 Tm (ALTEGRO  |  PHASE 1 STATUS) Tj ET
+BT /F2 22 Tf 0.914 0.184 0.51 rg 1 0 0 1 48 790 Tm (Altegro Website Change Summary) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 747 Tm (Date: 8 October 2026) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 727.5 Tm (Overview) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 697.5 Tm (This document summarises the completed improvements to the Altegro operations website and its) Tj ET
+BT /F1 9.3 Tf 0.18 0.14 0.17 rg 1 0 0 1 48 685 Tm (supporting API.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 665.5 Tm (Completed changes) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 635.5 Tm (Notifications and administration) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 612.5 Tm (- Added personal notification preferences for in-app and email alerts.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 598.2 Tm (- Users can set a minimum severity and quiet hours.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 583.9000000000001 Tm (- Added a modern Administration workspace with platform health, email-delivery status, and) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 571.6000000000001 Tm (read-only robot-account visibility for platform administrators.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 557.3000000000002 Tm (- Added a security-audit summary for administrators, covering review items, access events,) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 545.0000000000002 Tm (and controlled changes.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 526.7000000000003 Tm (Reports and analytics) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 503.7000000000003 Tm (- Added PDF download for operations reports alongside CSV and JSON exports.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 489.40000000000026 Tm (- Kept scheduled email reports with delivery status, pause/resume, and send-now controls.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 475.10000000000025 Tm (- Updated predictive maintenance into AI-assisted maintenance recommendations based on) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 462.80000000000024 Tm (fleet telemetry, recent errors, battery signals, and maintenance schedules.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 448.5000000000002 Tm (- Recommendations are advisory and do not issue robot commands.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 430.2000000000002 Tm (Operations and maintenance) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 407.2000000000002 Tm (- Added a monthly maintenance calendar showing active service due dates and their urgency.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 392.9000000000002 Tm (- Improved the mobile dashboard with a compact priorities card that directs users to) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 380.6000000000002 Tm (alerts needing attention.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 362.3000000000002 Tm (Customer experience) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 339.3000000000002 Tm (- Added a read-only Customer Portal with customer-scoped fleet health, service status,) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 327.00000000000017 Tm (maintenance risk, battery level, and site-level fleet summaries.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 312.70000000000016 Tm (- The portal uses existing tenant, organization, role, and robot-scope authorization.) Tj ET
+BT /F2 11.5 Tf 0.66 0.07 0.33 rg 1 0 0 1 48 294.40000000000015 Tm (Appearance and languages) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 271.40000000000015 Tm (- Added a saved dark-mode preference.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 257.10000000000014 Tm (- Added French as an additional language option alongside English and German.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 242.80000000000013 Tm (- Continued responsive layouts for phone, tablet, and desktop use.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 224.5000000000001 Tm (Security notes) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 194.5000000000001 Tm (- Customer-facing views are read-only.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 180.2000000000001 Tm (- Maintenance recommendations remain decision support for qualified technicians.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 165.9000000000001 Tm (- Passwords, session tokens, provider credentials, and protected diagnostics are never) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 153.60000000000008 Tm (displayed in the new views.) Tj ET
+BT /F1 7.5 Tf 0.47 0.38 0.43 rg 1 0 0 1 48 30 Tm (Altegro Phase 1 Status Report  |  1 / 2) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 2375 >>
+stream
+q 0.914 0.184 0.51 rg 0 816 595 26 re f Q
+BT /F2 8 Tf 1 1 1 rg 1 0 0 1 48 825 Tm (ALTEGRO  |  PHASE 1 STATUS) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 786 Tm (Recommended next steps) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 756 Tm (1. Add OIDC single sign-on and multi-factor authentication, then replace prototype) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 743.7 Tm (accounts with managed user memberships.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 729.4000000000001 Tm (2. Finish moving the remaining legacy pages into the typed frontend and validate each) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 717.1000000000001 Tm (role's key tasks with users.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 702.8000000000002 Tm (3. Expand the customer portal with customer-approved reports, document access, and) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 690.5000000000002 Tm (support-ticket tracking.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 676.2000000000003 Tm (4. Add a read-only live fleet map with site and floor-plan context.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 661.9000000000003 Tm (5. Complete production hardening: multi-instance database writes, durable event delivery,) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 649.6000000000004 Tm (backup-restore drills, and independent security testing.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 635.3000000000004 Tm (6. Validate CRM, service-desk, and robot-provider integrations with approved sandbox) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 58 623.0000000000005 Tm (credentials and real contract tests.) Tj ET
+BT /F2 15 Tf 0.09 0.067 0.086 rg 1 0 0 1 48 604.7000000000005 Tm (Verification) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 574.7000000000005 Tm (- Server syntax checks passed.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 560.4000000000005 Tm (- Backend regression tests passed for the prior completed API changes.) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 546.1000000000006 Tm (- TypeScript checking was run with the workspace configuration; the production frontend) Tj ET
+BT /F1 9.3 Tf 0.09 0.067 0.086 rg 1 0 0 1 62 533.8000000000006 Tm (build requires Node.js 20.9 or newer.) Tj ET
+BT /F1 7.5 Tf 0.47 0.38 0.43 rg 1 0 0 1 48 30 Tm (Altegro Phase 1 Status Report  |  2 / 2) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000224 00000 n 
+0000000326 00000 n 
+0000005110 00000 n 
+0000005246 00000 n 
+0000007673 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+7809
+%%EOF
